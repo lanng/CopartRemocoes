@@ -29,6 +29,7 @@ use Filament\Tables\Filters\SelectFilter;
 use Filament\Tables\Table;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Storage;
+use Leandrocfe\FilamentPtbrFormFields\Money;
 
 class RegisterResource extends Resource
 {
@@ -87,7 +88,7 @@ class RegisterResource extends Resource
                 TextInput::make('driver_plate')
                     ->label('Placa guincho')
                     ->maxLength(7),
-                TextInput::make('value')
+                Money::make('value')
                     ->required()
                     ->label('Valor')
                     ->numeric(),
