@@ -40,7 +40,7 @@ enum RegisterStatusEnum: string
 
     public function localizedLabel(): string
     {
-        return app()->getLocale() === 'pt-BR'
+        return app()->getLocale() === 'pt_BR'
             ? $this->labelPt()
             : $this->label();
     }
