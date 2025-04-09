@@ -3,20 +3,32 @@
 namespace App\Filament\Resources;
 
 use App\Enums\RegisterStatusEnum;
-use App\Filament\Resources\RegisterResource\Pages;
+use App\Filament\Resources\RegisterResource\Pages\CreateRegister;
+use App\Filament\Resources\RegisterResource\Pages\EditRegister;
+use App\Filament\Resources\RegisterResource\Pages\ListRegisters;
+use App\Filament\Resources\RegisterResource\Pages\ViewRegister;
 use App\Filament\Resources\RegisterResource\RelationManagers;
 use App\Models\Register;
 use Carbon\Carbon;
-use Filament\Facades\Filament;
-use Filament\Forms;
+use Filament\Forms\Components\DatePicker;
+use Filament\Forms\Components\FileUpload;
+use Filament\Forms\Components\Section;
+use Filament\Forms\Components\Select;
+use Filament\Forms\Components\TextInput;
 use Filament\Forms\Form;
 use Filament\Resources\Resource;
-use Filament\Tables;
+use Filament\Tables\Actions\BulkAction;
+use Filament\Tables\Actions\BulkActionGroup;
+use Filament\Tables\Actions\DeleteBulkAction;
+use Filament\Tables\Actions\EditAction;
+use Filament\Tables\Columns\Layout\Panel;
+use Filament\Tables\Columns\Layout\Split;
+use Filament\Tables\Columns\Layout\Stack;
+use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Filters\SelectFilter;
 use Filament\Tables\Table;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Storage;
-use Illuminate\Validation\Rules\Unique;
 
 class RegisterResource extends Resource
 {
@@ -32,12 +44,12 @@ class RegisterResource extends Resource
     {
         return $form
             ->schema([
-                Forms\Components\Section::make('Dados do veículo')->schema([
-                    Forms\Components\TextInput::make('vehicle_model')
+                Section::make('Dados do veículo')->schema([
+                    TextInput::make('vehicle_model')
                         ->required()
                         ->label('Veículo')
                         ->maxLength(30),
-                    Forms\Components\TextInput::make('vehicle_plate')
+                    TextInput::make('vehicle_plate')
                         ->required()
                         ->label('Placa do veículo')
                         ->maxLength(7)
@@ -45,47 +57,47 @@ class RegisterResource extends Resource
                         ->validationMessages([
                             'unique' => 'Placa já cadastrada',
                         ]),
-                    Forms\Components\TextInput::make('origin_city')
+                    TextInput::make('origin_city')
                         ->required()
                         ->label('Cidade origem')
                         ->maxLength(50),
-                    Forms\Components\TextInput::make('destination_city')
+                    TextInput::make('destination_city')
                         ->required()
                         ->label('Cidade destino')
                         ->maxLength(50),
-                    Forms\Components\TextInput::make('vehicle_id')
+                    TextInput::make('vehicle_id')
                         ->label('Código do veículo')
                         ->required()
                         ->numeric()
                         ->maxLength(10),
                 ]),
-                Forms\Components\Section::make('Datas')->schema([
-                    Forms\Components\DatePicker::make('deadline_withdraw')
+                Section::make('Datas')->schema([
+                    DatePicker::make('deadline_withdraw')
                         ->label('Data limite para recolha')
                         ->required(),
-                    Forms\Components\DatePicker::make('deadline_delivery')
+                    DatePicker::make('deadline_delivery')
                         ->label('Data limite entrega')
                         ->required(),
-                    Forms\Components\DatePicker::make('collected_date')
+                    DatePicker::make('collected_date')
                         ->label('Data da recolha'),
                 ]),
-                Forms\Components\TextInput::make('driver')
+                TextInput::make('driver')
                     ->label('Motorista')
                     ->maxLength(30),
-                Forms\Components\TextInput::make('driver_plate')
+                TextInput::make('driver_plate')
                     ->label('Placa guincho')
                     ->maxLength(7),
-                Forms\Components\TextInput::make('value')
+                TextInput::make('value')
                     ->required()
                     ->label('Valor')
                     ->numeric(),
-                Forms\Components\Select::make('status')
+                Select::make('status')
                     ->required()
                     ->label('Situação')
                     ->options(RegisterStatusEnum::optionsWithLabels())
                     ->enum(RegisterStatusEnum::class)
                     ->default(RegisterStatusEnum::PENDING),
-                Forms\Components\FileUpload::make('pdf_path')
+                FileUpload::make('pdf_path')
                     ->label('PDF')
                     ->disk('s3')
                     ->directory('registers')
@@ -102,65 +114,65 @@ class RegisterResource extends Resource
     {
         return $table
             ->columns([
-                Tables\Columns\Layout\Split::make([
-                    Tables\Columns\TextColumn::make('vehicle_model')
+                Split::make([
+                    TextColumn::make('vehicle_model')
                         ->searchable(),
-                    Tables\Columns\TextColumn::make('vehicle_plate')
+                    TextColumn::make('vehicle_plate')
                         ->label('Placa')
                         ->searchable(),
-                    Tables\Columns\TextColumn::make('origin_city')
+                    TextColumn::make('origin_city')
                         ->label('Origem')
                         ->searchable(),
-                    Tables\Columns\TextColumn::make('deadline_withdraw')
+                    TextColumn::make('deadline_withdraw')
                         ->label('Data limite remoção')
                         ->icon('heroicon-o-exclamation-triangle')
                         ->color('danger')
                         ->date()
                         ->sortable(),
-                    Tables\Columns\TextColumn::make('pdf_path')
+                    TextColumn::make('pdf_path')
                         ->label('PDF')
                         ->formatStateUsing(fn($state) => 'Ver PDF')
                         ->url(fn($record) => Storage::disk('s3')->url($record->pdf_path))
                         ->openUrlInNewTab(),
-                    Tables\Columns\TextColumn::make('status')
+                    TextColumn::make('status')
                         ->label('Situação')
                         ->sortable()
                         ->badge()
                         ->color(fn(RegisterStatusEnum $state): string => $state->color())
                         ->formatStateUsing(fn(RegisterStatusEnum $state): string => $state->localizedLabel())
                 ]),
-                Tables\Columns\Layout\Panel::make([
-                    Tables\Columns\Layout\Stack::make([
-                        Tables\Columns\TextColumn::make('destination_city')
+                Panel::make([
+                    Stack::make([
+                        TextColumn::make('destination_city')
                             ->formatStateUsing(fn($state) => '<strong>Patio destino: </strong>' . $state)
                             ->html()
                             ->searchable(),
-                        Tables\Columns\TextColumn::make('deadline_delivery')
+                        TextColumn::make('deadline_delivery')
                             ->formatStateUsing(fn($state) => '<strong>Data limite entrega: </strong>' . Carbon::parse($state)->format('d/m/Y'))
                             ->html()
                             ->label('Data limite entrega')
                             ->sortable(),
-                        Tables\Columns\TextColumn::make('collected_date')
+                        TextColumn::make('collected_date')
                             ->formatStateUsing(fn($state) => '<strong>Data coletado: </strong>' . Carbon::parse($state)->format('d/m/Y'))
                             ->html()
                             ->toggleable(isToggledHiddenByDefault: true)
                             ->sortable(),
-                        Tables\Columns\TextColumn::make('driver')
+                        TextColumn::make('driver')
                             ->formatStateUsing(fn($state) => '<strong> Motorista: </strong>' . $state)
                             ->html()
                             ->toggleable(isToggledHiddenByDefault: true)
                             ->searchable(),
-                        Tables\Columns\TextColumn::make('driver_plate')
+                        TextColumn::make('driver_plate')
                             ->formatStateUsing(fn($state) => '<strong> Placa motorista: </strong>' . $state)
                             ->html()
                             ->toggleable(isToggledHiddenByDefault: true)
                             ->searchable(),
-                        Tables\Columns\TextColumn::make('vehicle_id')
+                        TextColumn::make('vehicle_id')
                             ->formatStateUsing(fn($state) => '<strong> Cod. Veículo: </strong>' . $state)
                             ->html()
                             ->toggleable(isToggledHiddenByDefault: true)
                             ->searchable(),
-                        Tables\Columns\TextColumn::make('value')
+                        TextColumn::make('value')
                             ->formatStateUsing(fn($state) => '<strong> Valor: R$ </strong>' . str_replace('.', ',', $state))
                             ->html()
                             ->toggleable(isToggledHiddenByDefault: true)
@@ -183,30 +195,30 @@ class RegisterResource extends Resource
                     ]),
             ])
             ->actions([
-                Tables\Actions\EditAction::make(),
+                EditAction::make(),
             ])
             ->bulkActions([
-                Tables\Actions\BulkActionGroup::make([
-                    Tables\Actions\DeleteBulkAction::make()->label('Apagar Registros'),
-                    Tables\Actions\BulkAction::make('updateStatus')
+                BulkActionGroup::make([
+                    DeleteBulkAction::make()->label('Apagar Registros'),
+                    BulkAction::make('updateStatus')
                         ->label('Atualizar situação')
                         ->icon('heroicon-o-pencil-square')
                         ->form([
-                            Forms\Components\Select::make('status')
+                            Select::make('status')
                                 ->label('Situação')
                                 ->options(RegisterStatusEnum::optionsWithLabels())
                                 ->required()
                                 ->reactive(),
-                            Forms\Components\DatePicker::make('collected_date')
+                            DatePicker::make('collected_date')
                                 ->label('Data da coleta')
                                 ->requiredIf('status', RegisterStatusEnum::COLLECTED->value)
                                 ->visible(fn ($get) => $get('status') === RegisterStatusEnum::COLLECTED->value)
                                 ->required(),
-                            Forms\Components\TextInput::make('driver')
+                            TextInput::make('driver')
                                 ->label('Motorista (se houver)')
                                 ->requiredIf('status', RegisterStatusEnum::COLLECTED->value)
                                 ->visible(fn ($get) => $get('status') === RegisterStatusEnum::COLLECTED->value),
-                            Forms\Components\TextInput::make('driver_plate')
+                            TextInput::make('driver_plate')
                                 ->label('Placa guincho (se houver)')
                                 ->requiredIf('status', RegisterStatusEnum::COLLECTED->value)
                                 ->visible(fn ($get) => $get('status') === RegisterStatusEnum::COLLECTED->value)
@@ -234,10 +246,10 @@ class RegisterResource extends Resource
     public static function getPages(): array
     {
         return [
-            'index' => Pages\ListRegisters::route('/'),
-            'create' => Pages\CreateRegister::route('/create'),
-            'view' => Pages\ViewRegister::route('/{record}'),
-            'edit' => Pages\EditRegister::route('/{record}/edit'),
+            'index' => ListRegisters::route('/'),
+            'create' => CreateRegister::route('/create'),
+            'view' => ViewRegister::route('/{record}'),
+            'edit' => EditRegister::route('/{record}/edit'),
         ];
     }
 }
