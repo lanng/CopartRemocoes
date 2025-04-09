@@ -17,4 +17,9 @@ class EditRegister extends EditRecord
             Actions\DeleteAction::make(),
         ];
     }
+
+    protected function getRedirectUrl(): string
+    {
+        return RegisterResource::getUrl('index');
+    }
 }
