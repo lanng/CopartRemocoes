@@ -14,9 +14,11 @@ use Filament\Forms\Components\DatePicker;
 use Filament\Forms\Components\FileUpload;
 use Filament\Forms\Components\Section;
 use Filament\Forms\Components\Select;
+use Filament\Forms\Components\Textarea;
 use Filament\Forms\Components\TextInput;
 use Filament\Forms\Form;
 use Filament\Resources\Resource;
+use Filament\Tables\Actions\Action;
 use Filament\Tables\Actions\BulkAction;
 use Filament\Tables\Actions\BulkActionGroup;
 use Filament\Tables\Actions\DeleteBulkAction;
@@ -29,7 +31,9 @@ use Filament\Tables\Filters\SelectFilter;
 use Filament\Tables\Table;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Storage;
+use Leandrocfe\FilamentPtbrFormFields\Cep;
 use Leandrocfe\FilamentPtbrFormFields\Money;
+use Leandrocfe\FilamentPtbrFormFields\PhoneNumber;
 
 class RegisterResource extends Resource
 {
@@ -39,7 +43,9 @@ class RegisterResource extends Resource
 
     protected static ?string $navigationLabel = 'Registros';
 
-    protected static ?string $modelLabel = 'Registros Copart';
+    protected static ?string $modelLabel = 'Registro Copart';
+
+    protected static ?string $pluralModelLabel = 'Registros Copart';
 
     public static function form(Form $form): Form
     {
@@ -54,7 +60,7 @@ class RegisterResource extends Resource
                         ->required()
                         ->label('Placa do veículo')
                         ->maxLength(7)
-                        ->unique()
+                        ->unique(ignoreRecord: true)
                         ->validationMessages([
                             'unique' => 'Placa já cadastrada',
                         ]),
@@ -90,8 +96,7 @@ class RegisterResource extends Resource
                     ->maxLength(7),
                 Money::make('value')
                     ->required()
-                    ->label('Valor')
-                    ->numeric(),
+                    ->label('Valor'),
                 Select::make('status')
                     ->required()
                     ->label('Situação')
@@ -107,13 +112,16 @@ class RegisterResource extends Resource
                     ->previewable()
                     ->acceptedFileTypes(['application/pdf'])
                     ->required()
-                    ->preserveFilenames()
+                    ->preserveFilenames(),
+                Textarea::make('notes')
+                    ->label('Observações')
+                    ->maxLength(255)
             ]);
     }
 
     public static function table(Table $table): Table
     {
-        return $table
+        return $table->defaultPaginationPageOption(25)
             ->columns([
                 Split::make([
                     TextColumn::make('vehicle_model')
@@ -138,12 +146,16 @@ class RegisterResource extends Resource
                     TextColumn::make('status')
                         ->label('Situação')
                         ->sortable()
+                        ->searchable()
                         ->badge()
                         ->color(fn(RegisterStatusEnum $state): string => $state->color())
                         ->formatStateUsing(fn(RegisterStatusEnum $state): string => $state->localizedLabel())
                 ]),
                 Panel::make([
                     Stack::make([
+                        TextColumn::make('notes')
+                            ->formatStateUsing(fn($state) => '<strong>Obs.: </strong>' . $state)
+                            ->html(),
                         TextColumn::make('destination_city')
                             ->formatStateUsing(fn($state) => '<strong>Patio destino: </strong>' . $state)
                             ->html()
@@ -185,23 +197,45 @@ class RegisterResource extends Resource
             ->emptyStateDescription('Busca sem resultado, se persistir entre em contato com o administrador do sistema.')
             ->filters([
                 SelectFilter::make('status')->label('Situação')
-                    ->options([
-                        'pending' => 'Pendentes',
-                        'collected' => 'Coletados',
-                        'delivered' => 'Entregues',
-                        'invoiced' => 'Em nota fiscal',
-                        'cancelled' => 'Cancelados',
-                        'available' => 'Liberado',
-                        'pending daily rates' => 'Diárias pendentes'
-                    ]),
+                    ->options(RegisterStatusEnum::optionsWithLabels())
             ])
             ->actions([
                 EditAction::make(),
+                Action::make('updateStatusSingle')
+                    ->label('Atual. Situação')
+                    ->icon('heroicon-o-arrow-path')
+                    ->form([
+                        Select::make('status')
+                            ->label('Situação')
+                            ->options(RegisterStatusEnum::optionsWithLabels())
+                            ->required()
+                            ->reactive(),
+                        DatePicker::make('collected_date')
+                            ->label('Data da coleta')
+                            ->requiredIf('status', RegisterStatusEnum::COLLECTED->value)
+                            ->visible(fn($get) => $get('status') === RegisterStatusEnum::COLLECTED->value)
+                            ->required(),
+                        TextInput::make('driver')
+                            ->label('Motorista (se houver)')
+                            ->requiredIf('status', RegisterStatusEnum::COLLECTED->value)
+                            ->visible(fn($get) => $get('status') === RegisterStatusEnum::COLLECTED->value),
+                        TextInput::make('driver_plate')
+                            ->label('Placa guincho (se houver)')
+                            ->requiredIf('status', RegisterStatusEnum::COLLECTED->value)
+                            ->visible(fn($get) => $get('status') === RegisterStatusEnum::COLLECTED->value)
+                    ])->action(function (array $data, Register $record): void {
+                        $record->update([
+                            'status' => $data['status'],
+                            'collected_date' => $data['collected_date'] ?? $record->collected_date,
+                            'driver' => $data['driver'] ?? $record->driver,
+                            'driver_plate' => $data['driver_plate'] ?? $record->driver_plate
+                        ]);
+                    })->color('primary')
             ])
             ->bulkActions([
                 BulkActionGroup::make([
                     DeleteBulkAction::make()->label('Apagar Registros'),
-                    BulkAction::make('updateStatus')
+                    BulkAction::make('updateStatusMulti')
                         ->label('Atualizar situação')
                         ->icon('heroicon-o-pencil-square')
                         ->form([
@@ -213,16 +247,16 @@ class RegisterResource extends Resource
                             DatePicker::make('collected_date')
                                 ->label('Data da coleta')
                                 ->requiredIf('status', RegisterStatusEnum::COLLECTED->value)
-                                ->visible(fn ($get) => $get('status') === RegisterStatusEnum::COLLECTED->value)
+                                ->visible(fn($get) => $get('status') === RegisterStatusEnum::COLLECTED->value)
                                 ->required(),
                             TextInput::make('driver')
                                 ->label('Motorista (se houver)')
                                 ->requiredIf('status', RegisterStatusEnum::COLLECTED->value)
-                                ->visible(fn ($get) => $get('status') === RegisterStatusEnum::COLLECTED->value),
+                                ->visible(fn($get) => $get('status') === RegisterStatusEnum::COLLECTED->value),
                             TextInput::make('driver_plate')
                                 ->label('Placa guincho (se houver)')
                                 ->requiredIf('status', RegisterStatusEnum::COLLECTED->value)
-                                ->visible(fn ($get) => $get('status') === RegisterStatusEnum::COLLECTED->value)
+                                ->visible(fn($get) => $get('status') === RegisterStatusEnum::COLLECTED->value)
                         ])->action(function (array $data, Collection $records): void {
                             foreach ($records as $record) {
                                 $record->update([

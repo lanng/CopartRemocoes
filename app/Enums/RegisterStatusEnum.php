@@ -34,7 +34,7 @@ enum RegisterStatusEnum: string
             self::INVOICED => 'Em nota fiscal',
             self::CANCELLED => 'Cancelado',
             self::AVAILABLE => 'Liberado',
-            self::PENDING_DAILY_RATES => 'Diárias Pendentes',
+            self::PENDING_DAILY_RATES => 'Pen. Diária',
         };
     }
 
@@ -57,10 +57,12 @@ enum RegisterStatusEnum: string
     public function color(): string
     {
         return match ($this) {
-            self::COLLECTED => 'ok',
-            self::DELIVERED, self::AVAILABLE => 'success',
-            self::INVOICED => 'info',
-            self::PENDING, self::PENDING_DAILY_RATES => 'warning',
+            self::COLLECTED => 'collected',
+            self::DELIVERED => 'success',
+            self::AVAILABLE => 'available',
+            self::INVOICED => 'invoiced',
+            self::PENDING => 'waiting',
+            self::PENDING_DAILY_RATES => 'warning',
             self::CANCELLED => 'danger',
         };
     }

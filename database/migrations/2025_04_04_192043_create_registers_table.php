@@ -15,19 +15,20 @@ return new class extends Migration
         Schema::create('registers', function (Blueprint $table) {
             $table->id();
             $table->timestamps();
-            $table->string('vehicle_model');
-            $table->string('vehicle_plate');
-            $table->string('origin_city');
-            $table->string('destination_city');
+            $table->string('vehicle_model', 30);
+            $table->string('vehicle_plate', 7);
+            $table->string('origin_city', 50);
+            $table->string('destination_city', 20);
             $table->date('deadline_withdraw');
             $table->date('deadline_delivery');
             $table->date('collected_date')->nullable();
-            $table->string('driver')->nullable();
-            $table->string('driver_plate')->nullable();
-            $table->string('vehicle_id');
-            $table->decimal('value');
+            $table->string('driver', 30)->nullable();
+            $table->string('driver_plate', 7)->nullable();
+            $table->string('vehicle_id', 10);
+            $table->decimal('value', 2);
             $table->string('status')->default(RegisterStatusEnum::PENDING);
             $table->string('pdf_path')->nullable();
+            $table->string('notes')->nullable();
         });
     }
 

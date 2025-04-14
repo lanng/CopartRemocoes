@@ -33,7 +33,7 @@ class Register extends Model
         'value',
         'status',
         'pdf_path',
-
+        'notes',
     ];
 
     protected $casts = [
