@@ -25,7 +25,7 @@ return new class extends Migration
             $table->string('driver', 30)->nullable();
             $table->string('driver_plate', 7)->nullable();
             $table->string('vehicle_id', 10);
-            $table->decimal('value', 2);
+            $table->decimal('value', 6, 2);
             $table->string('status')->default(RegisterStatusEnum::PENDING);
             $table->string('pdf_path')->nullable();
             $table->string('notes')->nullable();
