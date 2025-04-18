@@ -37,6 +37,31 @@ class Register extends Model
     ];
 
     protected $casts = [
-        'status' => RegisterStatusEnum::class,
+        'deadline_withdraw' => 'datetime', // Cast to Carbon object
+        'deadline_delivery' => 'datetime', // Cast to Carbon object
+        'collected_date'    => 'datetime', // Cast to Carbon object
+        'status'            => RegisterStatusEnum::class, // Cast status to your Enum
+        'value'             => 'decimal:2', // Example: Cast value if it's a decimal/money type
     ];
+
+    // Implement the helper methods suggested before
+    public function isCollected(): bool
+    {
+        // Ensure status is cast to enum before comparison
+        return in_array($this->status, [
+            RegisterStatusEnum::COLLECTED,
+            RegisterStatusEnum::DELIVERED // Or whatever statuses mean "collected"
+        ]);
+    }
+
+    public function isDelivered(): bool
+    {
+        // Ensure status is cast to enum before comparison
+        return $this->status === RegisterStatusEnum::DELIVERED;
+    }
+
+    public function isCancelled(): bool
+    {
+        return $this->status === RegisterStatusEnum::CANCELLED;
+    }
 }
