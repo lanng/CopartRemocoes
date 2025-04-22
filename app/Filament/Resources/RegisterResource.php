@@ -234,18 +234,21 @@ class RegisterResource extends Resource
 
                     Stack::make([
                         TextColumn::make('deadline_withdraw')
+                            ->label('Data limite recolha') //label just for orderBy option
                             ->icon('heroicon-o-exclamation-triangle')
                             ->color(fn(Register $record) => $record->deadline_withdraw?->isPast() && !$record->isCollected() && !$record->isCancelled() ? 'danger' : 'gray')
                             ->tooltip(fn(Register $record) => $record->deadline_withdraw?->isPast() && !$record->isCollected() && !$record->isCancelled() ? 'Remoção Atrasada!' : null)
                             ->date('d/m/Y')
                             ->sortable(),
                         TextColumn::make('deadline_delivery')
+                            ->label('Data limite entrega') //label just for orderBy option
                             ->icon('heroicon-o-calendar-days')
                             ->color(fn(Register $record) => $record->deadline_delivery?->isPast() && !$record->isDelivered() && !$record->isCancelled() ? 'warning' : 'gray')
                             ->tooltip(fn(Register $record) => $record->deadline_delivery?->isPast() && !$record->isDelivered() && !$record->isCancelled() ? 'Entrega Atrasada!' : null)
                             ->date('d/m/Y')
                             ->sortable(),
                         TextColumn::make('status')
+                            ->label('Situação') //label just for orderBy option
                             ->badge()
                             ->color(fn(RegisterStatusEnum $state): string => $state->color())
                             ->formatStateUsing(fn(RegisterStatusEnum $state): string => $state->localizedLabel())
@@ -277,15 +280,13 @@ class RegisterResource extends Resource
                         TextColumn::make('collected_date')
                             ->date('d/m/Y')
                             ->placeholder('-')
-                            ->icon('heroicon-o-check-circle')
-                            ->sortable(),
+                            ->icon('heroicon-o-check-circle'),
                         TextColumn::make('vehicle_id')
                             ->icon('heroicon-o-identification')
                             ->searchable(),
                         TextColumn::make('value')
                             ->formatStateUsing(fn($state) => '<strong> Valor: R$ </strong>' . str_replace('.', ',', $state))
-                            ->html()
-                            ->sortable(),
+                            ->html(),
                         TextColumn::make('notes')
                             ->formatStateUsing(fn($state) => '<strong> Obs.: </strong>' . str_replace('.', ',', $state))
                             ->html()
