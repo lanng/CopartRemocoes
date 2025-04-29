@@ -330,11 +330,12 @@ class RegisterResource extends Resource
             $query->orderByRaw("
                     CASE status
                         WHEN 'pending' THEN 1
-                        WHEN 'available' THEN 2
-                        WHEN 'collected' THEN 3
-                        WHEN 'delivered' THEN 4
-                        WHEN 'invoiced' THEN 5
-                        ELSE 6
+                        WHEN 'pending daily rates' THEN 2
+                        WHEN 'available' THEN 3
+                        WHEN 'collected' THEN 4
+                        WHEN 'delivered' THEN 5
+                        WHEN 'invoiced' THEN 6
+                        ELSE 7
                     END ASC
                 ");
         })
