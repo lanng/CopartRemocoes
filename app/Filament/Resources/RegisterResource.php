@@ -127,7 +127,7 @@ class RegisterResource extends Resource
                     FileUpload::make('pdf_path')
                         ->label('PDF')
                         ->disk('s3')
-                        ->directory('registersTest')
+                        ->directory(config('awss3.s3_bucket'))
                         ->visibility('public')
                         ->downloadable()
                         ->openable()
