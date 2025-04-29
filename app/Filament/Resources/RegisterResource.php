@@ -1,5 +1,4 @@
 <?php
-
 namespace App\Filament\Resources;
 
 use App\Enums\RegisterStatusEnum;
@@ -32,6 +31,7 @@ use Filament\Tables\Columns\Layout\Stack;
 use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Filters\SelectFilter;
 use Filament\Tables\Table;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Log;
@@ -78,7 +78,7 @@ class RegisterResource extends Resource
                     TextInput::make('vehicle_id')
                         ->label('Código do veículo')
                         ->required()
-                        ->numeric()
+                        ->numeric(),
                 ]),
 
                 Section::make('Datas')->schema([
@@ -102,7 +102,7 @@ class RegisterResource extends Resource
                         ->native(false)
                         ->live()
                         ->afterOrEqual('deadline_withdraw')
-                        ->beforeOrEqual('deadline_delivery')
+                        ->beforeOrEqual('deadline_delivery'),
                 ]),
 
                 Section::make('Detalhes Financeiros e Status')->schema([
@@ -127,7 +127,7 @@ class RegisterResource extends Resource
                     FileUpload::make('pdf_path')
                         ->label('PDF')
                         ->disk('s3')
-                        ->directory('registers')
+                        ->directory(config('awss3.s3_bucket'))
                         ->visibility('public')
                         ->downloadable()
                         ->openable()
@@ -146,7 +146,7 @@ class RegisterResource extends Resource
                             }
 
                             try {
-                                $extractor = app(PdfExtractorService::class);
+                                $extractor     = app(PdfExtractorService::class);
                                 $extractedData = $extractor->extractData($state->getRealPath());
 
                                 if (isset($extractedData['error'])) {
@@ -164,7 +164,7 @@ class RegisterResource extends Resource
                                 $set('destination_city', $extractedData['destination_city'] ?? $get('destination_city'));
                                 $set('vehicle_id', $extractedData['vehicle_id'] ?? $get('vehicle_id'));
 
-                                if (!empty($extractedData['deadline_withdraw'])) {
+                                if (! empty($extractedData['deadline_withdraw'])) {
                                     try {
                                         $date = Carbon::createFromFormat('d/m/Y', $extractedData['deadline_withdraw'])->format('Y-m-d');
                                         $set('deadline_withdraw', $date);
@@ -172,7 +172,7 @@ class RegisterResource extends Resource
                                         Log::warning("Could not parse deadline_withdraw from PDF: " . $extractedData['deadline_withdraw']);
                                     }
                                 }
-                                if (!empty($extractedData['deadline_delivery'])) {
+                                if (! empty($extractedData['deadline_delivery'])) {
                                     try {
                                         $date = Carbon::createFromFormat('d/m/Y', $extractedData['deadline_delivery'])->format('Y-m-d');
                                         $set('deadline_delivery', $date);
@@ -181,9 +181,9 @@ class RegisterResource extends Resource
                                     }
                                 }
 
-                                if (!empty($extractedData['origin_phones'])) {
+                                if (! empty($extractedData['origin_phones'])) {
                                     $phoneString = implode(' / ', $extractedData['origin_phones']);
-                                    $notes = $get('notes');
+                                    $notes       = $get('notes');
                                     $set('notes', ($notes ? $notes . "\n" : '') . "Telefones Origem: " . $phoneString);
                                 }
 
@@ -236,15 +236,15 @@ class RegisterResource extends Resource
                         TextColumn::make('deadline_withdraw')
                             ->label('Data limite recolha') //label just for orderBy option
                             ->icon('heroicon-o-exclamation-triangle')
-                            ->color(fn(Register $record) => $record->deadline_withdraw?->isPast() && !$record->isCollected() && !$record->isCancelled() ? 'danger' : 'gray')
-                            ->tooltip(fn(Register $record) => $record->deadline_withdraw?->isPast() && !$record->isCollected() && !$record->isCancelled() ? 'Remoção Atrasada!' : null)
+                            ->color(fn(Register $record) => $record->deadline_withdraw?->isPast() && ! $record->isCollected() && ! $record->isCancelled() ? 'danger' : 'gray')
+                            ->tooltip(fn(Register $record) => $record->deadline_withdraw?->isPast() && ! $record->isCollected() && ! $record->isCancelled() ? 'Remoção Atrasada!' : null)
                             ->date('d/m/Y')
                             ->sortable(),
                         TextColumn::make('deadline_delivery')
                             ->label('Data limite entrega') //label just for orderBy option
                             ->icon('heroicon-o-calendar-days')
-                            ->color(fn(Register $record) => $record->deadline_delivery?->isPast() && !$record->isDelivered() && !$record->isCancelled() ? 'warning' : 'gray')
-                            ->tooltip(fn(Register $record) => $record->deadline_delivery?->isPast() && !$record->isDelivered() && !$record->isCancelled() ? 'Entrega Atrasada!' : null)
+                            ->color(fn(Register $record) => $record->deadline_delivery?->isPast() && ! $record->isDelivered() && ! $record->isCancelled() ? 'warning' : 'gray')
+                            ->tooltip(fn(Register $record) => $record->deadline_delivery?->isPast() && ! $record->isDelivered() && ! $record->isCancelled() ? 'Entrega Atrasada!' : null)
                             ->date('d/m/Y')
                             ->sortable(),
                         TextColumn::make('status')
@@ -261,7 +261,7 @@ class RegisterResource extends Resource
                             ->icon('heroicon-o-document-text')
                             ->formatStateUsing(fn($state) => 'Ver PDF')
                             ->url(fn($record): ?string => $record->pdf_path ? Storage::disk('s3')->url($record->pdf_path) : null)
-                            ->openUrlInNewTab()
+                            ->openUrlInNewTab(),
                     ]),
                 ]),
 
@@ -289,8 +289,8 @@ class RegisterResource extends Resource
                             ->html(),
                         TextColumn::make('notes')
                             ->formatStateUsing(fn($state) => '<strong> Obs.: </strong>' . str_replace('.', ',', $state))
-                            ->html()
-                    ])
+                            ->html(),
+                    ]),
                 ])->collapsed(),
             ])
             ->emptyStateHeading('Não há registros!')
@@ -298,7 +298,7 @@ class RegisterResource extends Resource
             ->filters([
                 SelectFilter::make('status')
                     ->label('Situação')
-                    ->options(RegisterStatusEnum::optionsWithLabels())
+                    ->options(RegisterStatusEnum::optionsWithLabels()),
             ])
             ->actions([
                 EditAction::make()->iconButton(),
@@ -326,7 +326,19 @@ class RegisterResource extends Resource
                         ->modalWidth('lg')
                         ->deselectRecordsAfterCompletion(),
                 ])->label('Ações em massa'),
-            ])
+            ])->modifyQueryUsing(function (Builder $query) {
+            $query->orderByRaw("
+                    CASE status
+                        WHEN 'pending' THEN 1
+                        WHEN 'pending daily rates' THEN 2
+                        WHEN 'available' THEN 3
+                        WHEN 'collected' THEN 4
+                        WHEN 'delivered' THEN 5
+                        WHEN 'invoiced' THEN 6
+                        ELSE 7
+                    END ASC
+                ");
+        })
             ->recordUrl(fn(Register $record): string => static::getUrl('view', ['record' => $record]));
     }
 
@@ -371,15 +383,10 @@ class RegisterResource extends Resource
             if (isset($data['driver_plate'])) {
                 $updateData['driver_plate'] = $data['driver_plate'];
             }
-        } else {
-            $updateData['collected_date'] = null;
-            $updateData['driver'] = null;
-            $updateData['driver_plate'] = null;
         }
 
         $record->update($updateData);
     }
-
 
     public static function getRelations(): array
     {
@@ -391,10 +398,10 @@ class RegisterResource extends Resource
     public static function getPages(): array
     {
         return [
-            'index' => ListRegisters::route('/'),
+            'index'  => ListRegisters::route('/'),
             'create' => CreateRegister::route('/create'),
-            'view' => ViewRegister::route('/{record}'),
-            'edit' => EditRegister::route('/{record}/edit'),
+            'view'   => ViewRegister::route('/{record}'),
+            'edit'   => EditRegister::route('/{record}/edit'),
         ];
     }
 }
