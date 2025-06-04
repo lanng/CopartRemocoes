@@ -5,9 +5,13 @@ namespace App\Models;
 use App\Enums\RegisterStatusEnum;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Facades\Storage;
+use Spatie\Activitylog\LogOptions;
+use Spatie\Activitylog\Traits\LogsActivity;
 
 class Register extends Model
 {
+    use LogsActivity;
+
     protected static function boot(): void
     {
         parent::boot();
@@ -37,31 +41,39 @@ class Register extends Model
     ];
 
     protected $casts = [
-        'deadline_withdraw' => 'datetime', // Cast to Carbon object
-        'deadline_delivery' => 'datetime', // Cast to Carbon object
-        'collected_date'    => 'datetime', // Cast to Carbon object
-        'status'            => RegisterStatusEnum::class, // Cast status to your Enum
-        'value'             => 'decimal:2', // Example: Cast value if it's a decimal/money type
+        'deadline_withdraw' => 'datetime',
+        'deadline_delivery' => 'datetime',
+        'collected_date'    => 'datetime',
+        'status'            => RegisterStatusEnum::class,
+        'value'             => 'decimal:2',
     ];
 
     // Implement the helper methods suggested before
     public function isCollected(): bool
     {
-        // Ensure status is cast to enum before comparison
         return in_array($this->status, [
             RegisterStatusEnum::COLLECTED,
-            RegisterStatusEnum::DELIVERED // Or whatever statuses mean "collected"
+            RegisterStatusEnum::DELIVERED
         ]);
     }
 
     public function isDelivered(): bool
     {
-        // Ensure status is cast to enum before comparison
         return $this->status === RegisterStatusEnum::DELIVERED;
     }
 
     public function isCancelled(): bool
     {
         return $this->status === RegisterStatusEnum::CANCELLED;
+    }
+
+    public function getActivitylogOptions(): LogOptions
+    {
+        return LogOptions::defaults()
+            ->logOnly(['vehicle_model', 'vehicle_plate', 'origin_city', 'notes', 'status', 'driver', 'collected_date'])
+            ->logOnlyDirty()
+            ->dontSubmitEmptyLogs()
+            ->setDescriptionForEvent(fn(string $eventName) => "O registro foi {$eventName}")
+            ->useLogName('RegisterLog');
     }
 }
