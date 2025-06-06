@@ -28,7 +28,7 @@ class ActivityLogResource extends Resource
     public static function canViewAny(): bool
     {
         if (Auth::check()) {
-            return Auth::user()->name === 'Victor';
+            return Auth::user()->email === config('authuser.user');
         }
         return false;
     }
