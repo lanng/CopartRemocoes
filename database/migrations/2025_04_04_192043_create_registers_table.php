@@ -28,7 +28,7 @@ return new class extends Migration
             $table->decimal('value', 6, 2);
             $table->string('status')->default(RegisterStatusEnum::PENDING);
             $table->string('pdf_path')->nullable();
-            $table->string('notes')->nullable();
+            $table->longText('notes')->nullable()->change();
         });
     }
 

@@ -1,15 +1,13 @@
 <?php
-
 namespace App\Enums;
 
-enum RegisterStatusEnum: string
-{
-    case COLLECTED = 'collected';
-    case DELIVERED = 'delivered';
-    case INVOICED = 'invoiced';
-    case PENDING = 'pending';
-    case CANCELLED = 'cancelled';
-    case AVAILABLE = 'available';
+enum RegisterStatusEnum: string {
+    case COLLECTED           = 'collected';
+    case PAID                = 'paid';
+    case INVOICED            = 'invoiced';
+    case PENDING             = 'pending';
+    case CANCELLED           = 'cancelled';
+    case AVAILABLE           = 'available';
     case PENDING_DAILY_RATES = 'pending daily rates';
 
     public function label(): string
@@ -17,7 +15,7 @@ enum RegisterStatusEnum: string
         return match ($this) {
             self::PENDING => 'Pending',
             self::COLLECTED => 'Collected',
-            self::DELIVERED => 'Delivered',
+            self::PAID => 'Paid',
             self::INVOICED => 'Invoiced',
             self::CANCELLED => 'Cancelled',
             self::AVAILABLE => 'Available',
@@ -30,7 +28,7 @@ enum RegisterStatusEnum: string
         return match ($this) {
             self::PENDING => 'Pendente',
             self::COLLECTED => 'Coletado',
-            self::DELIVERED => 'Entregue',
+            self::PAID => 'Pago',
             self::INVOICED => 'Em nota fiscal',
             self::CANCELLED => 'Cancelado',
             self::AVAILABLE => 'Liberado',
@@ -41,15 +39,15 @@ enum RegisterStatusEnum: string
     public function localizedLabel(): string
     {
         return app()->getLocale() === 'pt_BR'
-            ? $this->labelPt()
-            : $this->label();
+        ? $this->labelPt()
+        : $this->label();
     }
 
     public static function optionsWithLabels(): array
     {
         return collect(self::cases())
-            ->mapWithKeys(fn ($case) => [
-                $case->value => $case->localizedLabel()
+            ->mapWithKeys(fn($case) => [
+                $case->value => $case->localizedLabel(),
             ])
             ->toArray();
     }
@@ -58,7 +56,7 @@ enum RegisterStatusEnum: string
     {
         return match ($this) {
             self::COLLECTED => 'collected',
-            self::DELIVERED => 'success',
+            self::PAID => 'success',
             self::AVAILABLE => 'available',
             self::INVOICED => 'invoiced',
             self::PENDING => 'waiting',

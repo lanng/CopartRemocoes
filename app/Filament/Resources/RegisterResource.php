@@ -87,6 +87,8 @@ class RegisterResource extends Resource
                         ->validationAttribute('Data limite para recolha')
                         ->required()
                         ->native(false)
+                        ->weekStartsOnSunday()
+                        ->closeOnDateSelection()
                         ->live()
                         ->beforeOrEqual(fn(Get $get) => $get('deadline_delivery') ?? null),
                     DatePicker::make('deadline_delivery')
@@ -94,33 +96,45 @@ class RegisterResource extends Resource
                         ->validationAttribute('Data limite entrega')
                         ->required()
                         ->native(false)
+                        ->weekStartsOnSunday()
+                        ->closeOnDateSelection()
                         ->live()
                         ->afterOrEqual('deadline_withdraw'),
                     DatePicker::make('collected_date')
                         ->label('Data da recolha')
                         ->validationAttribute('Data da recolha')
                         ->native(false)
-                        ->live()
-                        ->afterOrEqual('deadline_withdraw')
-                        ->beforeOrEqual('deadline_delivery'),
+                        ->weekStartsOnSunday()
+                        ->closeOnDateSelection()
+                        ->live(),
                 ]),
 
-                Section::make('Detalhes Financeiros e Status')->schema([
+                Section::make('Detalhes Remoção e Status')->schema([
                     TextInput::make('driver')
                         ->label('Motorista')
                         ->maxLength(30),
                     TextInput::make('driver_plate')
                         ->label('Placa guincho')
                         ->maxLength(7),
-                    Money::make('value')
-                        ->label('Valor')
-                        ->required(),
                     Select::make('status')
                         ->label('Situação')
                         ->options(RegisterStatusEnum::optionsWithLabels())
                         ->enum(RegisterStatusEnum::class)
                         ->default(RegisterStatusEnum::PENDING)
                         ->required(),
+                ]),
+
+                Section::make('Financeiro')->schema([
+                    TextInput::make('payment_code')
+                        ->label('Código pagamento'),
+                    TextInput::make('insurance')
+                        ->label('Seguradora'),
+                    Money::make('fipe_value')
+                        ->label('Valor FIPE'),
+                    Money::make('value')
+                        ->label('Valor')
+                        ->required(),
+
                 ]),
 
                 Section::make('Documentos e Observações')->schema([
@@ -142,6 +156,7 @@ class RegisterResource extends Resource
                                 $set('origin_city', '');
                                 $set('destination_city', '');
                                 $set('vehicle_id', '');
+                                $set('insurance', '');
                                 return;
                             }
 
@@ -163,6 +178,7 @@ class RegisterResource extends Resource
                                 $set('origin_city', $extractedData['origin_city'] ?? $get('origin_city'));
                                 $set('destination_city', $extractedData['destination_city'] ?? $get('destination_city'));
                                 $set('vehicle_id', $extractedData['vehicle_id'] ?? $get('vehicle_id'));
+                                $set('insurance', $extractedData['insurance'] ?? $get('insurance'));
 
                                 if (! empty($extractedData['deadline_withdraw'])) {
                                     try {
@@ -205,7 +221,8 @@ class RegisterResource extends Resource
                         ->helperText('Faça upload do PDF para tentar preencher os campos automaticamente.'),
                     Textarea::make('notes')
                         ->label('Observações')
-                        ->maxLength(255)
+                        ->maxLength(700)
+                        ->rows(8)
                         ->columnSpanFull(),
                 ]),
             ]);
@@ -243,8 +260,8 @@ class RegisterResource extends Resource
                         TextColumn::make('deadline_delivery')
                             ->label('Data limite entrega') //label just for orderBy option
                             ->icon('heroicon-o-calendar-days')
-                            ->color(fn(Register $record) => $record->deadline_delivery?->isPast() && ! $record->isDelivered() && ! $record->isCancelled() ? 'warning' : 'gray')
-                            ->tooltip(fn(Register $record) => $record->deadline_delivery?->isPast() && ! $record->isDelivered() && ! $record->isCancelled() ? 'Entrega Atrasada!' : null)
+                            ->color(fn(Register $record) => $record->deadline_delivery?->isPast() && ! $record->isPaid() && ! $record->isCancelled() ? 'warning' : 'gray')
+                            ->tooltip(fn(Register $record) => $record->deadline_delivery?->isPast() && ! $record->isPaid() && ! $record->isCancelled() ? 'Entrega Atrasada!' : null)
                             ->date('d/m/Y')
                             ->sortable(),
                         TextColumn::make('status')
@@ -284,12 +301,14 @@ class RegisterResource extends Resource
                         TextColumn::make('vehicle_id')
                             ->icon('heroicon-o-identification')
                             ->searchable(),
+                        TextColumn::make('notes')
+                            ->formatStateUsing(fn(?string $state): ?string => $state ? '<strong>Obs.: </strong>' . nl2br(e($state)) : null)
+                            ->wrap()
+                            ->html(),
                         TextColumn::make('value')
                             ->formatStateUsing(fn($state) => '<strong> Valor: R$ </strong>' . str_replace('.', ',', $state))
                             ->html(),
-                        TextColumn::make('notes')
-                            ->formatStateUsing(fn($state) => '<strong> Obs.: </strong>' . str_replace('.', ',', $state))
-                            ->html(),
+
                     ]),
                 ])->collapsed(),
             ])
@@ -333,8 +352,8 @@ class RegisterResource extends Resource
                         WHEN 'pending daily rates' THEN 2
                         WHEN 'available' THEN 3
                         WHEN 'collected' THEN 4
-                        WHEN 'delivered' THEN 5
-                        WHEN 'invoiced' THEN 6
+                        WHEN 'invoiced' THEN 5
+                        WHEN 'paid' THEN 6
                         ELSE 7
                     END ASC
                 ");

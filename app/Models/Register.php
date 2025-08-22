@@ -1,5 +1,4 @@
 <?php
-
 namespace App\Models;
 
 use App\Enums\RegisterStatusEnum;
@@ -38,6 +37,9 @@ class Register extends Model
         'status',
         'pdf_path',
         'notes',
+        'insurance',
+        'fipe_value',
+        'payment_code',
     ];
 
     protected $casts = [
@@ -53,13 +55,13 @@ class Register extends Model
     {
         return in_array($this->status, [
             RegisterStatusEnum::COLLECTED,
-            RegisterStatusEnum::DELIVERED
+            RegisterStatusEnum::PAID,
         ]);
     }
 
-    public function isDelivered(): bool
+    public function isPaid(): bool
     {
-        return $this->status === RegisterStatusEnum::DELIVERED;
+        return $this->status === RegisterStatusEnum::PAID;
     }
 
     public function isCancelled(): bool
