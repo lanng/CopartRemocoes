@@ -1,14 +1,17 @@
 <?php
+
 namespace App\Enums;
 
-enum RegisterStatusEnum: string {
-    case COLLECTED           = 'collected';
-    case PAID                = 'paid';
-    case INVOICED            = 'invoiced';
-    case PENDING             = 'pending';
-    case CANCELLED           = 'cancelled';
-    case AVAILABLE           = 'available';
+enum RegisterStatusEnum: string
+{
+    case COLLECTED = 'collected';
+    case PAID = 'paid';
+    case DELIVERED = 'delivered';
+    case PENDING = 'pending';
+    case CANCELLED = 'cancelled';
+    case AVAILABLE = 'available';
     case PENDING_DAILY_RATES = 'pending daily rates';
+    case INVOICED = 'invoiced';
 
     public function label(): string
     {
@@ -16,10 +19,11 @@ enum RegisterStatusEnum: string {
             self::PENDING => 'Pending',
             self::COLLECTED => 'Collected',
             self::PAID => 'Paid',
-            self::INVOICED => 'Invoiced',
+            self::DELIVERED => 'Delivered',
             self::CANCELLED => 'Cancelled',
             self::AVAILABLE => 'Available',
-            self::PENDING_DAILY_RATES => 'Pending daily rates'
+            self::PENDING_DAILY_RATES => 'Pending daily rates',
+            self::INVOICED => 'Invoiced'
         };
     }
 
@@ -29,10 +33,11 @@ enum RegisterStatusEnum: string {
             self::PENDING => 'Pendente',
             self::COLLECTED => 'Coletado',
             self::PAID => 'Pago',
-            self::INVOICED => 'Em nota fiscal',
+            self::DELIVERED => 'Entregue',
             self::CANCELLED => 'Cancelado',
             self::AVAILABLE => 'Liberado',
             self::PENDING_DAILY_RATES => 'Pen. Diária',
+            self::INVOICED => 'Em nota fiscal',
         };
     }
 
@@ -46,7 +51,7 @@ enum RegisterStatusEnum: string {
     public static function optionsWithLabels(): array
     {
         return collect(self::cases())
-            ->mapWithKeys(fn($case) => [
+            ->mapWithKeys(fn ($case) => [
                 $case->value => $case->localizedLabel(),
             ])
             ->toArray();
@@ -58,6 +63,7 @@ enum RegisterStatusEnum: string {
             self::COLLECTED => 'collected',
             self::PAID => 'success',
             self::AVAILABLE => 'available',
+            self::DELIVERED => 'success',
             self::INVOICED => 'invoiced',
             self::PENDING => 'waiting',
             self::PENDING_DAILY_RATES => 'warning',

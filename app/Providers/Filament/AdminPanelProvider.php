@@ -40,7 +40,7 @@ class AdminPanelProvider extends PanelProvider
                 'available' => Color::hex('#5E07D9'),
                 'invoiced' => Color::hex('#7B57AD'),
                 'waiting' => Color::Gray,
-                'collected' => Color::hex('#07D93A')
+                'collected' => Color::hex('#07D93A'),
             ])
             ->discoverResources(in: app_path('Filament/Resources'), for: 'App\\Filament\\Resources')
             ->discoverPages(in: app_path('Filament/Pages'), for: 'App\\Filament\\Pages')

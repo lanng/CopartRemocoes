@@ -1,4 +1,5 @@
 <?php
+
 namespace App\Filament\Resources;
 
 use App\Enums\RegisterStatusEnum;
@@ -90,7 +91,7 @@ class RegisterResource extends Resource
                         ->weekStartsOnSunday()
                         ->closeOnDateSelection()
                         ->live()
-                        ->beforeOrEqual(fn(Get $get) => $get('deadline_delivery') ?? null),
+                        ->beforeOrEqual(fn (Get $get) => $get('deadline_delivery') ?? null),
                     DatePicker::make('deadline_delivery')
                         ->label('Data limite entrega')
                         ->validationAttribute('Data limite entrega')
@@ -157,11 +158,12 @@ class RegisterResource extends Resource
                                 $set('destination_city', '');
                                 $set('vehicle_id', '');
                                 $set('insurance', '');
+
                                 return;
                             }
 
                             try {
-                                $extractor     = app(PdfExtractorService::class);
+                                $extractor = app(PdfExtractorService::class);
                                 $extractedData = $extractor->extractData($state->getRealPath());
 
                                 if (isset($extractedData['error'])) {
@@ -170,6 +172,7 @@ class RegisterResource extends Resource
                                         ->title('Erro na Extração')
                                         ->body($extractedData['error'])
                                         ->send();
+
                                     return;
                                 }
 
@@ -185,7 +188,7 @@ class RegisterResource extends Resource
                                         $date = Carbon::createFromFormat('d/m/Y', $extractedData['deadline_withdraw'])->format('Y-m-d');
                                         $set('deadline_withdraw', $date);
                                     } catch (Exception $e) {
-                                        Log::warning("Could not parse deadline_withdraw from PDF: " . $extractedData['deadline_withdraw']);
+                                        Log::warning('Could not parse deadline_withdraw from PDF: '.$extractedData['deadline_withdraw']);
                                     }
                                 }
                                 if (! empty($extractedData['deadline_delivery'])) {
@@ -193,14 +196,14 @@ class RegisterResource extends Resource
                                         $date = Carbon::createFromFormat('d/m/Y', $extractedData['deadline_delivery'])->format('Y-m-d');
                                         $set('deadline_delivery', $date);
                                     } catch (Exception $e) {
-                                        Log::warning("Could not parse deadline_delivery from PDF: " . $extractedData['deadline_delivery']);
+                                        Log::warning('Could not parse deadline_delivery from PDF: '.$extractedData['deadline_delivery']);
                                     }
                                 }
 
                                 if (! empty($extractedData['origin_phones'])) {
                                     $phoneString = implode(' / ', $extractedData['origin_phones']);
-                                    $notes       = $get('notes');
-                                    $set('notes', ($notes ? $notes . "\n" : '') . "Telefones Origem: " . $phoneString);
+                                    $notes = $get('notes');
+                                    $set('notes', ($notes ? $notes."\n" : '').'Telefones Origem: '.$phoneString);
                                 }
 
                                 Notification::make()
@@ -213,9 +216,9 @@ class RegisterResource extends Resource
                                 Notification::make()
                                     ->danger()
                                     ->title('Erro Inesperado')
-                                    ->body('Ocorreu um erro ao tentar extrair dados do PDF: ' . $e->getMessage())
+                                    ->body('Ocorreu um erro ao tentar extrair dados do PDF: '.$e->getMessage())
                                     ->send();
-                                Log::error("Unexpected error during PDF extraction service call: " . $e->getMessage(), ['state' => $state]);
+                                Log::error('Unexpected error during PDF extraction service call: '.$e->getMessage(), ['state' => $state]);
                             }
                         })
                         ->helperText('Faça upload do PDF para tentar preencher os campos automaticamente.'),
@@ -251,24 +254,24 @@ class RegisterResource extends Resource
 
                     Stack::make([
                         TextColumn::make('deadline_withdraw')
-                            ->label('Data limite recolha') //label just for orderBy option
+                            ->label('Data limite recolha') // label just for orderBy option
                             ->icon('heroicon-o-exclamation-triangle')
-                            ->color(fn(Register $record) => $record->deadline_withdraw?->isPast() && ! $record->isCollected() && ! $record->isCancelled() ? 'danger' : 'gray')
-                            ->tooltip(fn(Register $record) => $record->deadline_withdraw?->isPast() && ! $record->isCollected() && ! $record->isCancelled() ? 'Remoção Atrasada!' : null)
+                            ->color(fn (Register $record) => $record->deadline_withdraw?->isPast() && ! $record->isCollected() && ! $record->isCancelled() ? 'danger' : 'gray')
+                            ->tooltip(fn (Register $record) => $record->deadline_withdraw?->isPast() && ! $record->isCollected() && ! $record->isCancelled() ? 'Remoção Atrasada!' : null)
                             ->date('d/m/Y')
                             ->sortable(),
                         TextColumn::make('deadline_delivery')
-                            ->label('Data limite entrega') //label just for orderBy option
+                            ->label('Data limite entrega') // label just for orderBy option
                             ->icon('heroicon-o-calendar-days')
-                            ->color(fn(Register $record) => $record->deadline_delivery?->isPast() && ! $record->isPaid() && ! $record->isCancelled() ? 'warning' : 'gray')
-                            ->tooltip(fn(Register $record) => $record->deadline_delivery?->isPast() && ! $record->isPaid() && ! $record->isCancelled() ? 'Entrega Atrasada!' : null)
+                            ->color(fn (Register $record) => $record->deadline_delivery?->isPast() && ! $record->isPaid() && ! $record->isCollected() && ! $record->isCancelled() ? 'warning' : 'gray')
+                            ->tooltip(fn (Register $record) => $record->deadline_delivery?->isPast() && ! $record->isPaid() && ! $record->isCollected() && ! $record->isCancelled() ? 'Entrega Atrasada!' : null)
                             ->date('d/m/Y')
                             ->sortable(),
                         TextColumn::make('status')
-                            ->label('Situação') //label just for orderBy option
+                            ->label('Situação') // label just for orderBy option
                             ->badge()
-                            ->color(fn(RegisterStatusEnum $state): string => $state->color())
-                            ->formatStateUsing(fn(RegisterStatusEnum $state): string => $state->localizedLabel())
+                            ->color(fn (RegisterStatusEnum $state): string => $state->color())
+                            ->formatStateUsing(fn (RegisterStatusEnum $state): string => $state->localizedLabel())
                             ->sortable()
                             ->searchable(),
                     ]),
@@ -276,8 +279,8 @@ class RegisterResource extends Resource
                     Stack::make([
                         TextColumn::make('pdf_path')
                             ->icon('heroicon-o-document-text')
-                            ->formatStateUsing(fn($state) => 'Ver PDF')
-                            ->url(fn($record): ?string => $record->pdf_path ? Storage::disk('s3')->url($record->pdf_path) : null)
+                            ->formatStateUsing(fn ($state) => 'Ver PDF')
+                            ->url(fn ($record): ?string => $record->pdf_path ? Storage::disk('s3')->url($record->pdf_path) : null)
                             ->openUrlInNewTab(),
                     ]),
                 ]),
@@ -285,12 +288,12 @@ class RegisterResource extends Resource
                 Panel::make([
                     Stack::make([
                         TextColumn::make('driver')
-                            ->formatStateUsing(fn($state) => '<strong> Motorista: </strong>' . $state ?: '-')
+                            ->formatStateUsing(fn ($state) => '<strong> Motorista: </strong>'.$state ?: '-')
                             ->html()
                             ->icon('heroicon-o-user')
                             ->searchable(),
                         TextColumn::make('driver_plate')
-                            ->formatStateUsing(fn($state) => '<strong> Placa guincho: </strong>' . $state ?: '-')
+                            ->formatStateUsing(fn ($state) => '<strong> Placa guincho: </strong>'.$state ?: '-')
                             ->html()
                             ->icon('heroicon-o-truck')
                             ->searchable(),
@@ -302,11 +305,11 @@ class RegisterResource extends Resource
                             ->icon('heroicon-o-identification')
                             ->searchable(),
                         TextColumn::make('notes')
-                            ->formatStateUsing(fn(?string $state): ?string => $state ? '<strong>Obs.: </strong>' . nl2br(e($state)) : null)
+                            ->formatStateUsing(fn (?string $state): ?string => $state ? '<strong>Obs.: </strong>'.nl2br(e($state)) : null)
                             ->wrap()
                             ->html(),
                         TextColumn::make('value')
-                            ->formatStateUsing(fn($state) => '<strong> Valor: R$ </strong>' . str_replace('.', ',', $state))
+                            ->formatStateUsing(fn ($state) => '<strong> Valor: R$ </strong>'.str_replace('.', ',', $state))
                             ->html(),
 
                     ]),
@@ -339,26 +342,26 @@ class RegisterResource extends Resource
                         ->icon('heroicon-o-pencil-square')
                         ->form(self::getUpdateStatusFormSchema())
                         ->action(function (array $data, Collection $records): void {
-                            $records->each(fn(Register $record) => self::updateRegisterStatus($record, $data));
+                            $records->each(fn (Register $record) => self::updateRegisterStatus($record, $data));
                         })
                         ->color('primary')
                         ->modalWidth('lg')
                         ->deselectRecordsAfterCompletion(),
                 ])->label('Ações em massa'),
             ])->modifyQueryUsing(function (Builder $query) {
-            $query->orderByRaw("
+                $query->orderByRaw("
                     CASE status
                         WHEN 'pending' THEN 1
                         WHEN 'pending daily rates' THEN 2
                         WHEN 'available' THEN 3
                         WHEN 'collected' THEN 4
-                        WHEN 'invoiced' THEN 5
+                        WHEN 'delivered' THEN 5
                         WHEN 'paid' THEN 6
                         ELSE 7
                     END ASC
-                ");
-        })
-            ->recordUrl(fn(Register $record): string => static::getUrl('view', ['record' => $record]));
+                ")->orderBy('deadline_withdraw', 'asc');
+            })
+            ->recordUrl(fn (Register $record): string => static::getUrl('view', ['record' => $record]));
     }
 
     protected static function getUpdateStatusFormSchema(): array
@@ -373,16 +376,16 @@ class RegisterResource extends Resource
             DatePicker::make('collected_date')
                 ->label('Data da coleta')
                 ->native(false)
-                ->visible(fn(Get $get) => $get('status') === RegisterStatusEnum::COLLECTED->value)
+                ->visible(fn (Get $get) => $get('status') === RegisterStatusEnum::COLLECTED->value)
                 ->requiredIf('status', RegisterStatusEnum::COLLECTED->value),
             TextInput::make('driver')
                 ->label('Motorista (opcional)')
-                ->visible(fn(Get $get) => $get('status') === RegisterStatusEnum::COLLECTED->value)
+                ->visible(fn (Get $get) => $get('status') === RegisterStatusEnum::COLLECTED->value)
                 ->requiredIf('status', RegisterStatusEnum::COLLECTED->value)
                 ->maxLength(30),
             TextInput::make('driver_plate')
                 ->label('Placa guincho (opcional)')
-                ->visible(fn(Get $get) => $get('status') === RegisterStatusEnum::COLLECTED->value)
+                ->visible(fn (Get $get) => $get('status') === RegisterStatusEnum::COLLECTED->value)
                 ->requiredIf('status', RegisterStatusEnum::COLLECTED->value)
                 ->maxLength(7),
         ];
@@ -417,10 +420,10 @@ class RegisterResource extends Resource
     public static function getPages(): array
     {
         return [
-            'index'  => ListRegisters::route('/'),
+            'index' => ListRegisters::route('/'),
             'create' => CreateRegister::route('/create'),
-            'view'   => ViewRegister::route('/{record}'),
-            'edit'   => EditRegister::route('/{record}/edit'),
+            'view' => ViewRegister::route('/{record}'),
+            'edit' => EditRegister::route('/{record}/edit'),
         ];
     }
 }
