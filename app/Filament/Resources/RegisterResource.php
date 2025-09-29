@@ -256,15 +256,15 @@ class RegisterResource extends Resource
                         TextColumn::make('deadline_withdraw')
                             ->label('Data limite recolha') // label just for orderBy option
                             ->icon('heroicon-o-exclamation-triangle')
-                            ->color(fn (Register $record) => $record->deadline_withdraw?->isPast() && ! $record->isCollected() && ! $record->isCancelled() ? 'danger' : 'gray')
-                            ->tooltip(fn (Register $record) => $record->deadline_withdraw?->isPast() && ! $record->isCollected() && ! $record->isCancelled() ? 'Remoção Atrasada!' : null)
+                            ->color(fn (Register $record) => $record->deadline_withdraw?->isPast() && ! $record->isCollected() && ! $record->isDelivered() && ! $record->isCancelled() && ! $record->isPaid() ? 'danger' : 'gray')
+                            ->tooltip(fn (Register $record) => $record->deadline_withdraw?->isPast() && ! $record->isCollected() && ! $record->isDelivered() && ! $record->isCancelled() && ! $record->isPaid() ? 'Remoção Atrasada!' : null)
                             ->date('d/m/Y')
                             ->sortable(),
                         TextColumn::make('deadline_delivery')
                             ->label('Data limite entrega') // label just for orderBy option
                             ->icon('heroicon-o-calendar-days')
-                            ->color(fn (Register $record) => $record->deadline_delivery?->isPast() && ! $record->isPaid() && ! $record->isCollected() && ! $record->isCancelled() ? 'warning' : 'gray')
-                            ->tooltip(fn (Register $record) => $record->deadline_delivery?->isPast() && ! $record->isPaid() && ! $record->isCollected() && ! $record->isCancelled() ? 'Entrega Atrasada!' : null)
+                            ->color(fn (Register $record) => $record->deadline_delivery?->isPast() && ! $record->isPaid() && ! $record->isDelivered() && ! $record->isCancelled() ? 'warning' : 'gray')
+                            ->tooltip(fn (Register $record) => $record->deadline_delivery?->isPast() && ! $record->isPaid() && ! $record->isDelivered() && ! $record->isCancelled() ? 'Entrega Atrasada!' : null)
                             ->date('d/m/Y')
                             ->sortable(),
                         TextColumn::make('status')

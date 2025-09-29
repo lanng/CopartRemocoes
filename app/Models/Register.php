@@ -1,4 +1,5 @@
 <?php
+
 namespace App\Models;
 
 use App\Enums\RegisterStatusEnum;
@@ -45,9 +46,9 @@ class Register extends Model
     protected $casts = [
         'deadline_withdraw' => 'datetime',
         'deadline_delivery' => 'datetime',
-        'collected_date'    => 'datetime',
-        'status'            => RegisterStatusEnum::class,
-        'value'             => 'decimal:2',
+        'collected_date' => 'datetime',
+        'status' => RegisterStatusEnum::class,
+        'value' => 'decimal:2',
     ];
 
     // Implement the helper methods suggested before
@@ -69,13 +70,18 @@ class Register extends Model
         return $this->status === RegisterStatusEnum::CANCELLED;
     }
 
+    public function isDelivered(): bool
+    {
+        return $this->status === RegisterStatusEnum::DELIVERED;
+    }
+
     public function getActivitylogOptions(): LogOptions
     {
         return LogOptions::defaults()
             ->logOnly(['vehicle_model', 'vehicle_plate', 'origin_city', 'notes', 'status', 'driver', 'collected_date'])
             ->logOnlyDirty()
             ->dontSubmitEmptyLogs()
-            ->setDescriptionForEvent(fn(string $eventName) => "O registro foi {$eventName}")
+            ->setDescriptionForEvent(fn (string $eventName) => "O registro foi {$eventName}")
             ->useLogName('RegisterLog');
     }
 }
