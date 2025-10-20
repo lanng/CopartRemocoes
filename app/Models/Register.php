@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Enums\CompanyEnum;
 use App\Enums\RegisterStatusEnum;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Facades\Storage;
@@ -24,6 +25,7 @@ class Register extends Model
     }
 
     protected $fillable = [
+        'company',
         'vehicle_model',
         'vehicle_plate',
         'origin_city',
@@ -49,6 +51,7 @@ class Register extends Model
         'collected_date' => 'datetime',
         'status' => RegisterStatusEnum::class,
         'value' => 'decimal:2',
+        'company' => CompanyEnum::class,
     ];
 
     // Implement the helper methods suggested before

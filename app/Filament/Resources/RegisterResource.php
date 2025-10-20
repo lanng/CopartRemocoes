@@ -2,6 +2,7 @@
 
 namespace App\Filament\Resources;
 
+use App\Enums\CompanyEnum;
 use App\Enums\RegisterStatusEnum;
 use App\Filament\Resources\RegisterResource\Pages\CreateRegister;
 use App\Filament\Resources\RegisterResource\Pages\EditRegister;
@@ -9,6 +10,7 @@ use App\Filament\Resources\RegisterResource\Pages\ListRegisters;
 use App\Filament\Resources\RegisterResource\Pages\ViewRegister;
 use App\Models\Register;
 use App\Services\PdfExtractorService;
+use App\Services\WhatsappExtractorService;
 use Exception;
 use Filament\Forms\Components\DatePicker;
 use Filament\Forms\Components\FileUpload;
@@ -55,7 +57,17 @@ class RegisterResource extends Resource
     {
         return $form
             ->schema([
-                Section::make('Dados do veículo')->schema([
+                Section::make('Dados do veículo e empresa')->schema([
+                    Select::make('company')
+                        ->label('Empresa')
+                        ->options([
+                            'copart' => 'Copart',
+                            'millan' => 'Millan',
+                        ])
+                        ->default('copart')
+                        ->required()
+                        ->live()
+                        ->afterStateUpdated(fn (Set $set) => $set('pdf_path', null)),
                     TextInput::make('vehicle_model')
                         ->label('Veículo')
                         ->required()
@@ -86,7 +98,7 @@ class RegisterResource extends Resource
                     DatePicker::make('deadline_withdraw')
                         ->label('Data limite para recolha')
                         ->validationAttribute('Data limite para recolha')
-                        ->required()
+                        ->required(fn (Get $get): bool => $get('company') === 'copart')
                         ->native(false)
                         ->weekStartsOnSunday()
                         ->closeOnDateSelection()
@@ -95,7 +107,7 @@ class RegisterResource extends Resource
                     DatePicker::make('deadline_delivery')
                         ->label('Data limite entrega')
                         ->validationAttribute('Data limite entrega')
-                        ->required()
+                        ->required(fn (Get $get): bool => $get('company') === 'copart')
                         ->native(false)
                         ->weekStartsOnSunday()
                         ->closeOnDateSelection()
@@ -147,9 +159,10 @@ class RegisterResource extends Resource
                         ->downloadable()
                         ->openable()
                         ->acceptedFileTypes(['application/pdf'])
-                        ->required()
+                        ->required(fn (Get $get): bool => $get('company') === 'copart')
                         ->preserveFilenames()
                         ->live()
+                        ->visible(fn (Get $get): bool => $get('company') === 'copart')
                         ->afterStateUpdated(function ($state, Set $set, Get $get) {
                             if (blank($state)) {
                                 $set('vehicle_model', '');
@@ -224,9 +237,53 @@ class RegisterResource extends Resource
                         ->helperText('Faça upload do PDF para tentar preencher os campos automaticamente.'),
                     Textarea::make('notes')
                         ->label('Observações')
-                        ->maxLength(700)
+                        ->maxLength(1500)
                         ->rows(8)
-                        ->columnSpanFull(),
+                        ->columnSpanFull()
+                        ->live(onBlur: true)
+                        ->afterStateUpdated(function (Get $get, Set $set, ?string $state) {
+                            if ($get('company') !== 'millan' || blank($state)) {
+                                return;
+                            }
+
+                            try {
+                                $extractor = app(WhatsappExtractorService::class);
+                                $extractedData = $extractor->extractData($state);
+
+                                if (empty($extractedData)) {
+                                    Notification::make()
+                                        ->warning()
+                                        ->title('Nenhum dado extraído')
+                                        ->body('Não foi possível extrair informações do texto. Por favor, preencha manualmente.')
+                                        ->send();
+
+                                    return;
+                                }
+
+                                $contactPhone = $extractedData['contact_phone'] ?? null;
+                                unset($extractedData['contact_phone']);
+
+                                foreach ($extractedData as $key => $value) {
+                                    $set($key, $value);
+                                }
+
+                                $set('notes', $contactPhone ? 'Contato: '.$contactPhone : null);
+
+                                Notification::make()
+                                    ->success()
+                                    ->title('Dados Extraídos do Texto')
+                                    ->body('Campos preenchidos com base na mensagem. Por favor, revise.')
+                                    ->send();
+
+                            } catch (Exception $e) {
+                                Notification::make()
+                                    ->danger()
+                                    ->title('Erro na Extração')
+                                    ->body('Ocorreu um erro ao processar o texto.')
+                                    ->send();
+                                Log::error('WhatsappExtractorService Error: '.$e->getMessage(), ['text' => $state]);
+                            }
+                        }),
                 ]),
             ]);
     }
@@ -238,6 +295,13 @@ class RegisterResource extends Resource
             ->columns([
                 Split::make([
                     Stack::make([
+                        TextColumn::make('company')
+                            ->badge()
+                            ->formatStateUsing(fn (CompanyEnum $state): string => $state->getLabel() ?? '')
+                            ->color(fn (CompanyEnum $state): string => match ($state) {
+                                CompanyEnum::COPART => 'primary',
+                                CompanyEnum::MILLAN => 'success'
+                            }),
                         TextColumn::make('vehicle_model')
                             ->weight('bold')
                             ->searchable(),
@@ -281,7 +345,8 @@ class RegisterResource extends Resource
                             ->icon('heroicon-o-document-text')
                             ->formatStateUsing(fn ($state) => 'Ver PDF')
                             ->url(fn ($record): ?string => $record->pdf_path ? Storage::disk('s3')->url($record->pdf_path) : null)
-                            ->openUrlInNewTab(),
+                            ->openUrlInNewTab()
+                            ->hidden(fn (?Register $record) => $record?->company === CompanyEnum::MILLAN),
                     ]),
                 ]),
 
@@ -318,6 +383,11 @@ class RegisterResource extends Resource
             ->emptyStateHeading('Não há registros!')
             ->emptyStateDescription('Nenhum registro encontrado. Tente ajustar sua busca ou crie um novo registro.')
             ->filters([
+                SelectFilter::make('company')
+                    ->options([
+                        'copart' => 'Copart',
+                        'millan' => 'Millan',
+                    ]),
                 SelectFilter::make('status')
                     ->label('Situação')
                     ->options(RegisterStatusEnum::optionsWithLabels()),
