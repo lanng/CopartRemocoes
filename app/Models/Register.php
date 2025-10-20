@@ -43,6 +43,7 @@ class Register extends Model
         'insurance',
         'fipe_value',
         'payment_code',
+        'tow_yard',
     ];
 
     protected $casts = [

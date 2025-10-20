@@ -135,6 +135,9 @@ class RegisterResource extends Resource
                         ->enum(RegisterStatusEnum::class)
                         ->default(RegisterStatusEnum::PENDING)
                         ->required(),
+                    TextInput::make('tow_yard')
+                        ->label('Pátio')
+                        ->maxLength(50),
                 ]),
 
                 Section::make('Financeiro')->schema([
@@ -366,6 +369,10 @@ class RegisterResource extends Resource
                             ->date('d/m/Y')
                             ->placeholder('-')
                             ->icon('heroicon-o-check-circle'),
+                        TextColumn::make('tow_yard')
+                            ->formatStateUsing(fn ($state) => '<strong> Pátio: </strong>'.$state ?: '-')
+                            ->html()
+                            ->icon('heroicon-o-home'),
                         TextColumn::make('vehicle_id')
                             ->icon('heroicon-o-identification')
                             ->searchable(),
