@@ -2,13 +2,16 @@
 
 namespace App\Filament\Resources;
 
+use App\Enums\CompanyEnum;
 use App\Enums\RegisterStatusEnum;
+use App\Exports\RegistersExport;
 use App\Filament\Resources\RegisterResource\Pages\CreateRegister;
 use App\Filament\Resources\RegisterResource\Pages\EditRegister;
 use App\Filament\Resources\RegisterResource\Pages\ListRegisters;
 use App\Filament\Resources\RegisterResource\Pages\ViewRegister;
 use App\Models\Register;
 use App\Services\PdfExtractorService;
+use App\Services\WhatsappExtractorService;
 use Exception;
 use Filament\Forms\Components\DatePicker;
 use Filament\Forms\Components\FileUpload;
@@ -38,6 +41,8 @@ use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
 use Leandrocfe\FilamentPtbrFormFields\Money;
+use Maatwebsite\Excel\Excel as ExcelExcel;
+use Maatwebsite\Excel\Facades\Excel;
 
 class RegisterResource extends Resource
 {
@@ -55,7 +60,17 @@ class RegisterResource extends Resource
     {
         return $form
             ->schema([
-                Section::make('Dados do veículo')->schema([
+                Section::make('Dados do veículo e empresa')->schema([
+                    Select::make('company')
+                        ->label('Empresa')
+                        ->options([
+                            'copart' => 'Copart',
+                            'millan' => 'Millan',
+                        ])
+                        ->default('copart')
+                        ->required()
+                        ->live()
+                        ->afterStateUpdated(fn (Set $set) => $set('pdf_path', null)),
                     TextInput::make('vehicle_model')
                         ->label('Veículo')
                         ->required()
@@ -123,6 +138,9 @@ class RegisterResource extends Resource
                         ->enum(RegisterStatusEnum::class)
                         ->default(RegisterStatusEnum::PENDING)
                         ->required(),
+                    TextInput::make('tow_yard')
+                        ->label('Pátio')
+                        ->maxLength(50),
                 ]),
 
                 Section::make('Financeiro')->schema([
@@ -147,9 +165,10 @@ class RegisterResource extends Resource
                         ->downloadable()
                         ->openable()
                         ->acceptedFileTypes(['application/pdf'])
-                        ->required()
+                        ->required(fn (Get $get): bool => $get('company') === 'copart')
                         ->preserveFilenames()
                         ->live()
+                        ->visible(fn (Get $get): bool => $get('company') === 'copart')
                         ->afterStateUpdated(function ($state, Set $set, Get $get) {
                             if (blank($state)) {
                                 $set('vehicle_model', '');
@@ -224,9 +243,59 @@ class RegisterResource extends Resource
                         ->helperText('Faça upload do PDF para tentar preencher os campos automaticamente.'),
                     Textarea::make('notes')
                         ->label('Observações')
-                        ->maxLength(700)
+                        ->maxLength(1500)
                         ->rows(8)
-                        ->columnSpanFull(),
+                        ->columnSpanFull()
+                        ->live(onBlur: true)
+                        ->afterStateUpdated(function (Get $get, Set $set, ?string $state) {
+                            if ($get('company') !== 'millan' || blank($state)) {
+                                return;
+                            }
+
+                            if (str_starts_with(trim((string) $state), 'Contato:')) {
+                                return;
+                            }
+
+                            try {
+                                $extractor = app(WhatsappExtractorService::class);
+                                $extractedData = $extractor->extractData($state);
+
+                                if (empty($extractedData)) {
+                                    // Notification::make()
+                                    //     ->warning()
+                                    //     ->title('Nenhum dado extraído')
+                                    //     ->body('Não foi possível extrair informações do texto. Por favor, preencha manualmente.')
+                                    //     ->send();
+
+                                    return;
+                                }
+
+                                $contactPhone = $extractedData['contact_phone'] ?? null;
+                                unset($extractedData['contact_phone']);
+
+                                foreach ($extractedData as $key => $value) {
+                                    if (! blank($value)) {
+                                        $set($key, $value);
+                                    }
+                                }
+
+                                $set('notes', $contactPhone ? 'Contato: '.$contactPhone : null);
+
+                                Notification::make()
+                                    ->success()
+                                    ->title('Dados Extraídos do Texto')
+                                    ->body('Campos preenchidos com base na mensagem. Por favor, revise.')
+                                    ->send();
+
+                            } catch (Exception $e) {
+                                Notification::make()
+                                    ->danger()
+                                    ->title('Erro na Extração')
+                                    ->body('Ocorreu um erro ao processar o texto.')
+                                    ->send();
+                                Log::error('WhatsappExtractorService Error: '.$e->getMessage(), ['text' => $state]);
+                            }
+                        }),
                 ]),
             ]);
     }
@@ -240,7 +309,8 @@ class RegisterResource extends Resource
                     Stack::make([
                         TextColumn::make('vehicle_model')
                             ->weight('bold')
-                            ->searchable(),
+                            ->searchable()
+                            ->formatStateUsing(fn (string $state, Register $record) => "{$state} - {$record->company->getLabel()}"),
                         TextColumn::make('vehicle_plate')
                             ->badge()
                             ->searchable(),
@@ -250,9 +320,6 @@ class RegisterResource extends Resource
                         TextColumn::make('destination_city')
                             ->icon('heroicon-o-arrow-down-circle')
                             ->searchable(),
-                    ]),
-
-                    Stack::make([
                         TextColumn::make('deadline_withdraw')
                             ->label('Data limite recolha') // label just for orderBy option
                             ->icon('heroicon-o-exclamation-triangle')
@@ -279,9 +346,10 @@ class RegisterResource extends Resource
                     Stack::make([
                         TextColumn::make('pdf_path')
                             ->icon('heroicon-o-document-text')
-                            ->formatStateUsing(fn ($state) => 'Ver PDF')
+                            ->formatStateUsing(fn () => 'Ver PDF')
                             ->url(fn ($record): ?string => $record->pdf_path ? Storage::disk('s3')->url($record->pdf_path) : null)
-                            ->openUrlInNewTab(),
+                            ->openUrlInNewTab()
+                            ->hidden(fn (?Register $record) => $record?->company === CompanyEnum::MILLAN),
                     ]),
                 ]),
 
@@ -301,6 +369,10 @@ class RegisterResource extends Resource
                             ->date('d/m/Y')
                             ->placeholder('-')
                             ->icon('heroicon-o-check-circle'),
+                        TextColumn::make('tow_yard')
+                            ->formatStateUsing(fn ($state) => '<strong> Pátio: </strong>'.$state ?: '-')
+                            ->html()
+                            ->icon('heroicon-o-home'),
                         TextColumn::make('vehicle_id')
                             ->icon('heroicon-o-identification')
                             ->searchable(),
@@ -318,6 +390,11 @@ class RegisterResource extends Resource
             ->emptyStateHeading('Não há registros!')
             ->emptyStateDescription('Nenhum registro encontrado. Tente ajustar sua busca ou crie um novo registro.')
             ->filters([
+                SelectFilter::make('company')
+                    ->options([
+                        'copart' => 'Copart',
+                        'millan' => 'Millan',
+                    ]),
                 SelectFilter::make('status')
                     ->label('Situação')
                     ->options(RegisterStatusEnum::optionsWithLabels()),
@@ -337,6 +414,15 @@ class RegisterResource extends Resource
             ->bulkActions([
                 BulkActionGroup::make([
                     DeleteBulkAction::make()->label('Apagar Selecionados'),
+                    BulkAction::make('export')
+                        ->label('Exportar para Excel')
+                        ->icon('heroicon-o-document-arrow-down')
+                        ->action(function (Collection $records) {
+                            $filename = 'registros-'.now()->format('d-m-Y').'.xlsx';
+
+                            return Excel::download(new RegistersExport($records), $filename, ExcelExcel::XLSX);
+                        })
+                        ->deselectRecordsAfterCompletion(),
                     BulkAction::make('updateStatusMulti')
                         ->label('Atualizar Situação (em massa)')
                         ->icon('heroicon-o-pencil-square')
