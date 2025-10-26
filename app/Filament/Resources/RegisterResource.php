@@ -4,6 +4,7 @@ namespace App\Filament\Resources;
 
 use App\Enums\CompanyEnum;
 use App\Enums\RegisterStatusEnum;
+use App\Exports\RegistersExport;
 use App\Filament\Resources\RegisterResource\Pages\CreateRegister;
 use App\Filament\Resources\RegisterResource\Pages\EditRegister;
 use App\Filament\Resources\RegisterResource\Pages\ListRegisters;
@@ -40,6 +41,8 @@ use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
 use Leandrocfe\FilamentPtbrFormFields\Money;
+use Maatwebsite\Excel\Excel as ExcelExcel;
+use Maatwebsite\Excel\Facades\Excel;
 
 class RegisterResource extends Resource
 {
@@ -98,7 +101,7 @@ class RegisterResource extends Resource
                     DatePicker::make('deadline_withdraw')
                         ->label('Data limite para recolha')
                         ->validationAttribute('Data limite para recolha')
-                        ->required(fn (Get $get): bool => $get('company') === 'copart')
+                        ->required()
                         ->native(false)
                         ->weekStartsOnSunday()
                         ->closeOnDateSelection()
@@ -107,7 +110,7 @@ class RegisterResource extends Resource
                     DatePicker::make('deadline_delivery')
                         ->label('Data limite entrega')
                         ->validationAttribute('Data limite entrega')
-                        ->required(fn (Get $get): bool => $get('company') === 'copart')
+                        ->required()
                         ->native(false)
                         ->weekStartsOnSunday()
                         ->closeOnDateSelection()
@@ -249,16 +252,20 @@ class RegisterResource extends Resource
                                 return;
                             }
 
+                            if (str_starts_with(trim((string) $state), 'Contato:')) {
+                                return;
+                            }
+
                             try {
                                 $extractor = app(WhatsappExtractorService::class);
                                 $extractedData = $extractor->extractData($state);
 
                                 if (empty($extractedData)) {
-                                    Notification::make()
-                                        ->warning()
-                                        ->title('Nenhum dado extraído')
-                                        ->body('Não foi possível extrair informações do texto. Por favor, preencha manualmente.')
-                                        ->send();
+                                    // Notification::make()
+                                    //     ->warning()
+                                    //     ->title('Nenhum dado extraído')
+                                    //     ->body('Não foi possível extrair informações do texto. Por favor, preencha manualmente.')
+                                    //     ->send();
 
                                     return;
                                 }
@@ -267,7 +274,9 @@ class RegisterResource extends Resource
                                 unset($extractedData['contact_phone']);
 
                                 foreach ($extractedData as $key => $value) {
-                                    $set($key, $value);
+                                    if (! blank($value)) {
+                                        $set($key, $value);
+                                    }
                                 }
 
                                 $set('notes', $contactPhone ? 'Contato: '.$contactPhone : null);
@@ -298,16 +307,10 @@ class RegisterResource extends Resource
             ->columns([
                 Split::make([
                     Stack::make([
-                        TextColumn::make('company')
-                            ->badge()
-                            ->formatStateUsing(fn (CompanyEnum $state): string => $state->getLabel() ?? '')
-                            ->color(fn (CompanyEnum $state): string => match ($state) {
-                                CompanyEnum::COPART => 'primary',
-                                CompanyEnum::MILLAN => 'success'
-                            }),
                         TextColumn::make('vehicle_model')
                             ->weight('bold')
-                            ->searchable(),
+                            ->searchable()
+                            ->formatStateUsing(fn (string $state, Register $record) => "{$state} - {$record->company->getLabel()}"),
                         TextColumn::make('vehicle_plate')
                             ->badge()
                             ->searchable(),
@@ -317,9 +320,6 @@ class RegisterResource extends Resource
                         TextColumn::make('destination_city')
                             ->icon('heroicon-o-arrow-down-circle')
                             ->searchable(),
-                    ]),
-
-                    Stack::make([
                         TextColumn::make('deadline_withdraw')
                             ->label('Data limite recolha') // label just for orderBy option
                             ->icon('heroicon-o-exclamation-triangle')
@@ -346,7 +346,7 @@ class RegisterResource extends Resource
                     Stack::make([
                         TextColumn::make('pdf_path')
                             ->icon('heroicon-o-document-text')
-                            ->formatStateUsing(fn ($state) => 'Ver PDF')
+                            ->formatStateUsing(fn () => 'Ver PDF')
                             ->url(fn ($record): ?string => $record->pdf_path ? Storage::disk('s3')->url($record->pdf_path) : null)
                             ->openUrlInNewTab()
                             ->hidden(fn (?Register $record) => $record?->company === CompanyEnum::MILLAN),
@@ -414,6 +414,15 @@ class RegisterResource extends Resource
             ->bulkActions([
                 BulkActionGroup::make([
                     DeleteBulkAction::make()->label('Apagar Selecionados'),
+                    BulkAction::make('export')
+                        ->label('Exportar para Excel')
+                        ->icon('heroicon-o-document-arrow-down')
+                        ->action(function (Collection $records) {
+                            $filename = 'registros-'.now()->format('d-m-Y').'.xlsx';
+
+                            return Excel::download(new RegistersExport($records), $filename, ExcelExcel::XLSX);
+                        })
+                        ->deselectRecordsAfterCompletion(),
                     BulkAction::make('updateStatusMulti')
                         ->label('Atualizar Situação (em massa)')
                         ->icon('heroicon-o-pencil-square')
