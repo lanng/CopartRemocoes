@@ -182,8 +182,13 @@ class RegisterResource extends Resource
                             }
 
                             try {
+                                $tempLocalPath = tempnam(sys_get_temp_dir(), 'pdf_process_');
+
+                                file_put_contents($tempLocalPath, $state->get());
+
                                 $extractor = app(PdfExtractorService::class);
-                                $extractedData = $extractor->extractData($state->getRealPath());
+
+                                $extractedData = $extractor->extractData($tempLocalPath);
 
                                 if (isset($extractedData['error'])) {
                                     Notification::make()
@@ -238,6 +243,10 @@ class RegisterResource extends Resource
                                     ->body('Ocorreu um erro ao tentar extrair dados do PDF: '.$e->getMessage())
                                     ->send();
                                 Log::error('Unexpected error during PDF extraction service call: '.$e->getMessage(), ['state' => $state]);
+                            }finally {
+                                if (file_exists($tempLocalPath)) {
+                                    unlink($tempLocalPath);
+                                }
                             }
                         })
                         ->helperText('Faça upload do PDF para tentar preencher os campos automaticamente.'),
