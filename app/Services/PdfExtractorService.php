@@ -1,10 +1,14 @@
 <?php
 namespace App\Services;
 
+use Exception;
 use Illuminate\Support\Facades\Log;
 
 class PdfExtractorService
 {
+    /**
+     * @throws Exception
+     */
     public function extractData(string $pdfPath): array
     {
         if (! defined('PDFTOTEXT_PATH')) {
@@ -14,13 +18,13 @@ class PdfExtractorService
         $pdfFilePath = $pdfPath;
 
         if (! file_exists($pdfFilePath)) {
-            fwrite(STDERR, "Error: PDF file not found at '$pdfFilePath'\n");
-            exit(1);
+            Log::error("PdfExtractorService: Arquivo não encontrado em '$pdfFilePath'");
+            throw new Exception("Erro: Arquivo PDF não encontrado.");
         }
 
         if (! is_readable($pdfFilePath)) {
-            fwrite(STDERR, "Error: PDF file is not readable at '$pdfFilePath'\n");
-            exit(1);
+            Log::error("PdfExtractorService: Sem permissão de leitura em '$pdfFilePath'");
+            throw new Exception("Erro: Sem permissão para ler o arquivo PDF.");
         }
 
         $escapedPdfPath = escapeshellarg($pdfFilePath);
