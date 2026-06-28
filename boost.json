@@ -1,0 +1,11 @@
+{
+    "agents": [
+        "opencode"
+    ],
+    "editors": [
+        "opencode"
+    ],
+    "guidelines": [
+        "filament/filament"
+    ]
+}

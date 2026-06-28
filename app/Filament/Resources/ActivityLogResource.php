@@ -3,7 +3,6 @@
 namespace App\Filament\Resources;
 
 use App\Filament\Resources\ActivityLogResource\Pages;
-use App\Filament\Resources\ActivityLogResource\RelationManagers;
 use App\Models\Register;
 use App\Models\User;
 use Filament\Forms;
@@ -30,6 +29,7 @@ class ActivityLogResource extends Resource
         if (Auth::check()) {
             return Auth::user()->email === config('authuser.user');
         }
+
         return false;
     }
 
@@ -99,11 +99,11 @@ class ActivityLogResource extends Resource
             ])
             ->actions([
                 Tables\Actions\ViewAction::make(),
-//                Tables\Actions\EditAction::make(),
+                //                Tables\Actions\EditAction::make(),
             ])
             ->bulkActions([
                 Tables\Actions\BulkActionGroup::make([
-//                    Tables\Actions\DeleteBulkAction::make(),
+                    //                    Tables\Actions\DeleteBulkAction::make(),
                 ]),
             ])->defaultSort('created_at', 'desc');
     }
@@ -119,13 +119,13 @@ class ActivityLogResource extends Resource
     {
         return [
             'index' => Pages\ListActivityLogs::route('/'),
-//            'create' => Pages\CreateActivityLog::route('/create'),
+            //            'create' => Pages\CreateActivityLog::route('/create'),
             'view' => Pages\ViewActivityLog::route('/{record}'),
-//            'edit' => Pages\EditActivityLog::route('/{record}/edit'),
+            //            'edit' => Pages\EditActivityLog::route('/{record}/edit'),
         ];
     }
 
-    public static function canCreate():bool
+    public static function canCreate(): bool
     {
         return false;
     }

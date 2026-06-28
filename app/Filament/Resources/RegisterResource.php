@@ -5,6 +5,7 @@ namespace App\Filament\Resources;
 use App\Enums\CompanyEnum;
 use App\Enums\RegisterStatusEnum;
 use App\Exports\RegistersExport;
+use App\Exports\RegistersJsonExport;
 use App\Filament\Resources\RegisterResource\Pages\CreateRegister;
 use App\Filament\Resources\RegisterResource\Pages\EditRegister;
 use App\Filament\Resources\RegisterResource\Pages\ListRegisters;
@@ -243,7 +244,7 @@ class RegisterResource extends Resource
                                     ->body('Ocorreu um erro ao tentar extrair dados do PDF: '.$e->getMessage())
                                     ->send();
                                 Log::error('Unexpected error during PDF extraction service call: '.$e->getMessage(), ['state' => $state]);
-                            }finally {
+                            } finally {
                                 if (file_exists($tempLocalPath)) {
                                     unlink($tempLocalPath);
                                 }
@@ -430,6 +431,15 @@ class RegisterResource extends Resource
                             $filename = 'registros-'.now()->format('d-m-Y').'.xlsx';
 
                             return Excel::download(new RegistersExport($records), $filename, ExcelExcel::XLSX);
+                        })
+                        ->deselectRecordsAfterCompletion(),
+                    BulkAction::make('exportJson')
+                        ->label('Exportar para JSON')
+                        ->icon('heroicon-o-code-bracket-square')
+                        ->action(function (Collection $records) {
+                            $filename = 'registros-'.now()->format('d-m-Y').'.json';
+
+                            return (new RegistersJsonExport($records))->download($filename);
                         })
                         ->deselectRecordsAfterCompletion(),
                     BulkAction::make('updateStatusMulti')
