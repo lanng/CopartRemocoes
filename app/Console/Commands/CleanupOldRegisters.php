@@ -2,10 +2,12 @@
 
 namespace App\Console\Commands;
 
+use App\Models\CteEmissionBatch;
 use App\Models\Register;
 use Carbon\Carbon;
 use Exception;
 use Illuminate\Console\Command;
+use Illuminate\Support\Facades\DB;
 
 class CleanupOldRegisters extends Command
 {
@@ -26,7 +28,7 @@ class CleanupOldRegisters extends Command
     /**
      * Execute the console command.
      */
-    public function handle()
+    public function handle(): int
     {
         $this->info('Starting cleanup of old paid and cancelled registers...');
 
@@ -40,20 +42,32 @@ class CleanupOldRegisters extends Command
             return 0;
         }
 
-        $count = $registersToDelete->count();
-        $this->info("Found {$count} register(s) to delete.");
+        $this->info("Found {$registersToDelete->count()} register(s) to delete.");
+
+        $deletedCount = 0;
 
         foreach ($registersToDelete as $register) {
-            $this->line("Deleting register #{$register->id} (Plate: {$register->vehicle_plate}, Status: {$register->status->value}");
+            $batchIds = $register->cteDocuments()->pluck('cte_emission_batch_id')->unique();
 
             try {
-                $register->delete();
+                DB::transaction(function () use ($batchIds, $register): void {
+                    $register->cteDocuments()->delete();
+                    $register->delete();
+
+                    CteEmissionBatch::query()
+                        ->whereIn('id', $batchIds)
+                        ->doesntHave('documents')
+                        ->delete();
+                });
+
+                $deletedCount++;
+                $this->line("Deleted register #{$register->id} (Plate: {$register->vehicle_plate}, Status: {$register->status->value})");
             } catch (Exception $e) {
                 $this->error("Failed to delete register #{$register->id} ".$e->getMessage());
             }
         }
 
-        $this->info("Cleanup complete. Successfully deleted {$count} register(s).");
+        $this->info("Cleanup complete. Successfully deleted {$deletedCount} register(s).");
 
         return 0;
     }

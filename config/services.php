@@ -2,6 +2,14 @@
 
 return [
 
+    'microsoft_graph' => [
+        'client_id' => env('MICROSOFT_GRAPH_CLIENT_ID'),
+        'client_secret' => env('MICROSOFT_GRAPH_CLIENT_SECRET'),
+        'redirect_uri' => env('MICROSOFT_GRAPH_REDIRECT_URI', '/microsoft/graph/callback'),
+        'tenant' => env('MICROSOFT_GRAPH_TENANT', 'consumers'),
+        'scopes' => 'openid offline_access Mail.Read User.Read',
+    ],
+
     /*
     |--------------------------------------------------------------------------
     | Third Party Services

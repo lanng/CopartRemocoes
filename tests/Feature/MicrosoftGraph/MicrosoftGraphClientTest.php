@@ -1,0 +1,92 @@
+<?php
+
+namespace Tests\Feature\MicrosoftGraph;
+
+use App\Models\MicrosoftGraphConnection;
+use App\Services\MicrosoftGraph\MicrosoftGraphClient;
+use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Http\Client\Request;
+use Illuminate\Support\Carbon;
+use Illuminate\Support\Facades\Http;
+use Tests\TestCase;
+
+class MicrosoftGraphClientTest extends TestCase
+{
+    use RefreshDatabase;
+
+    public function test_it_fetches_at_most_fifty_messages_after_the_utc_checkpoint(): void
+    {
+        Carbon::setTestNow('2026-08-13 20:55:00');
+        $connection = MicrosoftGraphConnection::factory()->create([
+            'last_synced_at' => '2026-08-13 20:50:00',
+        ]);
+        Http::fake([
+            'https://graph.microsoft.com/*' => Http::response([
+                'value' => [[
+                    'id' => 'message-1',
+                    'subject' => 'Checklist digital - 1146609',
+                    'sender' => ['emailAddress' => ['address' => 'remocao@copart.com.br']],
+                    'receivedDateTime' => '2026-08-13T20:52:00Z',
+                    'body' => ['content' => 'Veículo 1146609 - ESN4A20.', 'contentType' => 'text'],
+                ]],
+            ]),
+        ]);
+
+        $result = app(MicrosoftGraphClient::class)->fetchNewMessages($connection);
+
+        $this->assertSame('message-1', $result['messages'][0]['external_id']);
+        $this->assertSame('2026-08-13 20:55:00', $result['checkpoint_at']->format('Y-m-d H:i:s'));
+        Http::assertSent(function (Request $request): bool {
+            parse_str((string) parse_url($request->url(), PHP_URL_QUERY), $query);
+
+            return str_starts_with($request->url(), 'https://graph.microsoft.com/v1.0/me/mailFolders/inbox/messages?')
+                && $query['$top'] === '50'
+                && $query['$orderby'] === 'receivedDateTime asc'
+                && $query['$filter'] === 'receivedDateTime gt 2026-08-13T20:50:00Z';
+        });
+        Http::assertSentCount(1);
+    }
+
+    public function test_a_full_page_advances_only_to_the_last_message(): void
+    {
+        Carbon::setTestNow('2026-08-13 21:00:00');
+        $connection = MicrosoftGraphConnection::factory()->create([
+            'last_synced_at' => '2026-08-13 20:50:00',
+        ]);
+        $messages = collect(range(1, 50))->map(fn (int $index): array => [
+            'id' => "message-{$index}",
+            'subject' => 'Irrelevante',
+            'sender' => ['emailAddress' => ['address' => 'other@example.com']],
+            'receivedDateTime' => Carbon::parse('2026-08-13 20:50:00')->addSeconds($index)->toIso8601ZuluString(),
+            'body' => ['content' => '', 'contentType' => 'text'],
+        ])->all();
+        Http::fake(['https://graph.microsoft.com/*' => Http::response(['value' => $messages])]);
+
+        $result = app(MicrosoftGraphClient::class)->fetchNewMessages($connection);
+
+        $this->assertCount(50, $result['messages']);
+        $this->assertSame('2026-08-13 20:50:50', $result['checkpoint_at']->format('Y-m-d H:i:s'));
+        Http::assertSentCount(1);
+    }
+
+    public function test_it_refreshes_an_expired_access_token_before_querying_graph(): void
+    {
+        $connection = MicrosoftGraphConnection::factory()->create([
+            'expires_at' => now()->subMinute(),
+        ]);
+
+        Http::fake([
+            'https://login.microsoftonline.com/*/oauth2/v2.0/token' => Http::response([
+                'access_token' => 'new-access-token',
+                'refresh_token' => 'new-refresh-token',
+                'expires_in' => 3600,
+            ]),
+            'https://graph.microsoft.com/*' => Http::response(['value' => []]),
+        ]);
+
+        app(MicrosoftGraphClient::class)->fetchNewMessages($connection);
+
+        $this->assertSame('new-access-token', $connection->refresh()->access_token);
+        $this->assertSame('new-refresh-token', $connection->refresh()->refresh_token);
+    }
+}
