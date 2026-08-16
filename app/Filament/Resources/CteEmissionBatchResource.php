@@ -6,7 +6,9 @@ use App\Enums\CteEmissionBatchStatusEnum;
 use App\Filament\Resources\CteEmissionBatchResource\Pages;
 use App\Filament\Resources\CteEmissionBatchResource\RelationManagers;
 use App\Models\CteEmissionBatch;
+use App\Services\Cte\DeleteDraftCteEmissionBatch;
 use Filament\Forms\Form;
+use Filament\Infolists\Components\Section;
 use Filament\Infolists\Components\TextEntry;
 use Filament\Infolists\Infolist;
 use Filament\Resources\Resource;
@@ -33,6 +35,18 @@ class CteEmissionBatchResource extends Resource
     public static function infolist(Infolist $infolist): Infolist
     {
         return $infolist->schema([
+            Section::make('Resumo financeiro')
+                ->columns(2)
+                ->schema([
+                    TextEntry::make('total_cargo_value')
+                        ->label('Valor total da carga')
+                        ->state(fn (CteEmissionBatch $record): int => $record->totalCargoValueInCents())
+                        ->money('BRL', divideBy: 100, locale: 'pt_BR'),
+                    TextEntry::make('total_transport_value')
+                        ->label('Valor total do transporte')
+                        ->state(fn (CteEmissionBatch $record): int => $record->totalTransportValueInCents())
+                        ->money('BRL', divideBy: 100, locale: 'pt_BR'),
+                ]),
             TextEntry::make('status')
                 ->label('Situação')
                 ->badge()
@@ -89,6 +103,18 @@ class CteEmissionBatchResource extends Resource
             ])
             ->actions([
                 Tables\Actions\ViewAction::make()->label('Ver lote'),
+                Tables\Actions\Action::make('delete')
+                    ->label('Excluir lote')
+                    ->icon('heroicon-o-trash')
+                    ->color('danger')
+                    ->visible(fn (CteEmissionBatch $record): bool => $record->status === CteEmissionBatchStatusEnum::DRAFT)
+                    ->requiresConfirmation()
+                    ->modalHeading('Excluir lote')
+                    ->modalDescription('Os documentos deste lote serão removidos. Os registros originais permanecerão disponíveis.')
+                    ->action(function (CteEmissionBatch $record): void {
+                        app(DeleteDraftCteEmissionBatch::class)->handle($record);
+                    })
+                    ->successNotificationTitle('Lote excluído.'),
             ])
             ->bulkActions([]);
     }

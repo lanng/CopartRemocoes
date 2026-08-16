@@ -3,6 +3,7 @@
 namespace App\Models;
 
 use App\Enums\CteEmissionBatchStatusEnum;
+use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -46,5 +47,42 @@ class CteEmissionBatch extends Model
     public function documents(): HasMany
     {
         return $this->hasMany(CteDocument::class);
+    }
+
+    public function totalCargoValueInCents(): int
+    {
+        return $this->totalSnapshotValueInCents('fipe_value');
+    }
+
+    public function totalTransportValueInCents(): int
+    {
+        return $this->totalSnapshotValueInCents('value');
+    }
+
+    private function totalSnapshotValueInCents(string $field): int
+    {
+        /** @var Collection<int, CteDocument> $documents */
+        $documents = $this->documents;
+
+        return $documents->sum(
+            fn (CteDocument $document): int => self::decimalValueInCents($document->snapshot[$field] ?? null)
+        );
+    }
+
+    private static function decimalValueInCents(mixed $value): int
+    {
+        if ($value === null || $value === '') {
+            return 0;
+        }
+
+        $value = (string) $value;
+        $isNegative = str_starts_with($value, '-');
+        $value = ltrim($value, '+-');
+        [$whole, $fraction] = array_pad(explode('.', $value, 2), 2, '0');
+        $fraction = str_pad(substr($fraction, 0, 2), 2, '0');
+
+        $cents = ((int) $whole * 100) + (int) $fraction;
+
+        return $isNegative ? -$cents : $cents;
     }
 }

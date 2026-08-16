@@ -5,6 +5,7 @@ namespace Tests\Feature\Filament;
 use App\Enums\CteDocumentStatusEnum;
 use App\Enums\CteEmissionBatchStatusEnum;
 use App\Enums\RegisterStatusEnum;
+use App\Filament\Resources\CteEmissionBatchResource;
 use App\Filament\Resources\CteEmissionBatchResource\Pages\ListCteEmissionBatches;
 use App\Filament\Resources\CteEmissionBatchResource\Pages\ViewCteEmissionBatch;
 use App\Filament\Resources\CteEmissionBatchResource\RelationManagers\DocumentsRelationManager;
@@ -82,7 +83,18 @@ class CteEmissionBatchResourceTest extends TestCase
             'processing_started_at' => Carbon::create(2026, 8, 12, 16, 30, 'UTC'),
             'completed_at' => Carbon::create(2026, 8, 12, 17, 30, 'UTC'),
         ]);
+        CteDocument::factory()->create([
+            'cte_emission_batch_id' => $batch->id,
+            'snapshot' => [
+                'fipe_value' => '43897.00',
+                'value' => '1250.00',
+            ],
+        ]);
         Livewire::test(ViewCteEmissionBatch::class, ['record' => $batch->getRouteKey()])
+            ->assertSee('Valor total da carga')
+            ->assertSee('43.897,00')
+            ->assertSee('Valor total do transporte')
+            ->assertSee('1.250,00')
             ->assertSee('Situação')
             ->assertSee('Rascunho')
             ->assertSee('Modo')
@@ -97,7 +109,55 @@ class CteEmissionBatchResourceTest extends TestCase
             ->assertSee('12/08/2026 13:30')
             ->assertSee('Concluído em')
             ->assertSee('12/08/2026 14:30')
+            ->assertActionHasLabel('delete', 'Excluir lote')
             ->assertActionHasLabel('approve', 'Aprovar lote');
+    }
+
+    public function test_the_delete_action_is_only_available_for_draft_batches(): void
+    {
+        $draft = CteEmissionBatch::factory()->create([
+            'status' => CteEmissionBatchStatusEnum::DRAFT,
+        ]);
+        $approved = CteEmissionBatch::factory()->create([
+            'status' => CteEmissionBatchStatusEnum::APPROVED,
+        ]);
+
+        Livewire::test(ListCteEmissionBatches::class)
+            ->assertTableActionHasLabel('delete', 'Excluir lote', $draft)
+            ->assertTableActionHidden('delete', $approved);
+    }
+
+    public function test_a_draft_batch_can_be_deleted_from_the_batch_list(): void
+    {
+        $batch = CteEmissionBatch::factory()->create([
+            'status' => CteEmissionBatchStatusEnum::DRAFT,
+        ]);
+        $document = CteDocument::factory()->create([
+            'cte_emission_batch_id' => $batch->id,
+        ]);
+
+        Livewire::test(ListCteEmissionBatches::class)
+            ->callTableAction('delete', $batch);
+
+        $this->assertModelMissing($batch);
+        $this->assertModelMissing($document);
+    }
+
+    public function test_a_draft_batch_can_be_deleted_from_the_batch_detail(): void
+    {
+        $batch = CteEmissionBatch::factory()->create([
+            'status' => CteEmissionBatchStatusEnum::DRAFT,
+        ]);
+        $document = CteDocument::factory()->create([
+            'cte_emission_batch_id' => $batch->id,
+        ]);
+
+        Livewire::test(ViewCteEmissionBatch::class, ['record' => $batch->getRouteKey()])
+            ->callAction('delete')
+            ->assertRedirect(CteEmissionBatchResource::getUrl('index'));
+
+        $this->assertModelMissing($batch);
+        $this->assertModelMissing($document);
     }
 
     public function test_documents_show_translated_state_and_the_register_action(): void
