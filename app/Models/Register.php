@@ -3,15 +3,19 @@
 namespace App\Models;
 
 use App\Enums\CompanyEnum;
+use App\Enums\CteDocumentStatusEnum;
 use App\Enums\RegisterStatusEnum;
+use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\Relations\HasOne;
 use Illuminate\Support\Facades\Storage;
 use Spatie\Activitylog\LogOptions;
 use Spatie\Activitylog\Traits\LogsActivity;
 
 class Register extends Model
 {
-    use LogsActivity;
+    use HasFactory, LogsActivity;
 
     protected static function boot(): void
     {
@@ -33,6 +37,7 @@ class Register extends Model
         'deadline_withdraw',
         'deadline_delivery',
         'collected_date',
+        'delivery_confirmed_at',
         'driver',
         'driver_plate',
         'vehicle_id',
@@ -50,6 +55,7 @@ class Register extends Model
         'deadline_withdraw' => 'datetime',
         'deadline_delivery' => 'datetime',
         'collected_date' => 'datetime',
+        'delivery_confirmed_at' => 'datetime',
         'status' => RegisterStatusEnum::class,
         'value' => 'decimal:2',
         'company' => CompanyEnum::class,
@@ -77,6 +83,29 @@ class Register extends Model
     public function isDelivered(): bool
     {
         return $this->status === RegisterStatusEnum::DELIVERED;
+    }
+
+    public function cteDocuments(): HasMany
+    {
+        return $this->hasMany(CteDocument::class);
+    }
+
+    public function latestAuthorizedCteDocument(): HasOne
+    {
+        return $this->hasOne(CteDocument::class)
+            ->ofMany([
+                'authorized_at' => 'max',
+                'id' => 'max',
+            ], function ($query): void {
+                $query
+                    ->where('status', CteDocumentStatusEnum::AUTHORIZED)
+                    ->whereNotNull('cte_number');
+            });
+    }
+
+    public function paymentBatchItems(): HasMany
+    {
+        return $this->hasMany(PaymentBatchItem::class);
     }
 
     public function getActivitylogOptions(): LogOptions

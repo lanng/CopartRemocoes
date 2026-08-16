@@ -11,11 +11,13 @@ use App\Filament\Resources\RegisterResource\Pages\EditRegister;
 use App\Filament\Resources\RegisterResource\Pages\ListRegisters;
 use App\Filament\Resources\RegisterResource\Pages\ViewRegister;
 use App\Models\Register;
+use App\Services\Cte\CreateCteEmissionBatch;
 use App\Services\PdfExtractorService;
 use App\Services\WhatsappExtractorService;
 use Exception;
 use Filament\Forms\Components\DatePicker;
 use Filament\Forms\Components\FileUpload;
+use Filament\Forms\Components\Placeholder;
 use Filament\Forms\Components\Section;
 use Filament\Forms\Components\Select;
 use Filament\Forms\Components\Textarea;
@@ -307,6 +309,21 @@ class RegisterResource extends Resource
                             }
                         }),
                 ]),
+
+                Section::make('CT-e e entrega')
+                    ->columns(3)
+                    ->visibleOn('view')
+                    ->schema([
+                        Placeholder::make('latestAuthorizedCteDocument.cte_number')
+                            ->label('Número do CT-e')
+                            ->content(fn (?Register $record): string => $record?->latestAuthorizedCteDocument?->cte_number ?? 'Não informado'),
+                        Placeholder::make('latestAuthorizedCteDocument.issued_at')
+                            ->label('Emissão do CT-e')
+                            ->content(fn (?Register $record): string => $record?->latestAuthorizedCteDocument?->issued_at?->timezone('America/Sao_Paulo')->format('d/m/Y H:i') ?? 'Não informado'),
+                        Placeholder::make('delivery_confirmed_at')
+                            ->label('Data da entrega')
+                            ->content(fn (?Register $record): string => $record?->delivery_confirmed_at?->timezone('America/Sao_Paulo')->format('d/m/Y H:i') ?? 'Não informado'),
+                    ]),
             ]);
     }
 
@@ -319,7 +336,13 @@ class RegisterResource extends Resource
                     Stack::make([
                         TextColumn::make('vehicle_model')
                             ->weight('bold')
-                            ->searchable()
+                            ->searchable(query: function (Builder $query, string $search): Builder {
+                                return $query
+                                    ->where('vehicle_model', 'like', "%{$search}%")
+                                    ->orWhereHas('cteDocuments', function (Builder $query) use ($search): Builder {
+                                        return $query->where('cte_number', 'like', "%{$search}%");
+                                    });
+                            })
                             ->formatStateUsing(fn (string $state, Register $record) => "{$state} - {$record->company->getLabel()}"),
                         TextColumn::make('vehicle_plate')
                             ->badge()
@@ -424,6 +447,35 @@ class RegisterResource extends Resource
             ->bulkActions([
                 BulkActionGroup::make([
                     DeleteBulkAction::make()->label('Apagar Selecionados'),
+                    BulkAction::make('createCteEmissionBatch')
+                        ->label('Criar lote de CT-e')
+                        ->icon('heroicon-o-document-plus')
+                        ->form([
+                            Select::make('execution_mode')
+                                ->label('Modo de execucao')
+                                ->options([
+                                    'dry_run' => 'Dry-run (sem autorizacao fiscal)',
+                                    'live' => 'Emissao real',
+                                ])
+                                ->default('dry_run')
+                                ->required(),
+                        ])
+                        ->action(function (Collection $records, array $data) {
+                            $batch = app(CreateCteEmissionBatch::class)->handle(
+                                $records,
+                                auth()->user(),
+                                $data['execution_mode'],
+                            );
+
+                            Notification::make()
+                                ->success()
+                                ->title('Lote de CT-e criado')
+                                ->body('Revise o lote antes de aprovar a execucao.')
+                                ->send();
+
+                            return redirect(CteEmissionBatchResource::getUrl('view', ['record' => $batch]));
+                        })
+                        ->deselectRecordsAfterCompletion(),
                     BulkAction::make('export')
                         ->label('Exportar para Excel')
                         ->icon('heroicon-o-document-arrow-down')
