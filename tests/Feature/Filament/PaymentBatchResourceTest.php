@@ -97,4 +97,40 @@ class PaymentBatchResourceTest extends TestCase
 
         $this->assertArrayHasKey('register', $component->instance()->getTable()->getQuery()->getEagerLoads());
     }
+
+    public function test_a_pending_item_can_be_removed_from_the_payment_batch(): void
+    {
+        $batch = PaymentBatch::factory()->create([
+            'status' => PaymentBatchStatusEnum::PENDING,
+            'total_amount' => '750.00',
+        ]);
+        $register = Register::factory()->create(['status' => 'delivered']);
+        $item = PaymentBatchItem::factory()->create([
+            'payment_batch_id' => $batch->id,
+            'register_id' => $register->id,
+            'amount' => '750.00',
+        ]);
+
+        Livewire::test(ItemsRelationManager::class, [
+            'ownerRecord' => $batch,
+            'pageClass' => ViewPaymentBatch::class,
+        ])
+            ->assertTableActionHasLabel('remove', 'Retirar do lote', $item)
+            ->callTableAction('remove', $item);
+
+        $this->assertModelMissing($item);
+        $this->assertModelMissing($batch);
+        $this->assertNotNull($register->refresh()->payment_deferred_at);
+    }
+
+    public function test_confirmed_payment_items_cannot_be_removed_from_the_interface(): void
+    {
+        $batch = PaymentBatch::factory()->create(['status' => PaymentBatchStatusEnum::CONFIRMED]);
+        $item = PaymentBatchItem::factory()->create(['payment_batch_id' => $batch->id]);
+
+        Livewire::test(ItemsRelationManager::class, [
+            'ownerRecord' => $batch,
+            'pageClass' => ViewPaymentBatch::class,
+        ])->assertTableActionHidden('remove', $item);
+    }
 }

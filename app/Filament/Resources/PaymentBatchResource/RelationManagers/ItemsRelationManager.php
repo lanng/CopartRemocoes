@@ -2,8 +2,10 @@
 
 namespace App\Filament\Resources\PaymentBatchResource\RelationManagers;
 
+use App\Enums\PaymentBatchStatusEnum;
 use App\Filament\Actions\ViewRegisterAction;
 use App\Models\PaymentBatchItem;
+use App\Services\Payments\RemovePaymentBatchItem;
 use Filament\Resources\RelationManagers\RelationManager;
 use Filament\Tables;
 use Filament\Tables\Table;
@@ -27,6 +29,18 @@ class ItemsRelationManager extends RelationManager
             ])
             ->actions([
                 ViewRegisterAction::make(fn (PaymentBatchItem $record): ?\App\Models\Register => $record->register),
+                Tables\Actions\Action::make('remove')
+                    ->label('Retirar do lote')
+                    ->icon('heroicon-o-minus-circle')
+                    ->color('warning')
+                    ->visible(fn (PaymentBatchItem $record): bool => $record->batch?->status === PaymentBatchStatusEnum::PENDING)
+                    ->requiresConfirmation()
+                    ->modalHeading('Retirar item do lote')
+                    ->modalDescription('O registro continuará entregue e será incluído na próxima geração de pagamentos.')
+                    ->action(function (PaymentBatchItem $record): void {
+                        app(RemovePaymentBatchItem::class)->handle($record);
+                    })
+                    ->successNotificationTitle('Item retirado do lote.'),
             ])
             ->bulkActions([]);
     }
