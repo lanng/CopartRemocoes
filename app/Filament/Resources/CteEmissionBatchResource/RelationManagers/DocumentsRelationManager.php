@@ -3,9 +3,11 @@
 namespace App\Filament\Resources\CteEmissionBatchResource\RelationManagers;
 
 use App\Enums\CteDocumentStatusEnum;
+use App\Enums\CteEmissionBatchStatusEnum;
 use App\Filament\Actions\ViewRegisterAction;
 use App\Models\CteDocument;
 use App\Services\Cte\CteDocumentRecoveryService;
+use App\Services\Cte\RemoveDraftCteDocument;
 use Filament\Forms\Components\Textarea;
 use Filament\Forms\Components\TextInput;
 use Filament\Notifications\Notification;
@@ -63,6 +65,19 @@ class DocumentsRelationManager extends RelationManager
                     ->action(function (CteDocument $record, array $data): void {
                         app(CteDocumentRecoveryService::class)->reconcile($record, $data);
                     }),
+                Tables\Actions\Action::make('remove')
+                    ->label('Retirar do lote')
+                    ->icon('heroicon-o-minus-circle')
+                    ->color('warning')
+                    ->visible(fn (CteDocument $record): bool => $record->status === CteDocumentStatusEnum::DRAFT
+                        && $record->batch?->status === CteEmissionBatchStatusEnum::DRAFT)
+                    ->requiresConfirmation()
+                    ->modalHeading('Retirar documento do lote')
+                    ->modalDescription('O registro original permanecerá disponível para nova emissão.')
+                    ->action(function (CteDocument $record): void {
+                        app(RemoveDraftCteDocument::class)->handle($record);
+                    })
+                    ->successNotificationTitle('Documento retirado do lote.'),
             ])
             ->bulkActions([
                 Tables\Actions\BulkAction::make('retrySelected')
