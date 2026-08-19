@@ -19,6 +19,7 @@ class ResolveIntegrationInboxItemTest extends TestCase
         $register = Register::factory()->create([
             'vehicle_id' => '1146609',
             'vehicle_plate' => 'ESN4A20',
+            'status' => 'collected',
         ]);
         $item = IntegrationInboxItem::factory()->create([
             'status' => 'pending',
@@ -32,6 +33,9 @@ class ResolveIntegrationInboxItemTest extends TestCase
         $this->assertSame('processed', $item->refresh()->status);
         $this->assertSame($register->id, $item->register_id);
         $this->assertSame('delivered', $register->refresh()->status->value);
+        $this->assertNull($item->previous_register_status);
+        $this->assertNull($item->delivery_alert);
+        $this->assertNull($item->authorized_cte_number_at_delivery);
         $this->assertSame($user->id, $item->resolved_by);
         $this->assertNotNull($item->resolved_at);
     }
