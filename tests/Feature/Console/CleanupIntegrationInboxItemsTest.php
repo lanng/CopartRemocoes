@@ -15,6 +15,7 @@ class CleanupIntegrationInboxItemsTest extends TestCase
     {
         $processed = IntegrationInboxItem::factory()->create([
             'status' => 'processed',
+            'delivery_alert' => 'missing_authorized_cte',
             'resolved_at' => Carbon::now()->subDays(31),
         ]);
         $duplicate = IntegrationInboxItem::factory()->create([

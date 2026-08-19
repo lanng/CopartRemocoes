@@ -52,12 +52,32 @@ class ApproveCteEmissionBatch
         foreach ($fields as $field) {
             $current = $register->{$field};
             $current = $current === null ? null : (string) $current;
+            $snapshotValue = $snapshot[$field] ?? null;
+            $matches = in_array($field, ['fipe_value', 'value'], true)
+                ? $this->normalizeDecimal($current) === $this->normalizeDecimal($snapshotValue)
+                : $current === $snapshotValue;
 
-            if ($current !== ($snapshot[$field] ?? null)) {
+            if (! $matches) {
                 throw ValidationException::withMessages([
                     'batch' => "A remocao {$register->id} foi alterada depois da criacao do lote. Crie um novo lote.",
                 ]);
             }
         }
+    }
+
+    private function normalizeDecimal(mixed $value): ?string
+    {
+        if ($value === null || $value === '') {
+            return null;
+        }
+
+        $value = (string) $value;
+        $negative = str_starts_with($value, '-');
+        $value = ltrim($value, '+-');
+        [$whole, $fraction] = array_pad(explode('.', $value, 2), 2, '');
+        $whole = ltrim($whole, '0') ?: '0';
+        $fraction = str_pad(substr($fraction, 0, 2), 2, '0');
+
+        return ($negative ? '-' : '').$whole.'.'.$fraction;
     }
 }

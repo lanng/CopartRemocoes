@@ -7,6 +7,8 @@ use App\Enums\CteEmissionBatchStatusEnum;
 use App\Enums\RegisterStatusEnum;
 use App\Models\CteDocument;
 use App\Models\CteEmissionBatch;
+use App\Models\PaymentBatch;
+use App\Models\PaymentBatchItem;
 use App\Models\Register;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -84,6 +86,60 @@ class CleanupOldRegistersTest extends TestCase
 
         $this->assertModelExists($recentPaid);
         $this->assertModelExists($delivered);
+    }
+
+    public function test_it_removes_payment_items_but_preserves_confirmed_batch_history(): void
+    {
+        $register = Register::factory()->create([
+            'status' => RegisterStatusEnum::PAID,
+            'value' => '123.45',
+            'updated_at' => now()->subDays(16),
+        ]);
+        $batch = PaymentBatch::factory()->create([
+            'status' => 'confirmed',
+            'total_amount' => '123.45',
+            'confirmed_at' => now()->subDays(10),
+        ]);
+        PaymentBatchItem::factory()->create([
+            'payment_batch_id' => $batch->id,
+            'register_id' => $register->id,
+            'amount' => '123.45',
+        ]);
+
+        $this->artisan('app:cleanup-old-registers')->assertSuccessful();
+
+        $this->assertModelMissing($register);
+        $this->assertDatabaseMissing('payment_batch_items', ['payment_batch_id' => $batch->id]);
+        $this->assertDatabaseHas('payment_batches', [
+            'id' => $batch->id,
+            'total_amount' => '123.45',
+        ]);
+    }
+
+    public function test_it_recalculates_a_pending_batch_when_deleting_an_old_register(): void
+    {
+        $register = Register::factory()->create([
+            'status' => RegisterStatusEnum::PAID,
+            'updated_at' => now()->subDays(16),
+        ]);
+        $batch = PaymentBatch::factory()->create([
+            'status' => 'pending',
+            'total_amount' => '300.00',
+        ]);
+        PaymentBatchItem::factory()->create([
+            'payment_batch_id' => $batch->id,
+            'register_id' => $register->id,
+            'amount' => '100.00',
+        ]);
+        PaymentBatchItem::factory()->create([
+            'payment_batch_id' => $batch->id,
+            'amount' => '200.00',
+        ]);
+
+        $this->artisan('app:cleanup-old-registers')->assertSuccessful();
+
+        $this->assertModelExists($batch);
+        $this->assertSame('200.00', $batch->refresh()->total_amount);
     }
 
     private function createBatch(): CteEmissionBatch

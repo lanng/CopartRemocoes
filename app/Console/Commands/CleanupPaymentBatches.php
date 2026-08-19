@@ -9,7 +9,7 @@ class CleanupPaymentBatches extends Command
 {
     protected $signature = 'payments:cleanup-batches';
 
-    protected $description = 'Remove lotes de pagamento confirmados há mais de três dias.';
+    protected $description = 'Remove lotes de pagamento confirmados há mais de 90 dias.';
 
     public function handle(): int
     {

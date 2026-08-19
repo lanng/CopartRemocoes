@@ -77,6 +77,25 @@ class CreatePaymentBatchForWindowTest extends TestCase
         $this->assertSame(1, PaymentBatchRun::query()->count());
     }
 
+    public function test_it_includes_an_older_deferred_register_and_clears_the_defer_marker(): void
+    {
+        $deferred = Register::factory()->create([
+            'company' => 'copart',
+            'status' => RegisterStatusEnum::DELIVERED,
+            'delivery_confirmed_at' => CarbonImmutable::parse('2026-07-01 12:00:00', 'America/Sao_Paulo'),
+            'payment_deferred_at' => CarbonImmutable::parse('2026-08-20 12:00:00', 'America/Sao_Paulo'),
+        ]);
+
+        $batch = app(CreatePaymentBatchForWindow::class)->handle($this->window());
+
+        $this->assertNotNull($batch);
+        $this->assertDatabaseHas('payment_batch_items', [
+            'payment_batch_id' => $batch->id,
+            'register_id' => $deferred->id,
+        ]);
+        $this->assertNull($deferred->refresh()->payment_deferred_at);
+    }
+
     private function window(): PaymentBatchWindow
     {
         return PaymentBatchWindow::forGenerationFriday(CarbonImmutable::parse('2026-08-21 07:00:00', 'America/Sao_Paulo'));

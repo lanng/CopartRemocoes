@@ -2,6 +2,7 @@
 
 namespace App\Filament\Resources;
 
+use App\Enums\RegisterStatusEnum;
 use App\Filament\Resources\IntegrationInboxItemResource\Pages;
 use App\Models\IntegrationInboxItem;
 use App\Models\Register;
@@ -14,6 +15,7 @@ use Filament\Infolists\Infolist;
 use Filament\Resources\Resource;
 use Filament\Tables;
 use Filament\Tables\Table;
+use Illuminate\Database\Eloquent\Builder;
 
 class IntegrationInboxItemResource extends Resource
 {
@@ -47,6 +49,19 @@ class IntegrationInboxItemResource extends Resource
             TextEntry::make('extracted_vehicle_plate')->label('Placa'),
             TextEntry::make('register.vehicle_id')->label('Registro associado'),
             TextEntry::make('failure_reason')->label('Motivo')->formatStateUsing(fn (IntegrationInboxItem $record): ?string => $record->failureReasonLabel()),
+            TextEntry::make('previous_register_status')
+                ->label('Status anterior')
+                ->placeholder('Não informado')
+                ->formatStateUsing(fn (mixed $state): mixed => RegisterStatusEnum::tryFrom((string) $state)?->localizedLabel() ?? $state),
+            TextEntry::make('delivery_alert')
+                ->label('Nível do alerta')
+                ->formatStateUsing(fn (IntegrationInboxItem $record): ?string => $record->deliveryAlertLabel())
+                ->badge()
+                ->color(fn (IntegrationInboxItem $record): string => $record->deliveryAlertColor())
+                ->placeholder('Sem alerta'),
+            TextEntry::make('authorized_cte_number_at_delivery')
+                ->label('CT-e autorizado na baixa')
+                ->placeholder('Não encontrado'),
             TextEntry::make('resolver.name')->label('Conciliado por')->placeholder('Não informado'),
             TextEntry::make('resolved_at')->label('Data da conciliação')->dateTime('d/m/Y H:i')->timezone('America/Sao_Paulo')->placeholder('Não informado'),
         ]);
@@ -57,19 +72,42 @@ class IntegrationInboxItemResource extends Resource
         return $table
             ->columns([
                 Tables\Columns\TextColumn::make('status')->label('Situação')->formatStateUsing(fn (IntegrationInboxItem $record): string => $record->statusLabel())->badge()->searchable(),
-                Tables\Columns\TextColumn::make('sender')->searchable(),
-                Tables\Columns\TextColumn::make('subject')->limit(50),
-                Tables\Columns\TextColumn::make('received_at')->label('Recebido em')->dateTime('d/m/Y H:i')->timezone('America/Sao_Paulo')->sortable(),
-                Tables\Columns\TextColumn::make('extracted_vehicle_id')->label('ID veículo')->searchable(),
-                Tables\Columns\TextColumn::make('extracted_vehicle_plate')->label('Placa')->searchable(),
-                Tables\Columns\TextColumn::make('failure_reason')->label('Motivo')->formatStateUsing(fn (IntegrationInboxItem $record): ?string => $record->failureReasonLabel())->limit(50),
+                Tables\Columns\TextColumn::make('extracted_vehicle_id')
+                    ->label('Veículo')
+                    ->description(fn (IntegrationInboxItem $record): ?string => $record->extracted_vehicle_plate)
+                    ->searchable(['extracted_vehicle_id', 'extracted_vehicle_plate', 'sender']),
+                Tables\Columns\TextColumn::make('received_at')
+                    ->label('Recebido')
+                    ->date('d/m/Y')
+                    ->timezone('America/Sao_Paulo')
+                    ->description(fn (IntegrationInboxItem $record): ?string => $record->received_at?->copy()->setTimezone('America/Sao_Paulo')->format('H:i'))
+                    ->sortable()
+                    ->visibleFrom('md'),
+                Tables\Columns\TextColumn::make('occurrence')
+                    ->label('Ocorrência')
+                    ->state(fn (IntegrationInboxItem $record): ?string => $record->deliveryAlertLabel() ?? $record->failureReasonLabel())
+                    ->badge()
+                    ->color(fn (IntegrationInboxItem $record): string => $record->hasDeliveryAlert() ? $record->deliveryAlertColor() : 'gray'),
             ])
+            ->defaultPaginationPageOption(25)
+            ->defaultSort('received_at', 'desc')
+
             ->filters([
                 Tables\Filters\SelectFilter::make('status')->options([
                     'pending' => 'Pendente',
                     'processed' => 'Processado',
                     'duplicate' => 'Duplicado',
                 ]),
+                Tables\Filters\TernaryFilter::make('has_delivery_alert')
+                    ->label('Alerta')
+                    ->placeholder('Todos')
+                    ->trueLabel('Com alerta')
+                    ->falseLabel('Sem alerta')
+                    ->queries(
+                        true: fn (Builder $query): Builder => $query->whereNotNull('delivery_alert'),
+                        false: fn (Builder $query): Builder => $query->whereNull('delivery_alert'),
+                        blank: fn (Builder $query): Builder => $query,
+                    ),
             ])
             ->actions([
                 Tables\Actions\ViewAction::make(),
@@ -100,6 +138,11 @@ class IntegrationInboxItemResource extends Resource
                         );
                     }),
             ])
+            ->recordClasses(fn (IntegrationInboxItem $record): ?string => match ($record->deliveryAlertColor()) {
+                'warning' => 'integration-inbox-alert-warning',
+                'danger' => 'integration-inbox-alert-danger',
+                default => null,
+            })
             ->bulkActions([]);
     }
 

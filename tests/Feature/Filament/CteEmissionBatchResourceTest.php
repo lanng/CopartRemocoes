@@ -185,6 +185,27 @@ class CteEmissionBatchResourceTest extends TestCase
             ->assertTableActionHasLabel('viewRegister', 'Ver registro', $document);
 
         $this->assertArrayHasKey('register', $component->instance()->getTable()->getQuery()->getEagerLoads());
+        $this->assertSame(25, $component->instance()->getTable()->getDefaultPaginationPageOption());
+    }
+
+    public function test_a_draft_document_can_be_removed_from_a_draft_batch(): void
+    {
+        $batch = CteEmissionBatch::factory()->create(['status' => CteEmissionBatchStatusEnum::DRAFT]);
+        $document = CteDocument::factory()->create([
+            'cte_emission_batch_id' => $batch->id,
+            'status' => CteDocumentStatusEnum::DRAFT,
+        ]);
+
+        Livewire::test(DocumentsRelationManager::class, [
+            'ownerRecord' => $batch,
+            'pageClass' => ViewCteEmissionBatch::class,
+        ])
+            ->assertTableActionHasLabel('remove', 'Retirar do lote', $document)
+            ->callTableAction('remove', $document);
+
+        $this->assertModelMissing($document);
+        $this->assertModelMissing($batch);
+        $this->assertModelExists($document->register);
     }
 
     public function test_failed_documents_can_be_retried_in_bulk_and_reopen_the_batch(): void

@@ -4,6 +4,7 @@ namespace App\Console\Commands;
 
 use App\Models\CteEmissionBatch;
 use App\Models\Register;
+use App\Services\Payments\DetachPaymentBatchItemsFromRegister;
 use Carbon\Carbon;
 use Exception;
 use Illuminate\Console\Command;
@@ -47,18 +48,36 @@ class CleanupOldRegisters extends Command
         $deletedCount = 0;
 
         foreach ($registersToDelete as $register) {
-            $batchIds = $register->cteDocuments()->pluck('cte_emission_batch_id')->unique();
-
             try {
-                DB::transaction(function () use ($batchIds, $register): void {
-                    $register->cteDocuments()->delete();
-                    $register->delete();
+                $wasDeleted = DB::transaction(function () use ($cutoffDate, $register): bool {
+                    $lockedRegister = Register::query()
+                        ->whereKey($register->id)
+                        ->whereIn('status', ['paid', 'cancelled'])
+                        ->where('updated_at', '<=', $cutoffDate)
+                        ->lockForUpdate()
+                        ->first();
+
+                    if (! $lockedRegister) {
+                        return false;
+                    }
+
+                    $batchIds = $lockedRegister->cteDocuments()->pluck('cte_emission_batch_id')->unique();
+
+                    app(DetachPaymentBatchItemsFromRegister::class)->handle($lockedRegister);
+                    $lockedRegister->cteDocuments()->delete();
+                    $lockedRegister->delete();
 
                     CteEmissionBatch::query()
                         ->whereIn('id', $batchIds)
                         ->doesntHave('documents')
                         ->delete();
+
+                    return true;
                 });
+
+                if (! $wasDeleted) {
+                    continue;
+                }
 
                 $deletedCount++;
                 $this->line("Deleted register #{$register->id} (Plate: {$register->vehicle_plate}, Status: {$register->status->value})");

@@ -12,15 +12,27 @@ class CreatePaymentBatchForWindow
     public function handle(PaymentBatchWindow $window, bool $outlookSyncFailed = false, ?string $outlookSyncError = null): ?PaymentBatch
     {
         return DB::transaction(function () use ($outlookSyncError, $outlookSyncFailed, $window): ?PaymentBatch {
-            $run = PaymentBatchRun::query()->firstOrCreate([
-                'window_start' => $window->start->toDateString(),
-                'window_end' => $window->end->toDateString(),
-            ]);
+            $windowStart = $window->start->toDateString();
+            $windowEnd = $window->end->toDateString();
+            PaymentBatchRun::query()->upsert([
+                [
+                    'window_start' => $windowStart,
+                    'window_end' => $windowEnd,
+                    'created_at' => now(),
+                    'updated_at' => now(),
+                ],
+            ], ['window_start', 'window_end'], []);
+
+            $run = PaymentBatchRun::query()
+                ->whereDate('window_start', $windowStart)
+                ->whereDate('window_end', $windowEnd)
+                ->lockForUpdate()
+                ->first();
 
             if ($run->processed_at) {
                 return PaymentBatch::query()
-                    ->where('window_start', $window->start->toDateString())
-                    ->where('window_end', $window->end->toDateString())
+                    ->whereDate('window_start', $windowStart)
+                    ->whereDate('window_end', $windowEnd)
                     ->first();
             }
 
@@ -28,7 +40,11 @@ class CreatePaymentBatchForWindow
                 ->with('latestAuthorizedCteDocument')
                 ->where('company', 'copart')
                 ->where('status', RegisterStatusEnum::DELIVERED)
-                ->whereBetween('delivery_confirmed_at', [$window->start->utc(), $window->end->utc()])
+                ->where(function ($query) use ($window): void {
+                    $query
+                        ->whereBetween('delivery_confirmed_at', [$window->start->utc(), $window->end->utc()])
+                        ->orWhereNotNull('payment_deferred_at');
+                })
                 ->whereDoesntHave('paymentBatchItems')
                 ->orderBy('id')
                 ->lockForUpdate()
@@ -48,8 +64,8 @@ class CreatePaymentBatchForWindow
 
             $batch = PaymentBatch::query()->create([
                 'status' => 'pending',
-                'window_start' => $window->start->toDateString(),
-                'window_end' => $window->end->toDateString(),
+                'window_start' => $windowStart,
+                'window_end' => $windowEnd,
                 'generated_at' => now(),
                 'total_amount' => $registers->sum(fn ($register): string => (string) $register->value),
                 'outlook_sync_failed' => $outlookSyncFailed,
@@ -64,6 +80,10 @@ class CreatePaymentBatchForWindow
                     'cte_number' => $register->latestAuthorizedCteDocument?->cte_number,
                     'delivery_confirmed_at' => $register->delivery_confirmed_at,
                 ]);
+
+                if ($register->payment_deferred_at) {
+                    $register->update(['payment_deferred_at' => null]);
+                }
             }
 
             $run->update([

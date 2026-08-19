@@ -14,6 +14,7 @@ class IntegrationInboxItem extends Model
     protected $fillable = [
         'source', 'external_id', 'status', 'sender', 'subject', 'received_at',
         'extracted_vehicle_id', 'extracted_vehicle_plate', 'register_id',
+        'previous_register_status', 'delivery_alert', 'authorized_cte_number_at_delivery',
         'failure_reason', 'resolved_by', 'resolved_at',
     ];
 
@@ -57,6 +58,30 @@ class IntegrationInboxItem extends Model
             'vehicle_plate_mismatch' => 'Placa divergente',
             'delivery_already_confirmed' => 'Entrega já confirmada',
             default => $this->failure_reason,
+        };
+    }
+
+    public function hasDeliveryAlert(): bool
+    {
+        return $this->delivery_alert !== null;
+    }
+
+    public function deliveryAlertLabel(): ?string
+    {
+        return match ($this->delivery_alert) {
+            null => null,
+            'unexpected_status' => 'Fluxo inesperado',
+            'missing_authorized_cte' => 'Entrega sem CT-e',
+            default => $this->delivery_alert,
+        };
+    }
+
+    public function deliveryAlertColor(): string
+    {
+        return match ($this->delivery_alert) {
+            'unexpected_status' => 'warning',
+            'missing_authorized_cte' => 'danger',
+            default => 'gray',
         };
     }
 }
