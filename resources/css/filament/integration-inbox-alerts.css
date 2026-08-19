@@ -1,0 +1,19 @@
+.integration-inbox-alert-warning {
+    background-color: rgba(254, 240, 138, 0.22);
+    border-inline-start: 3px solid #ca8a04;
+}
+
+.integration-inbox-alert-danger {
+    background-color: rgba(254, 202, 202, 0.24);
+    border-inline-start: 3px solid #dc2626;
+}
+
+.dark .integration-inbox-alert-warning {
+    background-color: rgba(133, 77, 14, 0.24);
+    border-inline-start-color: #facc15;
+}
+
+.dark .integration-inbox-alert-danger {
+    background-color: rgba(127, 29, 29, 0.28);
+    border-inline-start-color: #f87171;
+}
