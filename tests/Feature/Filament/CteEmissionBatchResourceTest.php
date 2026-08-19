@@ -113,6 +113,33 @@ class CteEmissionBatchResourceTest extends TestCase
             ->assertActionHasLabel('approve', 'Aprovar lote');
     }
 
+    public function test_the_batch_detail_polls_for_batch_updates(): void
+    {
+        $batch = CteEmissionBatch::factory()->create([
+            'status' => CteEmissionBatchStatusEnum::PROCESSING,
+        ]);
+
+        Livewire::test(ViewCteEmissionBatch::class, ['record' => $batch->getRouteKey()])
+            ->assertSee('wire:poll.5s="refreshBatch"', false);
+    }
+
+    public function test_refresh_batch_reloads_the_latest_batch_status(): void
+    {
+        $batch = CteEmissionBatch::factory()->create([
+            'status' => CteEmissionBatchStatusEnum::PROCESSING,
+        ]);
+        $component = Livewire::test(ViewCteEmissionBatch::class, ['record' => $batch->getRouteKey()]);
+
+        $batch->update([
+            'status' => CteEmissionBatchStatusEnum::COMPLETED_WITH_ERRORS,
+            'completed_at' => now(),
+        ]);
+
+        $component
+            ->call('refreshBatch')
+            ->assertSee('Concluído com erros');
+    }
+
     public function test_the_delete_action_is_only_available_for_draft_batches(): void
     {
         $draft = CteEmissionBatch::factory()->create([
@@ -186,6 +213,18 @@ class CteEmissionBatchResourceTest extends TestCase
 
         $this->assertArrayHasKey('register', $component->instance()->getTable()->getQuery()->getEagerLoads());
         $this->assertSame(25, $component->instance()->getTable()->getDefaultPaginationPageOption());
+    }
+
+    public function test_the_documents_table_polls_for_document_updates(): void
+    {
+        $batch = CteEmissionBatch::factory()->create();
+
+        $component = Livewire::test(DocumentsRelationManager::class, [
+            'ownerRecord' => $batch,
+            'pageClass' => ViewCteEmissionBatch::class,
+        ]);
+
+        $this->assertSame('5s', $component->instance()->getTable()->getPollingInterval());
     }
 
     public function test_a_draft_document_can_be_removed_from_a_draft_batch(): void

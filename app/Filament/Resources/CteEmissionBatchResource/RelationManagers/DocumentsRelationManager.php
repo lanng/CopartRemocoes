@@ -25,6 +25,7 @@ class DocumentsRelationManager extends RelationManager
     public function table(Table $table): Table
     {
         return $table
+            ->poll('5s')
             ->recordTitleAttribute('cte_number')
             ->modifyQueryUsing(fn (Builder $query): Builder => $query->with('register'))
             ->defaultPaginationPageOption(25)

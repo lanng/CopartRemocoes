@@ -12,6 +12,12 @@ class ViewCteEmissionBatch extends ViewRecord
 {
     protected static string $resource = CteEmissionBatchResource::class;
 
+    public function refreshBatch(): void
+    {
+        $this->authorizeAccess();
+        $this->getRecord()->refresh();
+    }
+
     protected function getHeaderActions(): array
     {
         return [

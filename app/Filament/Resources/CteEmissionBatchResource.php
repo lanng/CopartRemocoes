@@ -36,33 +36,37 @@ class CteEmissionBatchResource extends Resource
 
     public static function infolist(Infolist $infolist): Infolist
     {
-        return $infolist->schema([
-            Section::make('Resumo financeiro')
-                ->columns(2)
-                ->schema([
-                    TextEntry::make('total_cargo_value')
-                        ->label('Valor total da carga')
-                        ->state(fn (CteEmissionBatch $record): int => $record->totalCargoValueInCents())
-                        ->money('BRL', divideBy: 100, locale: 'pt_BR'),
-                    TextEntry::make('total_transport_value')
-                        ->label('Valor total do transporte')
-                        ->state(fn (CteEmissionBatch $record): int => $record->totalTransportValueInCents())
-                        ->money('BRL', divideBy: 100, locale: 'pt_BR'),
-                ]),
-            TextEntry::make('status')
-                ->label('Situação')
-                ->badge()
-                ->color(fn (CteEmissionBatchStatusEnum $state): string => $state->color())
-                ->formatStateUsing(fn (CteEmissionBatchStatusEnum $state): string => $state->label()),
-            TextEntry::make('execution_mode')
-                ->label('Modo')
-                ->formatStateUsing(fn (string $state): string => self::formatExecutionMode($state)),
-            TextEntry::make('creator.name')->label('Criado por'),
-            TextEntry::make('approver.name')->label('Aprovado por'),
-            TextEntry::make('approved_at')->label('Aprovado em')->dateTime('d/m/Y H:i')->timezone('America/Sao_Paulo'),
-            TextEntry::make('processing_started_at')->label('Processamento iniciado em')->dateTime('d/m/Y H:i')->timezone('America/Sao_Paulo'),
-            TextEntry::make('completed_at')->label('Concluído em')->dateTime('d/m/Y H:i')->timezone('America/Sao_Paulo'),
-        ]);
+        return $infolist
+            ->extraAttributes([
+                'wire:poll.5s' => 'refreshBatch',
+            ])
+            ->schema([
+                Section::make('Resumo financeiro')
+                    ->columns(2)
+                    ->schema([
+                        TextEntry::make('total_cargo_value')
+                            ->label('Valor total da carga')
+                            ->state(fn (CteEmissionBatch $record): int => $record->totalCargoValueInCents())
+                            ->money('BRL', divideBy: 100, locale: 'pt_BR'),
+                        TextEntry::make('total_transport_value')
+                            ->label('Valor total do transporte')
+                            ->state(fn (CteEmissionBatch $record): int => $record->totalTransportValueInCents())
+                            ->money('BRL', divideBy: 100, locale: 'pt_BR'),
+                    ]),
+                TextEntry::make('status')
+                    ->label('Situação')
+                    ->badge()
+                    ->color(fn (CteEmissionBatchStatusEnum $state): string => $state->color())
+                    ->formatStateUsing(fn (CteEmissionBatchStatusEnum $state): string => $state->label()),
+                TextEntry::make('execution_mode')
+                    ->label('Modo')
+                    ->formatStateUsing(fn (string $state): string => self::formatExecutionMode($state)),
+                TextEntry::make('creator.name')->label('Criado por'),
+                TextEntry::make('approver.name')->label('Aprovado por'),
+                TextEntry::make('approved_at')->label('Aprovado em')->dateTime('d/m/Y H:i')->timezone('America/Sao_Paulo'),
+                TextEntry::make('processing_started_at')->label('Processamento iniciado em')->dateTime('d/m/Y H:i')->timezone('America/Sao_Paulo'),
+                TextEntry::make('completed_at')->label('Concluído em')->dateTime('d/m/Y H:i')->timezone('America/Sao_Paulo'),
+            ]);
     }
 
     public static function table(Table $table): Table
