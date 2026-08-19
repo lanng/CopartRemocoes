@@ -27,6 +27,7 @@ class ItemsRelationManager extends RelationManager
                 Tables\Columns\TextColumn::make('cte_number')->label('Número do CT-e')->placeholder('CT-e ausente'),
                 Tables\Columns\TextColumn::make('delivery_confirmed_at')->label('Data da entrega')->dateTime('d/m/Y H:i')->timezone('America/Sao_Paulo'),
             ])
+            ->defaultPaginationPageOption(25)
             ->actions([
                 ViewRegisterAction::make(fn (PaymentBatchItem $record): ?\App\Models\Register => $record->register),
                 Tables\Actions\Action::make('remove')

@@ -27,6 +27,7 @@ class DocumentsRelationManager extends RelationManager
         return $table
             ->recordTitleAttribute('cte_number')
             ->modifyQueryUsing(fn (Builder $query): Builder => $query->with('register'))
+            ->defaultPaginationPageOption(25)
             ->columns([
                 TextColumn::make('status')
                     ->label('Situação')

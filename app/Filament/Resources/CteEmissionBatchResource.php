@@ -90,6 +90,7 @@ class CteEmissionBatchResource extends Resource
                     ->timezone('America/Sao_Paulo')
                     ->sortable(),
             ])
+            ->defaultSort('approved_at', 'desc')
             ->filters([
                 Tables\Filters\SelectFilter::make('status')
                     ->label('Situação')

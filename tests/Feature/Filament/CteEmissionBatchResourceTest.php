@@ -185,6 +185,7 @@ class CteEmissionBatchResourceTest extends TestCase
             ->assertTableActionHasLabel('viewRegister', 'Ver registro', $document);
 
         $this->assertArrayHasKey('register', $component->instance()->getTable()->getQuery()->getEagerLoads());
+        $this->assertSame(25, $component->instance()->getTable()->getDefaultPaginationPageOption());
     }
 
     public function test_a_draft_document_can_be_removed_from_a_draft_batch(): void
