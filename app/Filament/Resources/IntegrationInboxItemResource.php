@@ -158,7 +158,9 @@ class IntegrationInboxItemResource extends Resource
                     ->label('Revisar importação')
                     ->icon('heroicon-o-pencil-square')
                     ->color('warning')
-                    ->visible(fn (IntegrationInboxItem $record): bool => $record->isRemovalRequest() && $record->status === 'pending')
+                    ->visible(fn (IntegrationInboxItem $record): bool => $record->isRemovalRequest()
+                        && $record->status === 'pending'
+                        && ($record->proposed_changes !== null || $record->candidate_pdf_path !== null))
                     ->form(fn (IntegrationInboxItem $record): array => [
                         CheckboxList::make('fields')
                             ->label('Campos para aplicar')

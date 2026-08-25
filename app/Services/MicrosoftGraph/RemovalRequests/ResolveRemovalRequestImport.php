@@ -52,6 +52,11 @@ class ResolveRemovalRequestImport
             $register = Register::query()->lockForUpdate()->findOrFail($lockedItem->register_id);
             $proposedChanges = is_array($lockedItem->proposed_changes) ? $lockedItem->proposed_changes : [];
             $selectedFields = array_values(array_intersect($selectedFields, array_keys($proposedChanges), self::EDITABLE_FIELDS));
+
+            if ($selectedFields === [] && ! $replacePdf) {
+                throw new DomainException('Selecione pelo menos uma alteração ou o PDF candidato.');
+            }
+
             $attributes = $register->only(self::EDITABLE_FIELDS);
             $candidatePath = $lockedItem->candidate_pdf_path;
 

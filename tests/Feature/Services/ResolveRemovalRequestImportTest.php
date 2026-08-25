@@ -125,6 +125,18 @@ class ResolveRemovalRequestImportTest extends TestCase
         app(ResolveRemovalRequestImport::class)->apply($item, $user, [], false);
     }
 
+    public function test_it_does_not_resolve_a_pending_import_without_a_selection(): void
+    {
+        $user = User::factory()->create();
+        $register = Register::factory()->create();
+        $item = $this->pendingItem($register, [
+            'destination_city' => ['current' => 'Pirapora', 'proposed' => 'Jundiaí'],
+        ], 'candidate/CartaDeRemoção ABC1D23.pdf');
+
+        $this->expectException(DomainException::class);
+        app(ResolveRemovalRequestImport::class)->apply($item, $user, [], false);
+    }
+
     /** @param array<string, array{current: mixed, proposed: mixed}> $changes */
     private function pendingItem(Register $register, array $changes, string $candidatePath): IntegrationInboxItem
     {
