@@ -4,7 +4,8 @@ namespace App\Services\MicrosoftGraph\RemovalRequests;
 
 use App\Jobs\ProcessRemovalRequestEmail;
 use App\Models\IntegrationInboxItem;
-use Illuminate\Database\QueryException;
+use Illuminate\Contracts\Bus\Dispatcher;
+use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
@@ -17,6 +18,7 @@ class QueueRemovalRequestEmail
     public function __construct(
         private readonly RemovalRequestSubjectParser $subjectParser,
         private readonly RemovalRequestBodyParser $bodyParser,
+        private readonly Dispatcher $dispatcher,
     ) {}
 
     /** @param array<string, mixed> $message */
@@ -27,13 +29,10 @@ class QueueRemovalRequestEmail
 
         try {
             return DB::transaction(function () use ($message, $subject, $body): IntegrationInboxItem {
-                $item = IntegrationInboxItem::query()
-                    ->where('source', 'microsoft_graph')
-                    ->where('external_id', $message['external_id'])
-                    ->first();
+                $item = $this->findItem((string) $message['external_id']);
 
                 if ($item === null) {
-                    $item = IntegrationInboxItem::query()->create([
+                    $item = $this->createItem([
                         'source' => 'microsoft_graph',
                         'external_id' => $message['external_id'],
                         'message_type' => 'removal_request',
@@ -55,11 +54,8 @@ class QueueRemovalRequestEmail
 
                 return $item;
             });
-        } catch (QueryException $exception) {
-            $item = IntegrationInboxItem::query()
-                ->where('source', 'microsoft_graph')
-                ->where('external_id', $message['external_id'])
-                ->first();
+        } catch (UniqueConstraintViolationException $exception) {
+            $item = $this->findItem((string) $message['external_id']);
 
             if ($item === null) {
                 throw $exception;
@@ -85,12 +81,28 @@ class QueueRemovalRequestEmail
             }
 
             try {
-                ProcessRemovalRequestEmail::dispatch($item->id)->afterCommit();
+                $job = new ProcessRemovalRequestEmail($item->id);
+                $job->afterCommit();
+                $this->dispatcher->dispatch($job);
             } catch (Throwable $exception) {
                 Cache::forget($cacheKey);
 
                 throw $exception;
             }
         });
+    }
+
+    protected function findItem(string $externalId): ?IntegrationInboxItem
+    {
+        return IntegrationInboxItem::query()
+            ->where('source', 'microsoft_graph')
+            ->where('external_id', $externalId)
+            ->first();
+    }
+
+    /** @param array<string, mixed> $attributes */
+    protected function createItem(array $attributes): IntegrationInboxItem
+    {
+        return IntegrationInboxItem::query()->create($attributes);
     }
 }

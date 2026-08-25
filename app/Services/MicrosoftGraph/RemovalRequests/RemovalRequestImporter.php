@@ -300,6 +300,19 @@ class RemovalRequestImporter
             }
         }
 
+        if ($register->pdf_sha256 === null || ! hash_equals($register->pdf_sha256, $pdf->sha256)) {
+            $changes['pdf_path'] = [
+                'current' => [
+                    'path' => $register->pdf_path,
+                    'sha256' => $register->pdf_sha256,
+                ],
+                'proposed' => [
+                    'file_name' => $pdf->fileName,
+                    'sha256' => $pdf->sha256,
+                ],
+            ];
+        }
+
         if ($register->pdf_sha256 !== null && hash_equals($register->pdf_sha256, $pdf->sha256) && $changes === []) {
             $item->forceFill([
                 'status' => 'no_changes',

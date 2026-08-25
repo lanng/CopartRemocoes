@@ -4,11 +4,16 @@ namespace Tests\Feature\MicrosoftGraph;
 
 use App\Jobs\ProcessRemovalRequestEmail;
 use App\Models\IntegrationInboxItem;
+use App\Services\MicrosoftGraph\RemovalRequests\QueueRemovalRequestEmail;
 use App\Services\MicrosoftGraph\RemovalRequests\RemovalRequestMessageRouter;
+use Illuminate\Contracts\Bus\Dispatcher;
+use Illuminate\Database\QueryException;
+use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Queue;
+use Mockery;
 use Tests\TestCase;
 
 class RemovalRequestMessageRouterTest extends TestCase
@@ -120,6 +125,86 @@ class RemovalRequestMessageRouterTest extends TestCase
         });
     }
 
+    public function test_it_retries_dispatch_when_the_first_after_commit_dispatch_fails(): void
+    {
+        Queue::fake();
+        Cache::flush();
+        $realDispatcher = app(Dispatcher::class);
+        $dispatcher = Mockery::mock(Dispatcher::class);
+        $dispatchCalls = 0;
+        $dispatcher->shouldReceive('dispatch')->twice()->andReturnUsing(function (mixed $job) use (&$dispatchCalls, $realDispatcher): mixed {
+            $dispatchCalls++;
+
+            if ($dispatchCalls === 1) {
+                throw new \RuntimeException('queue unavailable');
+            }
+
+            return $realDispatcher->dispatch($job);
+        });
+        $this->app->instance(Dispatcher::class, $dispatcher);
+        $message = $this->removalRequestMessage();
+        $router = app(RemovalRequestMessageRouter::class);
+
+        try {
+            $router->handle($message);
+            $this->fail('The first dispatch should fail.');
+        } catch (\RuntimeException $exception) {
+            $this->assertSame('queue unavailable', $exception->getMessage());
+        }
+
+        $item = $router->handle($message);
+
+        $this->assertSame('queued', $item->status);
+        Queue::assertPushed(ProcessRemovalRequestEmail::class, 1);
+        $dispatcher->shouldHaveReceived('dispatch')->twice();
+    }
+
+    public function test_unique_constraint_race_returns_existing_item_and_requeues_it(): void
+    {
+        Queue::fake();
+        Cache::flush();
+        $message = $this->removalRequestMessage();
+        $existing = IntegrationInboxItem::factory()->create([
+            'source' => 'microsoft_graph',
+            'external_id' => $message['external_id'],
+            'message_type' => 'removal_request',
+            'status' => 'queued',
+        ]);
+        $service = $this->raceService(new UniqueConstraintViolationException(
+            'sqlite',
+            'insert into integration_inbox_items',
+            [],
+            new \RuntimeException('duplicate'),
+        ));
+
+        $item = $service->handle($message);
+
+        $this->assertSame($existing->id, $item->id);
+        Queue::assertPushed(ProcessRemovalRequestEmail::class, 1);
+    }
+
+    public function test_non_unique_query_exception_is_not_treated_as_a_race(): void
+    {
+        Queue::fake();
+        $message = $this->removalRequestMessage();
+        IntegrationInboxItem::factory()->create([
+            'source' => 'microsoft_graph',
+            'external_id' => $message['external_id'],
+            'message_type' => 'removal_request',
+            'status' => 'queued',
+        ]);
+        $exception = new QueryException(
+            'sqlite',
+            'insert into integration_inbox_items',
+            [],
+            new \RuntimeException('constraint failure'),
+        );
+        $service = $this->raceService($exception);
+
+        $this->expectException(QueryException::class);
+        $service->handle($message);
+    }
+
     public function test_replies_other_senders_and_irrelevant_subjects_are_ignored(): void
     {
         Queue::fake();
@@ -174,5 +259,45 @@ class RemovalRequestMessageRouterTest extends TestCase
             'body' => 'Corpo inválido para revisão.',
             'receivedDateTime' => '2026-08-13T17:52:00-03:00',
         ];
+    }
+
+    private function raceService(QueryException $exception): QueueRemovalRequestEmail
+    {
+        $subjectParser = app(\App\Services\MicrosoftGraph\RemovalRequests\RemovalRequestSubjectParser::class);
+        $bodyParser = app(\App\Services\MicrosoftGraph\RemovalRequests\RemovalRequestBodyParser::class);
+        $dispatcher = app(Dispatcher::class);
+
+        return new class($subjectParser, $bodyParser, $dispatcher, $exception) extends QueueRemovalRequestEmail
+        {
+            private bool $firstLookup = true;
+
+            public function __construct(
+                $subjectParser,
+                $bodyParser,
+                $dispatcher,
+                private readonly QueryException $exception,
+            ) {
+                parent::__construct($subjectParser, $bodyParser, $dispatcher);
+            }
+
+            protected function findItem(string $externalId): ?IntegrationInboxItem
+            {
+                if ($this->firstLookup) {
+                    $this->firstLookup = false;
+
+                    return null;
+                }
+
+                return IntegrationInboxItem::query()
+                    ->where('source', 'microsoft_graph')
+                    ->where('external_id', $externalId)
+                    ->first();
+            }
+
+            protected function createItem(array $attributes): IntegrationInboxItem
+            {
+                throw $this->exception;
+            }
+        };
     }
 }

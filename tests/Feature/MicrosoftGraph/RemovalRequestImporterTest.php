@@ -170,14 +170,26 @@ class RemovalRequestImporterTest extends TestCase
         }
     }
 
-    public function test_different_or_missing_hash_requires_task7_update_without_upload(): void
+    #[DataProvider('pdfDifferenceProvider')]
+    public function test_pdf_difference_requires_task7_update_and_persists_pdf_evidence(?string $currentHash): void
     {
         Storage::fake('s3');
         $pdf = $this->pdf();
         $register = Register::factory()->create([
+            'vehicle_model' => 'FIAT ARGO 1.3',
             'vehicle_id' => '1156340',
             'vehicle_plate' => 'ABC1D23',
-            'pdf_sha256' => null,
+            'origin_city' => 'São Paulo',
+            'destination_city' => 'Pirapora',
+            'deadline_withdraw' => '2026-08-26',
+            'deadline_delivery' => '2026-09-03',
+            'value' => '500.00',
+            'insurance' => 'ALLIANZ SEGUROS SA',
+            'fipe_value' => '43897.00',
+            'payment_code' => 'T691299',
+            'notes' => 'Telefones Origem: 11 99999 1111 / 11 98888 2222',
+            'pdf_path' => 'registros/copart/1156340/old/CartaDeRemoção ABC1D23.pdf',
+            'pdf_sha256' => $currentHash,
         ]);
         $item = $this->item();
 
@@ -187,11 +199,28 @@ class RemovalRequestImporterTest extends TestCase
             $this->assertSame('update_required', $result->failure_reason);
             $this->assertSame('pending', $result->status);
             $this->assertSame($register->id, $result->register_id);
-            $this->assertNotEmpty($result->proposed_changes);
+            $this->assertSame([
+                'current' => [
+                    'path' => $register->pdf_path,
+                    'sha256' => $currentHash,
+                ],
+                'proposed' => [
+                    'file_name' => $pdf->fileName,
+                    'sha256' => $pdf->sha256,
+                ],
+            ], $result->proposed_changes['pdf_path']);
             $this->assertSame([], Storage::disk('s3')->allFiles());
         } finally {
             @unlink($pdf->temporaryPath);
         }
+    }
+
+    public static function pdfDifferenceProvider(): array
+    {
+        return [
+            'different hash' => [str_repeat('a', 64)],
+            'missing hash' => [null],
+        ];
     }
 
     public function test_it_preserves_manual_notes_and_does_not_duplicate_phone_line(): void

@@ -6,9 +6,11 @@ use App\Models\MicrosoftGraphConnection;
 use App\Services\MicrosoftGraph\MicrosoftGraphClient;
 use DomainException;
 use GuzzleHttp\Psr7\FnStream;
+use Illuminate\Database\Events\QueryExecuted;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\Client\Request;
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
 use Tests\TestCase;
 
@@ -289,10 +291,19 @@ class MicrosoftGraphClientTest extends TestCase
             'https://graph.microsoft.com/*' => Http::response(['value' => []]),
         ]);
 
+        $reloadQueries = [];
+        DB::listen(function (QueryExecuted $query) use (&$reloadQueries): void {
+            if (str_contains($query->sql, 'microsoft_graph_connections') && str_starts_with(strtolower(trim($query->sql)), 'select')) {
+                $reloadQueries[] = $query->sql;
+            }
+        });
+
         app(MicrosoftGraphClient::class)->fetchNewMessages($firstStale);
         app(MicrosoftGraphClient::class)->fetchNewMessages($secondStale);
 
         Http::assertSentCount(3);
+        $this->assertCount(2, $reloadQueries);
+        $this->assertStringContainsString('where "microsoft_graph_connections"."id" = ?', strtolower($reloadQueries[0]));
         $this->assertSame('new-access-token', $stored->refresh()->access_token);
         $this->assertSame('new-refresh-token', $stored->refresh()->refresh_token);
     }
