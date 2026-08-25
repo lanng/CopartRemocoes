@@ -210,6 +210,45 @@ class IntegrationInboxItemResourceTest extends TestCase
         $this->assertFalse($resolveAction->record($processed)->isVisible());
     }
 
+    public function test_it_exposes_removal_request_review_actions_without_using_checklist_reconciliation(): void
+    {
+        $pending = IntegrationInboxItem::factory()->create([
+            'message_type' => 'removal_request',
+            'status' => 'pending',
+            'proposed_changes' => [
+                'destination_city' => ['current' => 'Pirapora', 'proposed' => 'Jundiaí'],
+            ],
+        ]);
+        $alert = IntegrationInboxItem::factory()->create([
+            'message_type' => 'removal_request',
+            'status' => 'alert',
+            'alerts' => ['zero_fipe'],
+        ]);
+        $table = Livewire::test(ListIntegrationInboxItems::class)->instance()->getTable();
+
+        $this->assertTrue($table->getAction('reviewRemovalRequest')->record($pending)->isVisible());
+        $this->assertFalse($table->getAction('resolve')->record($pending)->isVisible());
+        $this->assertTrue($table->getAction('acknowledgeRemovalAlert')->record($alert)->isVisible());
+        $this->assertSame(['FIPE zerada'], $alert->removalAlertLabels());
+    }
+
+    public function test_it_displays_proposed_removal_changes_in_the_item_view(): void
+    {
+        $item = IntegrationInboxItem::factory()->create([
+            'message_type' => 'removal_request',
+            'status' => 'pending',
+            'proposed_changes' => [
+                'destination_city' => ['current' => 'Pirapora', 'proposed' => 'Jundiaí'],
+            ],
+        ]);
+
+        Livewire::test(ViewIntegrationInboxItem::class, ['record' => $item->getRouteKey()])
+            ->assertSee('Alterações propostas')
+            ->assertSee('Cidade de destino')
+            ->assertSee('Pirapora')
+            ->assertSee('Jundiaí');
+    }
+
     public function test_it_sorts_by_received_at_in_both_directions(): void
     {
         $oldest = IntegrationInboxItem::factory()->create([

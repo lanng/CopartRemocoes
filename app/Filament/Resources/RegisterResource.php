@@ -334,6 +334,15 @@ class RegisterResource extends Resource
                             ->label('Data da entrega')
                             ->content(fn (?Register $record): string => $record?->delivery_confirmed_at?->timezone('America/Sao_Paulo')->format('d/m/Y H:i') ?? 'Não informado'),
                     ]),
+                Section::make('Revisão de integração')
+                    ->visibleOn('view')
+                    ->schema([
+                        Placeholder::make('removal_import_attention')
+                            ->label('Situação')
+                            ->content(fn (?Register $record): string => $record?->unresolvedRemovalImports()->exists()
+                                ? 'Há uma revisão de e-mail pendente para este registro.'
+                                : 'Nenhuma revisão de e-mail pendente.'),
+                    ]),
             ]);
     }
 
@@ -384,6 +393,18 @@ class RegisterResource extends Resource
                             ->formatStateUsing(fn (RegisterStatusEnum $state): string => $state->localizedLabel())
                             ->sortable()
                             ->searchable(),
+                        TextColumn::make('unresolved_removal_imports_exists')
+                            ->label('Integração')
+                            ->state(fn (Register $record): ?string => $record->unresolved_removal_imports_exists ? 'Revisão pendente' : null)
+                            ->icon('heroicon-o-exclamation-triangle')
+                            ->color('warning')
+                            ->url(function (Register $record): ?string {
+                                $item = $record->getRelation('unresolvedRemovalImports')->first();
+
+                                return $item === null
+                                    ? null
+                                    : IntegrationInboxItemResource::getUrl('view', ['record' => $item]);
+                            }),
                     ]),
 
                     Stack::make([
@@ -516,6 +537,10 @@ class RegisterResource extends Resource
                         ->deselectRecordsAfterCompletion(),
                 ])->label('Ações em massa'),
             ])->modifyQueryUsing(function (Builder $query) {
+                $query
+                    ->withExists('unresolvedRemovalImports')
+                    ->with('unresolvedRemovalImports:id,register_id');
+
                 $query->orderByRaw("
                     CASE status
                         WHEN 'pending' THEN 1

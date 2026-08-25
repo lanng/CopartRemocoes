@@ -41,6 +41,63 @@ class IntegrationInboxItem extends Model
         return $this->message_type === 'removal_request';
     }
 
+    public function messageTypeLabel(): string
+    {
+        return match ($this->message_type) {
+            'removal_request' => 'Pedido de remoção',
+            'checklist' => 'Checklist digital',
+            default => $this->message_type,
+        };
+    }
+
+    public function removalAlertLabels(): array
+    {
+        return collect($this->alerts ?? [])
+            ->map(fn (string $alert): string => match ($alert) {
+                'freight_changed' => 'Frete alterado',
+                'zero_fipe' => 'FIPE zerada',
+                default => $alert,
+            })
+            ->values()
+            ->all();
+    }
+
+    public function hasRemovalAlert(): bool
+    {
+        return $this->removalAlertLabels() !== [];
+    }
+
+    public function removalAlertColor(): string
+    {
+        return $this->hasRemovalAlert() ? 'warning' : 'gray';
+    }
+
+    /** @return list<array{field: string, current: mixed, proposed: mixed}> */
+    public function proposedChangesForDisplay(): array
+    {
+        return collect($this->proposed_changes ?? [])
+            ->map(fn (array $change, string $field): array => [
+                'field' => match ($field) {
+                    'vehicle_model' => 'Veículo',
+                    'origin_city' => 'Cidade de origem',
+                    'destination_city' => 'Cidade de destino',
+                    'deadline_withdraw' => 'Data limite de retirada',
+                    'deadline_delivery' => 'Data limite de entrega',
+                    'value' => 'Frete',
+                    'insurance' => 'Seguradora',
+                    'fipe_value' => 'FIPE',
+                    'payment_code' => 'Código de pagamento',
+                    'notes' => 'Observações',
+                    'pdf_path' => 'PDF',
+                    default => $field,
+                },
+                'current' => $change['current'] ?? null,
+                'proposed' => $change['proposed'] ?? null,
+            ])
+            ->values()
+            ->all();
+    }
+
     public function register(): BelongsTo
     {
         return $this->belongsTo(Register::class);

@@ -6,6 +6,7 @@ use App\Enums\CteDocumentStatusEnum;
 use App\Filament\Resources\RegisterResource\Pages\ListRegisters;
 use App\Filament\Resources\RegisterResource\Pages\ViewRegister;
 use App\Models\CteDocument;
+use App\Models\IntegrationInboxItem;
 use App\Models\Register;
 use App\Models\User;
 use Filament\Facades\Filament;
@@ -108,5 +109,20 @@ class RegisterResourceTest extends TestCase
             ->assertSee('Emissão do CT-e')
             ->assertSee('Data da entrega')
             ->assertSee('Não informado');
+    }
+
+    public function test_register_list_and_view_show_unresolved_removal_imports(): void
+    {
+        $register = Register::factory()->create();
+        $item = IntegrationInboxItem::factory()->create([
+            'message_type' => 'removal_request',
+            'status' => 'pending',
+            'register_id' => $register->id,
+        ]);
+
+        Livewire::test(ListRegisters::class)
+            ->assertSee('Revisão pendente');
+
+        $this->assertTrue($register->unresolvedRemovalImports()->whereKey($item->id)->exists());
     }
 }
