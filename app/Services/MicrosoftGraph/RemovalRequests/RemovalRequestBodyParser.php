@@ -4,6 +4,8 @@ namespace App\Services\MicrosoftGraph\RemovalRequests;
 
 class RemovalRequestBodyParser
 {
+    private const FIELD_BOUNDARY = '(?:;|$|remetente\b|destinat[áa]rio\b|p[aá]tio\b|valor\b|data\b|c[oó]digo\b)';
+
     /**
      * @return array{valid: bool, data: array<string, string>, missing_fields: list<string>}
      */
@@ -48,7 +50,7 @@ class RemovalRequestBodyParser
             $data['value'] = $value;
         }
 
-        if (preg_match('~data\s+para\s+retirar\s+o\s+ve[ií]culo\s+da\s+oficina\s*:?\s*(\d{1,2}[/-]\d{1,2}[/-]\d{4}|\d{4}-\d{1,2}-\d{1,2})~iu', $body, $matches)) {
+        if (preg_match('~data\s+para\s+retirar\s+o\s+ve[ií]culo\s+da\s+oficina\s*:?\s*(\d{1,2}[/-]\d{1,2}[/-]\d{4}|\d{4}-\d{1,2}-\d{1,2})(?=\s*'.self::FIELD_BOUNDARY.')~iu', $body, $matches)) {
             $value = $normalizer->date($matches[1]);
 
             if ($value !== null) {
@@ -56,7 +58,7 @@ class RemovalRequestBodyParser
             }
         }
 
-        if (preg_match('~data\s+limite\s+de\s+entrega\s+no\s+p[aá]tio\s*:?\s*(\d{1,2}[/-]\d{1,2}[/-]\d{4}|\d{4}-\d{1,2}-\d{1,2})~iu', $body, $matches)) {
+        if (preg_match('~data\s+limite\s+de\s+entrega\s+no\s+p[aá]tio\s*:?\s*(\d{1,2}[/-]\d{1,2}[/-]\d{4}|\d{4}-\d{1,2}-\d{1,2})(?=\s*'.self::FIELD_BOUNDARY.')~iu', $body, $matches)) {
             $value = $normalizer->date($matches[1]);
 
             if ($value !== null) {
@@ -64,7 +66,7 @@ class RemovalRequestBodyParser
             }
         }
 
-        if (preg_match('~c[oó]digo\s+(?:do\s+)?ve[ií]culo\s*:?\s*(\d+)~iu', $body, $matches)) {
+        if (preg_match('~c[oó]digo\s+(?:do\s+)?ve[ií]culo\s*:?\s*(\d+)(?=\s*'.self::FIELD_BOUNDARY.')~iu', $body, $matches)) {
             $data['vehicle_id'] = $normalizer->identifier($matches[1]);
         }
 
@@ -93,7 +95,7 @@ class RemovalRequestBodyParser
     private function extractMoney(string $body, string $labelPattern, RemovalRequestNormalizer $normalizer): ?string
     {
         if (! preg_match(
-            '~'.$labelPattern.'\s*:?\s*(?:r\$\s*)?([^\s;]+)(?=\s*(?:;|$|remetente\b|destinat[áa]rio\b|p[aá]tio\b|valor\b|data\b|c[oó]digo\b))~iu',
+            '~'.$labelPattern.'\s*:?\s*(?:r\$\s*)?([^\s;]+)(?=\s*'.self::FIELD_BOUNDARY.')~iu',
             $body,
             $matches
         )) {

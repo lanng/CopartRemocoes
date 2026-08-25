@@ -90,6 +90,18 @@ class RemovalRequestBodyParserTest extends TestCase
         $this->assertSame([$field], $result['missing_fields']);
     }
 
+    #[DataProvider('invalidSuffixProvider')]
+    public function test_it_rejects_fields_with_invalid_suffixes(string $field, string $line): void
+    {
+        $result = (new RemovalRequestBodyParser)->parse(
+            str_replace($this->fieldLineFor($field), $line, $this->bodyWithAllFields())
+        );
+
+        $this->assertFalse($result['valid']);
+        $this->assertArrayNotHasKey($field, $result['data']);
+        $this->assertSame([$field], $result['missing_fields']);
+    }
+
     /**
      * @return array<string, array{string, string}>
      */
@@ -133,11 +145,32 @@ class RemovalRequestBodyParserTest extends TestCase
         ];
     }
 
+    /**
+     * @return array<string, array{string, string}>
+     */
+    public static function invalidSuffixProvider(): array
+    {
+        return [
+            'withdraw date suffix' => ['deadline_withdraw', 'Data para retirar o veículo da oficina 26/08/2026xyz'],
+            'delivery date suffix' => ['deadline_delivery', 'Data limite de entrega no pátio 03/09/2026xyz'],
+            'vehicle id suffix' => ['vehicle_id', 'Código veículo 1156340abc'],
+        ];
+    }
+
     private function monetaryLineFor(string $field): string
     {
         return $field === 'fipe_value'
             ? 'Valor da FIPE: R$ 56.739,00;'
             : 'Valor frete R$ 866,48;';
+    }
+
+    private function fieldLineFor(string $field): string
+    {
+        return match ($field) {
+            'deadline_withdraw' => 'Data para retirar o veículo da oficina 26/08/2026',
+            'deadline_delivery' => 'Data limite de entrega no pátio 03/09/2026',
+            'vehicle_id' => 'Código veículo 1156340',
+        };
     }
 
     private function bodyWithAllFields(): string
