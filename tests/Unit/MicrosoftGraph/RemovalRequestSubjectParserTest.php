@@ -24,7 +24,7 @@ class RemovalRequestSubjectParserTest extends TestCase
     public function test_it_parses_a_valid_mercosul_plate_with_flexible_spacing(): void
     {
         $result = (new RemovalRequestSubjectParser)->parse(
-            "  pedido   DE remoção\t-  abc1d23 - 1156340 - Allianz Seguros SA  "
+            "  pedido   DE remoção\t-  abc1d23 - 1156340 - Allianz\t   Seguros SA  "
         );
 
         $this->assertSame('ABC1D23', $result['vehicle_plate']);
@@ -51,6 +51,7 @@ class RemovalRequestSubjectParserTest extends TestCase
             'missing insurance' => ['Pedido de Remoção - FSG5551 - 1156340 -'],
             'punctuation-only hyphen insurance' => ['Pedido de Remoção - FSG5551 - 1156340 - -'],
             'punctuation-only slash insurance' => ['Pedido de Remoção - FSG5551 - 1156340 - /'],
+            'multiline insurance' => ["Pedido de Remoção - FSG5551 - 1156340 - Allianz\nSeguros"],
             'missing vehicle id' => ['Pedido de Remoção - FSG5551 - - Allianz'],
             'old plate with wrong length' => ['Pedido de Remoção - FSG555 - 1156340 - Allianz'],
             'plate with invalid character' => ['Pedido de Remoção - FSG@551 - 1156340 - Allianz'],

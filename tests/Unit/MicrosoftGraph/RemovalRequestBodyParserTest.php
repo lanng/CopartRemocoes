@@ -66,12 +66,10 @@ class RemovalRequestBodyParserTest extends TestCase
     }
 
     #[DataProvider('invalidDateProvider')]
-    public function test_it_treats_invalid_dates_as_missing_without_throwing(string $field, string $line): void
+    public function test_it_treats_invalid_dates_as_missing_without_throwing(string $field, string $line, string $replacement): void
     {
         $result = (new RemovalRequestBodyParser)->parse(
-            str_replace($line, $field === 'deadline_withdraw'
-                ? 'Data para retirar o veículo da oficina 31/02/2026'
-                : 'Data limite de entrega no pátio 31/02/2026', $this->bodyWithAllFields())
+            str_replace($line, $replacement, $this->bodyWithAllFields())
         );
 
         $this->assertFalse($result['valid']);
@@ -120,13 +118,15 @@ class RemovalRequestBodyParserTest extends TestCase
     }
 
     /**
-     * @return array<string, array{string, string}>
+     * @return array<string, array{string, string, string}>
      */
     public static function invalidDateProvider(): array
     {
         return [
-            'withdraw deadline' => ['deadline_withdraw', 'Data para retirar o veículo da oficina 26/08/2026'],
-            'delivery deadline' => ['deadline_delivery', 'Data limite de entrega no pátio 03/09/2026'],
+            'withdraw invalid calendar date' => ['deadline_withdraw', 'Data para retirar o veículo da oficina 26/08/2026', 'Data para retirar o veículo da oficina 31/02/2026'],
+            'delivery invalid calendar date' => ['deadline_delivery', 'Data limite de entrega no pátio 03/09/2026', 'Data limite de entrega no pátio 31/02/2026'],
+            'withdraw single-digit date' => ['deadline_withdraw', 'Data para retirar o veículo da oficina 26/08/2026', 'Data para retirar o veículo da oficina 1/2/2026'],
+            'delivery single-digit date' => ['deadline_delivery', 'Data limite de entrega no pátio 03/09/2026', 'Data limite de entrega no pátio 1/2/2026'],
         ];
     }
 

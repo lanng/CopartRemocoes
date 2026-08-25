@@ -9,8 +9,12 @@ class RemovalRequestSubjectParser
      */
     public function parse(string $subject): ?array
     {
+        if (strpbrk($subject, "\r\n") !== false) {
+            return null;
+        }
+
         if (! preg_match(
-            '~^\s*Pedido\s+de\s+Remoção\s*-\s*([A-Z]{3}(?:-?[0-9]{4}|-?[0-9][A-Z][0-9]{2}))\s*-\s*(\d+)\s*-\s*(\S(?:.*?\S)?)\s*$~isu',
+            '~^\s*Pedido\s+de\s+Remoção\s*-\s*([A-Z]{3}(?:-?[0-9]{4}|-?[0-9][A-Z][0-9]{2}))\s*-\s*(\d+)\s*-\s*(\S(?:.*?\S)?)\s*$~iu',
             $subject,
             $matches
         )) {
@@ -18,15 +22,16 @@ class RemovalRequestSubjectParser
         }
 
         $normalizer = new RemovalRequestNormalizer;
+        $insurance = $normalizer->text($matches[3]);
 
-        if (! preg_match('/[\p{L}\p{N}]/u', $matches[3])) {
+        if ($insurance === null || ! preg_match('/[\p{L}\p{N}]/u', $insurance)) {
             return null;
         }
 
         return [
             'vehicle_plate' => (string) $normalizer->plate($matches[1]),
             'vehicle_id' => trim($matches[2]),
-            'insurance' => trim($matches[3]),
+            'insurance' => $insurance,
         ];
     }
 }

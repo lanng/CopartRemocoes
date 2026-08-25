@@ -50,20 +50,16 @@ class RemovalRequestBodyParser
             $data['value'] = $value;
         }
 
-        if (preg_match('~data\s+para\s+retirar\s+o\s+ve[ií]culo\s+da\s+oficina\s*:?\s*(\d{1,2}[/-]\d{1,2}[/-]\d{4}|\d{4}-\d{1,2}-\d{1,2})(?=\s*'.self::FIELD_BOUNDARY.')~iu', $body, $matches)) {
-            $value = $normalizer->date($matches[1]);
+        $value = $this->extractDate($body, 'data\s+para\s+retirar\s+o\s+ve[ií]culo\s+da\s+oficina', $normalizer);
 
-            if ($value !== null) {
-                $data['deadline_withdraw'] = $value;
-            }
+        if ($value !== null) {
+            $data['deadline_withdraw'] = $value;
         }
 
-        if (preg_match('~data\s+limite\s+de\s+entrega\s+no\s+p[aá]tio\s*:?\s*(\d{1,2}[/-]\d{1,2}[/-]\d{4}|\d{4}-\d{1,2}-\d{1,2})(?=\s*'.self::FIELD_BOUNDARY.')~iu', $body, $matches)) {
-            $value = $normalizer->date($matches[1]);
+        $value = $this->extractDate($body, 'data\s+limite\s+de\s+entrega\s+no\s+p[aá]tio', $normalizer);
 
-            if ($value !== null) {
-                $data['deadline_delivery'] = $value;
-            }
+        if ($value !== null) {
+            $data['deadline_delivery'] = $value;
         }
 
         if (preg_match('~c[oó]digo\s+(?:do\s+)?ve[ií]culo\s*:?\s*(\d+)(?=\s*'.self::FIELD_BOUNDARY.')~iu', $body, $matches)) {
@@ -103,5 +99,18 @@ class RemovalRequestBodyParser
         }
 
         return $normalizer->decimal($matches[1]);
+    }
+
+    private function extractDate(string $body, string $labelPattern, RemovalRequestNormalizer $normalizer): ?string
+    {
+        if (! preg_match(
+            '~'.$labelPattern.'\s*:?\s*(\d{2}[/-]\d{2}[/-]\d{4}|\d{4}-\d{2}-\d{2})(?=\s*'.self::FIELD_BOUNDARY.')~iu',
+            $body,
+            $matches
+        )) {
+            return null;
+        }
+
+        return $normalizer->date($matches[1]);
     }
 }
