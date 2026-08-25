@@ -143,6 +143,8 @@ class RemovalRequestBodyParserTest extends TestCase
             'junk after value' => ['value', 'Valor frete R$ 866.48abc;'],
             'text after value' => ['value', 'Valor frete R$ 866,48 inválido;'],
             'keyword text after value' => ['value', 'Valor frete R$ 866,48 data inválido;'],
+            'date label text after value' => ['value', 'Valor frete R$ 866,48 data para retirar inválido;'],
+            'vehicle label text after value' => ['value', 'Valor frete R$ 866,48 código veículo inválido;'],
             'negative freight' => ['value', 'Valor frete R$ -866,48;'],
             'negative fipe' => ['fipe_value', 'Valor da FIPE: R$ -56.739,00;'],
         ];

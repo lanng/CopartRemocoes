@@ -92,7 +92,7 @@ class RemovalRequestBodyParser
     private function extractMoney(string $body, string $labelPattern, RemovalRequestNormalizer $normalizer): ?string
     {
         if (! preg_match(
-            '~'.$labelPattern.'\s*:?\s*(?:r\$\s*)?([^\s;]+)(?=[ \t]*'.self::FIELD_BOUNDARY.')~iu',
+            '~'.$labelPattern.'[ \t]*:?[ \t]*(?:r\$[ \t]*)?([^;\r\n]*?)(?:;|\r?\n|\z)~iu',
             $body,
             $matches
         )) {

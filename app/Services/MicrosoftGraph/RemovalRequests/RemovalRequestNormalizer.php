@@ -49,12 +49,16 @@ class RemovalRequestNormalizer
             return null;
         }
 
-        $transliterated = Str::ascii($value);
-        $containsNonLatin = preg_match('/[^\p{Latin}\p{N}\p{P}\p{S}\p{Z}]/u', $value) === 1;
+        $value = preg_replace_callback('/\S+/u', function (array $matches): string {
+            $token = $matches[0];
+            $transliterated = Str::ascii($token);
+            $containsNonLatin = preg_match('/[^\p{Latin}\p{N}\p{P}\p{S}\p{Z}]/u', $token) === 1;
 
-        if (! $containsNonLatin && preg_match('/[\p{L}\p{N}]/u', $transliterated) === 1) {
-            $value = $transliterated;
-        }
+            return ! $containsNonLatin && preg_match('/[\p{L}\p{N}]/u', $transliterated) === 1
+                ? $transliterated
+                : $token;
+        }, $value);
+        $value = (string) $value;
 
         $value = mb_strtoupper($value, 'UTF-8');
         $value = preg_replace('/[^\p{L}\p{N}\s]/u', '', $value);
@@ -77,15 +81,7 @@ class RemovalRequestNormalizer
                 return null;
             }
 
-            $normalized = rtrim(rtrim(sprintf('%.15f', $value), '0'), '.');
-
-            $decimalSeparatorPosition = strpos($normalized, '.');
-
-            if ($decimalSeparatorPosition !== false && strlen($normalized) - $decimalSeparatorPosition - 1 > 2) {
-                return null;
-            }
-
-            return number_format($value, 2, '.', '');
+            $value = (string) $value;
         }
 
         $value = trim(str_replace("\xC2\xA0", ' ', $value));

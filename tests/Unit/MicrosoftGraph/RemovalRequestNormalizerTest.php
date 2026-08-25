@@ -26,6 +26,7 @@ class RemovalRequestNormalizerTest extends TestCase
         $this->assertSame('ALLIANZ SEGUROS SA', $normalizer->insurance(' Allianz Seguros S/A '));
         $this->assertSame('SEGURADORA AGIL', $normalizer->insurance('Seguradora Ágil'));
         $this->assertSame('LODZ', $normalizer->insurance('Łódź'));
+        $this->assertSame('A 東京', $normalizer->insurance('Á 東京'));
         $this->assertSame('東京海上', $normalizer->insurance('東京海上'));
         $this->assertSame('ΑΣΦΑΛΙΣΤΙΚΉ', $normalizer->insurance('Ασφαλιστική'));
         $this->assertNull($normalizer->insurance(' / '));
@@ -47,6 +48,7 @@ class RemovalRequestNormalizerTest extends TestCase
             'brazilian freight' => ['R$ 866,48', '866.48'],
             'already decimal' => ['866.48', '866.48'],
             'one decimal place' => ['1234.5', '1234.50'],
+            'float with two decimal places' => [1234.56, '1234.56'],
             'brazilian grouped amount' => ['1.234.567,8', '1234567.80'],
             'large string amount' => ['12345678901234567890.12', '12345678901234567890.12'],
             'integer' => [42, '42.00'],
@@ -117,6 +119,7 @@ class RemovalRequestNormalizerTest extends TestCase
             'identifier whitespace' => ['vehicle_id', ' 1156340 ', '1156340', true],
             'insurance punctuation and case' => ['insurance', 'ALLIANZ SEGUROS S/A', 'Allianz Seguros SA', true],
             'transliterated insurance' => ['insurance', 'Łódź', 'Lodz', true],
+            'mixed script insurance' => ['insurance', 'Á 東京', 'A 東京', true],
             'different insurance' => ['insurance', 'ALLIANZ SEGUROS SA', 'TOKIO MARINE', false],
             'freight decimal formats' => ['value', '866,48', '866.48', true],
             'fipe decimal formats' => ['fipe_value', '56.739,00', '56739.00', true],
