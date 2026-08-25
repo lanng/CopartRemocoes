@@ -66,6 +66,7 @@ class RemovalRequestMessageRouterTest extends TestCase
         });
 
         $this->assertDatabaseCount('integration_inbox_items', 1);
+        Queue::assertPushed(ProcessRemovalRequestEmail::class, 1);
         Queue::assertPushed(ProcessRemovalRequestEmail::class, function (ProcessRemovalRequestEmail $job) use ($itemId): bool {
             return $job->integrationInboxItemId === $itemId;
         });
