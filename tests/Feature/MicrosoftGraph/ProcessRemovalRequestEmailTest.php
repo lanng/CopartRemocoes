@@ -9,6 +9,7 @@ use App\Services\MicrosoftGraph\RemovalRequests\RemovalRequestPdfStorage;
 use App\Services\PdfExtractorService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\Client\RequestException;
+use Illuminate\Support\Env;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Process;
 use Illuminate\Support\Facades\Storage;
@@ -21,10 +22,10 @@ class ProcessRemovalRequestEmailTest extends TestCase
 {
     use RefreshDatabase;
 
-    public function test_it_prepares_a_pdf_with_extracted_data_hash_and_normalized_filename(): void
+    public function test_it_accepts_metadata_and_bytes_exactly_at_the_configured_limit(): void
     {
-        config(['services.removal_requests.max_pdf_bytes' => 16]);
         $bytes = '%PDF-1.7';
+        config(['services.removal_requests.max_pdf_bytes' => strlen($bytes)]);
         $this->fakeGraph([$this->attachment(['size' => strlen($bytes)])], $bytes);
         Process::fake(fn () => Process::result($this->fixtureText()));
 
@@ -39,6 +40,51 @@ class ProcessRemovalRequestEmailTest extends TestCase
             $this->assertSame('1156340', $pdf->extractedData['vehicle_id']);
         } finally {
             @unlink($pdf->temporaryPath);
+        }
+    }
+
+    public function test_it_uses_the_ten_megabyte_default_when_the_pdf_limit_environment_variable_is_absent(): void
+    {
+        $environmentKey = 'REMOVAL_REQUEST_PDF_MAX_BYTES';
+        $getenvValue = getenv($environmentKey);
+        $hasEnvValue = array_key_exists($environmentKey, $_ENV);
+        $envValue = $_ENV[$environmentKey] ?? null;
+        $hasServerValue = array_key_exists($environmentKey, $_SERVER);
+        $serverValue = $_SERVER[$environmentKey] ?? null;
+        $configuredValue = config('services.removal_requests.max_pdf_bytes');
+
+        try {
+            putenv($environmentKey);
+            unset($_ENV[$environmentKey], $_SERVER[$environmentKey]);
+            Env::enablePutenv();
+
+            $services = require base_path('config/services.php');
+            $envExample = file_get_contents(base_path('.env.example'));
+
+            $this->assertSame(10 * 1024 * 1024, $services['removal_requests']['max_pdf_bytes']);
+            $this->assertIsString($envExample);
+            $this->assertStringContainsString($environmentKey.'=10485760', $envExample);
+        } finally {
+            if ($getenvValue === false) {
+                putenv($environmentKey);
+            } else {
+                putenv($environmentKey.'='.$getenvValue);
+            }
+
+            if ($hasEnvValue) {
+                $_ENV[$environmentKey] = $envValue;
+            } else {
+                unset($_ENV[$environmentKey]);
+            }
+
+            if ($hasServerValue) {
+                $_SERVER[$environmentKey] = $serverValue;
+            } else {
+                unset($_SERVER[$environmentKey]);
+            }
+
+            Env::enablePutenv();
+            config(['services.removal_requests.max_pdf_bytes' => $configuredValue]);
         }
     }
 
