@@ -43,7 +43,9 @@ class QueueRemovalRequestEmail
             );
 
             if ($item->wasRecentlyCreated) {
-                ProcessRemovalRequestEmail::dispatch($item->id)->afterCommit();
+                DB::afterCommit(function () use ($item): void {
+                    ProcessRemovalRequestEmail::dispatch($item->id)->afterCommit();
+                });
             }
 
             return $item;

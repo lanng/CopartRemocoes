@@ -5,6 +5,7 @@ namespace Tests\Feature\MicrosoftGraph;
 use App\Jobs\ProcessRemovalRequestEmail;
 use App\Services\MicrosoftGraph\RemovalRequests\RemovalRequestMessageRouter;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Queue;
 use Tests\TestCase;
 
@@ -49,6 +50,45 @@ class RemovalRequestMessageRouterTest extends TestCase
         $this->assertNotEmpty($item->extracted_data['body_missing_fields']);
         $this->assertSame([], $item->extracted_data['body']);
         Queue::assertPushed(ProcessRemovalRequestEmail::class, 1);
+    }
+
+    public function test_it_dispatches_only_after_the_outer_transaction_commits(): void
+    {
+        Queue::fake();
+        $message = $this->removalRequestMessage();
+        $itemId = null;
+
+        DB::transaction(function () use ($message, &$itemId): void {
+            $itemId = app(RemovalRequestMessageRouter::class)->handle($message)->id;
+
+            $this->assertDatabaseCount('integration_inbox_items', 1);
+            Queue::assertNothingPushed();
+        });
+
+        $this->assertDatabaseCount('integration_inbox_items', 1);
+        Queue::assertPushed(ProcessRemovalRequestEmail::class, function (ProcessRemovalRequestEmail $job) use ($itemId): bool {
+            return $job->integrationInboxItemId === $itemId;
+        });
+    }
+
+    public function test_it_does_not_persist_or_dispatch_when_the_outer_transaction_rolls_back(): void
+    {
+        Queue::fake();
+        $message = $this->removalRequestMessage();
+
+        try {
+            DB::transaction(function () use ($message): void {
+                app(RemovalRequestMessageRouter::class)->handle($message);
+
+                throw new \RuntimeException('rollback removal request');
+            });
+            $this->fail('The transaction should have rolled back.');
+        } catch (\RuntimeException $exception) {
+            $this->assertSame('rollback removal request', $exception->getMessage());
+        }
+
+        $this->assertDatabaseCount('integration_inbox_items', 0);
+        Queue::assertNothingPushed();
     }
 
     public function test_replies_other_senders_and_irrelevant_subjects_are_ignored(): void

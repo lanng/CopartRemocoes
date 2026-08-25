@@ -43,6 +43,7 @@ class MicrosoftGraphClientTest extends TestCase
 
             return str_starts_with($request->url(), 'https://graph.microsoft.com/v1.0/me/mailFolders/inbox/messages?')
                 && $request->header('Prefer') === ['IdType="ImmutableId", outlook.body-content-type="text"']
+                && $query['$select'] === 'id,subject,sender,receivedDateTime,body,hasAttachments'
                 && $query['$top'] === '50'
                 && $query['$orderby'] === 'receivedDateTime asc'
                 && $query['$filter'] === 'receivedDateTime gt 2026-08-13T20:50:00Z';
