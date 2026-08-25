@@ -4,21 +4,15 @@ namespace App\Services\MicrosoftGraph\RemovalRequests;
 
 use App\Jobs\ProcessRemovalRequestEmail;
 use App\Models\IntegrationInboxItem;
-use Illuminate\Contracts\Bus\Dispatcher;
 use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Support\Carbon;
-use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
-use Throwable;
 
 class QueueRemovalRequestEmail
 {
-    private const DISPATCH_TTL = 900;
-
     public function __construct(
         private readonly RemovalRequestSubjectParser $subjectParser,
         private readonly RemovalRequestBodyParser $bodyParser,
-        private readonly Dispatcher $dispatcher,
     ) {}
 
     /** @param array<string, mixed> $message */
@@ -74,21 +68,7 @@ class QueueRemovalRequestEmail
         }
 
         DB::afterCommit(function () use ($item): void {
-            $cacheKey = 'removal-request-dispatch:'.$item->id;
-
-            if (! Cache::add($cacheKey, true, self::DISPATCH_TTL)) {
-                return;
-            }
-
-            try {
-                $job = new ProcessRemovalRequestEmail($item->id);
-                $job->afterCommit();
-                $this->dispatcher->dispatch($job);
-            } catch (Throwable $exception) {
-                Cache::forget($cacheKey);
-
-                throw $exception;
-            }
+            ProcessRemovalRequestEmail::dispatch($item->id)->afterCommit();
         });
     }
 

@@ -6,6 +6,7 @@ use App\Jobs\ProcessRemovalRequestEmail;
 use App\Models\IntegrationInboxItem;
 use App\Services\MicrosoftGraph\RemovalRequests\QueueRemovalRequestEmail;
 use App\Services\MicrosoftGraph\RemovalRequests\RemovalRequestMessageRouter;
+use Illuminate\Bus\UniqueLock;
 use Illuminate\Contracts\Bus\Dispatcher;
 use Illuminate\Database\QueryException;
 use Illuminate\Database\UniqueConstraintViolationException;
@@ -131,15 +132,8 @@ class RemovalRequestMessageRouterTest extends TestCase
         Cache::flush();
         $realDispatcher = app(Dispatcher::class);
         $dispatcher = Mockery::mock(Dispatcher::class);
-        $dispatchCalls = 0;
-        $dispatcher->shouldReceive('dispatch')->twice()->andReturnUsing(function (mixed $job) use (&$dispatchCalls, $realDispatcher): mixed {
-            $dispatchCalls++;
-
-            if ($dispatchCalls === 1) {
-                throw new \RuntimeException('queue unavailable');
-            }
-
-            return $realDispatcher->dispatch($job);
+        $dispatcher->shouldReceive('dispatch')->once()->andReturnUsing(function (): never {
+            throw new \RuntimeException('queue unavailable');
         });
         $this->app->instance(Dispatcher::class, $dispatcher);
         $message = $this->removalRequestMessage();
@@ -150,13 +144,20 @@ class RemovalRequestMessageRouterTest extends TestCase
             $this->fail('The first dispatch should fail.');
         } catch (\RuntimeException $exception) {
             $this->assertSame('queue unavailable', $exception->getMessage());
+        } finally {
+            $this->app->instance(Dispatcher::class, $realDispatcher);
+            $queuedItem = IntegrationInboxItem::query()
+                ->where('external_id', $message['external_id'])
+                ->firstOrFail();
+            Cache::lock(UniqueLock::getKey(new ProcessRemovalRequestEmail($queuedItem->id)))->forceRelease();
         }
 
         $item = $router->handle($message);
 
         $this->assertSame('queued', $item->status);
+        $this->assertDatabaseCount('integration_inbox_items', 1);
         Queue::assertPushed(ProcessRemovalRequestEmail::class, 1);
-        $dispatcher->shouldHaveReceived('dispatch')->twice();
+        $dispatcher->shouldHaveReceived('dispatch')->once();
     }
 
     public function test_unique_constraint_race_returns_existing_item_and_requeues_it(): void
@@ -265,19 +266,17 @@ class RemovalRequestMessageRouterTest extends TestCase
     {
         $subjectParser = app(\App\Services\MicrosoftGraph\RemovalRequests\RemovalRequestSubjectParser::class);
         $bodyParser = app(\App\Services\MicrosoftGraph\RemovalRequests\RemovalRequestBodyParser::class);
-        $dispatcher = app(Dispatcher::class);
 
-        return new class($subjectParser, $bodyParser, $dispatcher, $exception) extends QueueRemovalRequestEmail
+        return new class($subjectParser, $bodyParser, $exception) extends QueueRemovalRequestEmail
         {
             private bool $firstLookup = true;
 
             public function __construct(
                 $subjectParser,
                 $bodyParser,
-                $dispatcher,
                 private readonly QueryException $exception,
             ) {
-                parent::__construct($subjectParser, $bodyParser, $dispatcher);
+                parent::__construct($subjectParser, $bodyParser);
             }
 
             protected function findItem(string $externalId): ?IntegrationInboxItem
