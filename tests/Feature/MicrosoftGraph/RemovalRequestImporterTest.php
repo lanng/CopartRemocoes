@@ -258,6 +258,41 @@ class RemovalRequestImporterTest extends TestCase
         }
     }
 
+    public function test_collected_register_pdf_difference_is_applied_and_old_pdf_is_deleted(): void
+    {
+        Storage::fake('s3');
+        $pdf = $this->pdf();
+        $oldPath = 'registros/copart/1156340/old/CartaDeRemoção ABC1D23.pdf';
+        Storage::disk('s3')->put($oldPath, '%PDF-old');
+        $register = Register::factory()->create([
+            'vehicle_model' => 'FIAT ARGO 1.3',
+            'vehicle_id' => '1156340',
+            'vehicle_plate' => 'ABC1D23',
+            'origin_city' => 'São Paulo',
+            'destination_city' => 'Pirapora',
+            'deadline_withdraw' => '2026-08-26',
+            'deadline_delivery' => '2026-09-03',
+            'value' => '500.00',
+            'insurance' => 'ALLIANZ SEGUROS SA',
+            'fipe_value' => '43897.00',
+            'payment_code' => 'T691299',
+            'status' => 'collected',
+            'pdf_path' => $oldPath,
+            'pdf_sha256' => str_repeat('a', 64),
+        ]);
+
+        try {
+            $result = app(RemovalRequestImporter::class)->handle($this->item(), $pdf);
+
+            $this->assertSame('processed', $result->status);
+            $this->assertSame('collected', $register->refresh()->status->value);
+            $this->assertFalse(Storage::disk('s3')->exists($oldPath));
+            $this->assertTrue(Storage::disk('s3')->exists($register->pdf_path));
+        } finally {
+            @unlink($pdf->temporaryPath);
+        }
+    }
+
     public static function pdfDifferenceProvider(): array
     {
         return [
@@ -688,6 +723,95 @@ class RemovalRequestImporterTest extends TestCase
             $this->assertSame('queued', $item->refresh()->status);
             $this->assertNull($item->candidate_pdf_path);
             $this->assertSame($oldPath, $register->refresh()->pdf_path);
+            @unlink($pdf->temporaryPath);
+        }
+    }
+
+    public function test_database_failure_during_existing_update_deletes_new_pdf_and_preserves_old_register(): void
+    {
+        Storage::fake('s3');
+        $pdf = $this->pdf();
+        $oldPath = 'registros/copart/1156340/current/CartaDeRemoção ABC1D23.pdf';
+        $newPath = 'registros/copart/1156340/new/CartaDeRemoção ABC1D23.pdf';
+        Storage::disk('s3')->put($oldPath, '%PDF-current');
+        $register = Register::factory()->create([
+            'vehicle_id' => '1156340',
+            'vehicle_plate' => 'ABC1D23',
+            'value' => '500.00',
+            'pdf_path' => $oldPath,
+            'pdf_sha256' => str_repeat('a', 64),
+        ]);
+        $item = $this->item();
+        $storage = $this->mock(RemovalRequestPdfStorage::class);
+        $storage->shouldReceive('store')->once()->andReturn($newPath);
+        $storage->shouldReceive('delete')->once()->with($newPath);
+        Event::listen('eloquent.updating: '.Register::class, function (): void {
+            throw new RuntimeException('register update failed');
+        });
+
+        try {
+            $this->expectException(RuntimeException::class);
+            app(RemovalRequestImporter::class)->handle($item, $pdf);
+        } finally {
+            $this->assertSame($oldPath, $register->refresh()->pdf_path);
+            $this->assertSame(str_repeat('a', 64), $register->pdf_sha256);
+            $this->assertSame('queued', $item->refresh()->status);
+            @unlink($pdf->temporaryPath);
+        }
+    }
+
+    public function test_database_failure_while_replacing_candidate_preserves_previous_candidate(): void
+    {
+        Storage::fake('s3');
+        $pdf = $this->pdf();
+        $oldCandidatePath = 'registros/copart/1156340/candidate/old.pdf';
+        $newCandidatePath = 'registros/copart/1156340/candidate/new/CartaDeRemoção ABC1D23.pdf';
+        Storage::disk('s3')->put($oldCandidatePath, '%PDF-candidate');
+        $register = Register::factory()->create([
+            'vehicle_id' => '1156340',
+            'vehicle_plate' => 'ABC1D23',
+            'status' => 'paid',
+            'pdf_sha256' => str_repeat('a', 64),
+        ]);
+        $item = $this->item([
+            'register_id' => $register->id,
+        ]);
+        $item->forceFill([
+            'register_id' => $register->id,
+            'candidate_pdf_path' => $oldCandidatePath,
+            'candidate_pdf_sha256' => str_repeat('b', 64),
+        ])->save();
+        $storage = $this->mock(RemovalRequestPdfStorage::class);
+        $storage->shouldReceive('store')->once()->andReturn($newCandidatePath);
+        $storage->shouldReceive('delete')->once()->with($newCandidatePath);
+        Event::listen('eloquent.updating: '.IntegrationInboxItem::class, function (): void {
+            throw new RuntimeException('candidate update failed');
+        });
+
+        try {
+            $this->expectException(RuntimeException::class);
+            app(RemovalRequestImporter::class)->handle($item, $pdf);
+        } finally {
+            $this->assertSame($oldCandidatePath, $item->refresh()->candidate_pdf_path);
+            $this->assertTrue(Storage::disk('s3')->exists($oldCandidatePath));
+            @unlink($pdf->temporaryPath);
+        }
+    }
+
+    public function test_storage_failure_before_transaction_does_not_mutate_register_or_inbox(): void
+    {
+        Storage::fake('s3');
+        $item = $this->item();
+        $pdf = $this->pdf();
+        $storage = $this->mock(RemovalRequestPdfStorage::class);
+        $storage->shouldReceive('store')->once()->andThrow(new RuntimeException('S3 unavailable'));
+
+        try {
+            $this->expectException(RuntimeException::class);
+            app(RemovalRequestImporter::class)->handle($item, $pdf);
+        } finally {
+            $this->assertDatabaseCount('registers', 0);
+            $this->assertSame('queued', $item->refresh()->status);
             @unlink($pdf->temporaryPath);
         }
     }

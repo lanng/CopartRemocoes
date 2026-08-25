@@ -11,6 +11,10 @@ use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Throwable;
 
+/**
+ * @phpstan-type RemovalChangeValue scalar|array<string, scalar|null>|null
+ * @phpstan-type RemovalChange array{current: RemovalChangeValue, proposed: RemovalChangeValue}
+ */
 class RemovalRequestImporter
 {
     private const IMPORT_LOCK_TTL = 600;
@@ -68,7 +72,12 @@ class RemovalRequestImporter
         $failureReason = $this->validationFailure($sources, $canonical);
 
         if ($failureReason !== null) {
-            return $this->markPending($item, $failureReason);
+            $oldCandidatePath = $item->candidate_pdf_path;
+            $result = $this->markPending($item, $failureReason);
+
+            $this->cleanupAfterCommit($result, null, $oldCandidatePath);
+
+            return $result->refresh();
         }
 
         return Cache::lock(
@@ -92,10 +101,12 @@ class RemovalRequestImporter
                     );
 
                     if ($lockedIdentity === null) {
+                        $oldCandidatePath = $item->candidate_pdf_path;
+
                         return [
                             'item' => $this->markPending($item, 'identity_conflict'),
                             'old_pdf_path' => null,
-                            'old_candidate_path' => null,
+                            'old_candidate_path' => $oldCandidatePath,
                             'discard_upload' => true,
                         ];
                     }
@@ -114,11 +125,8 @@ class RemovalRequestImporter
                 });
 
                 if ($result['discard_upload'] && $uploadedPath !== null) {
-                    try {
-                        $this->storage->delete($uploadedPath);
-                    } finally {
-                        $uploadedPath = null;
-                    }
+                    $this->cleanupAfterCommit($result['item'], null, $uploadedPath);
+                    $uploadedPath = null;
                 }
 
                 $this->cleanupAfterCommit(
@@ -375,6 +383,7 @@ class RemovalRequestImporter
 
     /**
      * @param  array<string, string|null>  $canonical
+     * @param  array<string, RemovalChange>  $changes
      * @return array{item: IntegrationInboxItem, old_pdf_path: ?string, old_candidate_path: ?string, discard_upload: bool}
      */
     private function persistExisting(
@@ -518,7 +527,7 @@ class RemovalRequestImporter
     }
 
     /**
-     * @param  array<string, array{current: mixed, proposed: mixed}>  $changes
+     * @param  array<string, RemovalChange>  $changes
      * @return array{item: IntegrationInboxItem, old_pdf_path: ?string, old_candidate_path: ?string, discard_upload: bool}
      */
     private function persistBlocked(
@@ -571,7 +580,7 @@ class RemovalRequestImporter
 
     /**
      * @param  array<string, string|null>  $canonical
-     * @return array<string, array{current: mixed, proposed: mixed}>
+     * @return array<string, RemovalChange>
      */
     private function changes(Register $register, array $canonical, PreparedRemovalPdf $pdf): array
     {
@@ -624,7 +633,7 @@ class RemovalRequestImporter
         ], true);
     }
 
-    /** @param array<string, array{current: mixed, proposed: mixed}> $changes @return list<string> */
+    /** @param array<string, RemovalChange> $changes @return list<string> */
     private function alertsForUpdate(array $changes, ?string $fipeValue): array
     {
         $alerts = [];
@@ -777,8 +786,6 @@ class RemovalRequestImporter
 
     private function markPending(IntegrationInboxItem $item, string $failureReason): IntegrationInboxItem
     {
-        $oldCandidatePath = $item->candidate_pdf_path;
-
         $item->forceFill([
             'status' => 'pending',
             'register_id' => null,
@@ -789,14 +796,6 @@ class RemovalRequestImporter
             'candidate_pdf_sha256' => null,
             'resolved_at' => null,
         ])->save();
-
-        if ($oldCandidatePath !== null && trim($oldCandidatePath) !== '') {
-            try {
-                $this->storage->delete($oldCandidatePath);
-            } catch (Throwable) {
-                $this->recordCleanupFailure($item, $oldCandidatePath);
-            }
-        }
 
         return $item->refresh();
     }
