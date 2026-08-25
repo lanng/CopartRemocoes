@@ -19,6 +19,10 @@ class RemovalRequestSubjectParser
 
         $normalizer = new RemovalRequestNormalizer;
 
+        if (! preg_match('/[\p{L}\p{N}]/u', $matches[3])) {
+            return null;
+        }
+
         return [
             'vehicle_plate' => (string) $normalizer->plate($matches[1]),
             'vehicle_id' => trim($matches[2]),

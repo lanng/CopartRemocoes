@@ -49,6 +49,8 @@ class RemovalRequestSubjectParserTest extends TestCase
             'forward prefix' => ['FW: Pedido de Remoção - FSG5551 - 1156340 - Allianz'],
             'forward prefix in portuguese' => ['ENC: Pedido de Remoção - FSG5551 - 1156340 - Allianz'],
             'missing insurance' => ['Pedido de Remoção - FSG5551 - 1156340 -'],
+            'punctuation-only hyphen insurance' => ['Pedido de Remoção - FSG5551 - 1156340 - -'],
+            'punctuation-only slash insurance' => ['Pedido de Remoção - FSG5551 - 1156340 - /'],
             'missing vehicle id' => ['Pedido de Remoção - FSG5551 - - Allianz'],
             'old plate with wrong length' => ['Pedido de Remoção - FSG555 - 1156340 - Allianz'],
             'plate with invalid character' => ['Pedido de Remoção - FSG@551 - 1156340 - Allianz'],

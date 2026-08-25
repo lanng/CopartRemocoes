@@ -78,6 +78,18 @@ class RemovalRequestBodyParserTest extends TestCase
         $this->assertSame([$field], $result['missing_fields']);
     }
 
+    #[DataProvider('malformedMonetaryProvider')]
+    public function test_it_rejects_malformed_monetary_values(string $field, string $line): void
+    {
+        $result = (new RemovalRequestBodyParser)->parse(
+            str_replace($this->monetaryLineFor($field), $line, $this->bodyWithAllFields())
+        );
+
+        $this->assertFalse($result['valid']);
+        $this->assertArrayNotHasKey($field, $result['data']);
+        $this->assertSame([$field], $result['missing_fields']);
+    }
+
     /**
      * @return array<string, array{string, string}>
      */
@@ -104,6 +116,28 @@ class RemovalRequestBodyParserTest extends TestCase
             'withdraw deadline' => ['deadline_withdraw', 'Data para retirar o veículo da oficina 26/08/2026'],
             'delivery deadline' => ['deadline_delivery', 'Data limite de entrega no pátio 03/09/2026'],
         ];
+    }
+
+    /**
+     * @return array<string, array{string, string}>
+     */
+    public static function malformedMonetaryProvider(): array
+    {
+        return [
+            'trailing comma' => ['value', 'Valor frete R$ 866,;'],
+            'missing integer part' => ['fipe_value', 'Valor da FIPE: R$ ,48;'],
+            'trailing dot' => ['value', 'Valor frete R$ 866.;'],
+            'repeated separator' => ['fipe_value', 'Valor da FIPE: R$ 56..739,00;'],
+            'junk after value' => ['value', 'Valor frete R$ 866.48abc;'],
+            'text after value' => ['value', 'Valor frete R$ 866,48 inválido;'],
+        ];
+    }
+
+    private function monetaryLineFor(string $field): string
+    {
+        return $field === 'fipe_value'
+            ? 'Valor da FIPE: R$ 56.739,00;'
+            : 'Valor frete R$ 866,48;';
     }
 
     private function bodyWithAllFields(): string

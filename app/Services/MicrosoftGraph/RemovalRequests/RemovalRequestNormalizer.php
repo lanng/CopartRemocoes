@@ -74,9 +74,16 @@ class RemovalRequestNormalizer
             return null;
         }
 
-        $value = preg_replace('/[^\d,.+\-]/u', '', $value);
+        $value = preg_replace('/^r\$\s*/iu', '', $value);
+        $value = str_replace(' ', '', (string) $value);
 
-        if (! is_string($value) || ! preg_match('/^[+-]?[\d,.]+$/', $value)) {
+        if (! preg_match('/^[+-]?\d[\d,.]*$/', $value)) {
+            return null;
+        }
+
+        $unsignedValue = ltrim($value, '+-');
+
+        if (preg_match('/^[,.]|[,.]$|[,.]{2,}/', $unsignedValue)) {
             return null;
         }
 

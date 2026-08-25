@@ -36,20 +36,16 @@ class RemovalRequestBodyParser
             }
         }
 
-        if (preg_match('~fipe\s*:?\s*(?:r\$\s*)?([0-9][0-9.\s]*(?:,[0-9]{1,2})?)~iu', $body, $matches)) {
-            $value = $normalizer->decimal($matches[1]);
+        $value = $this->extractMoney($body, 'fipe', $normalizer);
 
-            if ($value !== null) {
-                $data['fipe_value'] = $value;
-            }
+        if ($value !== null) {
+            $data['fipe_value'] = $value;
         }
 
-        if (preg_match('~(?:valor\s+de\s+frete|valor\s+frete|frete)\s*:?\s*(?:r\$\s*)?([0-9][0-9.\s]*(?:,[0-9]{1,2})?)~iu', $body, $matches)) {
-            $value = $normalizer->decimal($matches[1]);
+        $value = $this->extractMoney($body, '(?:valor\s+de\s+frete|valor\s+frete|frete)', $normalizer);
 
-            if ($value !== null) {
-                $data['value'] = $value;
-            }
+        if ($value !== null) {
+            $data['value'] = $value;
         }
 
         if (preg_match('~data\s+para\s+retirar\s+o\s+ve[ií]culo\s+da\s+oficina\s*:?\s*(\d{1,2}[/-]\d{1,2}[/-]\d{4}|\d{4}-\d{1,2}-\d{1,2})~iu', $body, $matches)) {
@@ -92,5 +88,18 @@ class RemovalRequestBodyParser
             'data' => $data,
             'missing_fields' => $missingFields,
         ];
+    }
+
+    private function extractMoney(string $body, string $labelPattern, RemovalRequestNormalizer $normalizer): ?string
+    {
+        if (! preg_match(
+            '~'.$labelPattern.'\s*:?\s*(?:r\$\s*)?([^\s;]+)(?=\s*(?:;|$|remetente\b|destinat[áa]rio\b|p[aá]tio\b|valor\b|data\b|c[oó]digo\b))~iu',
+            $body,
+            $matches
+        )) {
+            return null;
+        }
+
+        return $normalizer->decimal($matches[1]);
     }
 }
