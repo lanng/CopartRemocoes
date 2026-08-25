@@ -2,72 +2,66 @@
 
 namespace App\Services;
 
-use Exception;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Process;
+use RuntimeException;
+use Throwable;
 
 class PdfExtractorService
 {
-    /**
-     * @throws Exception
-     */
     public function extractData(string $pdfPath): array
     {
-        if (! defined('PDFTOTEXT_PATH')) {
-            define('PDFTOTEXT_PATH', 'pdftotext');
+        if (! file_exists($pdfPath) || ! is_readable($pdfPath)) {
+            Log::error('PdfExtractorService: Arquivo PDF ausente ou sem permissão de leitura.', [
+                'path' => $pdfPath,
+            ]);
+
+            throw new RuntimeException('Não foi possível ler o arquivo PDF.');
         }
 
-        $pdfFilePath = $pdfPath;
+        $command = 'pdftotext -layout '.escapeshellarg($pdfPath).' -';
 
-        if (! file_exists($pdfFilePath)) {
-            Log::error("PdfExtractorService: Arquivo não encontrado em '$pdfFilePath'");
-            throw new Exception('Erro: Arquivo PDF não encontrado.');
+        try {
+            $result = Process::timeout(30)->run($command);
+        } catch (Throwable $exception) {
+            Log::error('PdfExtractorService: Falha controlada ao executar pdftotext.', [
+                'exception' => $exception,
+            ]);
+
+            throw new RuntimeException('Não foi possível extrair texto do PDF.', 0, $exception);
         }
 
-        if (! is_readable($pdfFilePath)) {
-            Log::error("PdfExtractorService: Sem permissão de leitura em '$pdfFilePath'");
-            throw new Exception('Erro: Sem permissão para ler o arquivo PDF.');
+        if ($result->failed() || trim($result->output()) === '') {
+            Log::error('PdfExtractorService: pdftotext retornou falha ou saída vazia.', [
+                'exit_code' => $result->exitCode(),
+            ]);
+
+            throw new RuntimeException('Não foi possível extrair texto do PDF.');
         }
 
-        $escapedPdfPath = escapeshellarg($pdfFilePath);
-        $command = PDFTOTEXT_PATH.' -layout '.$escapedPdfPath.' -';
+        return $this->extractDataFromText($result->output());
+    }
 
-        $pdfTextContent = shell_exec($command);
-
-        if ($pdfTextContent === null || trim($pdfTextContent) === '') {
-            Log::error('Error during the read of the file in PdfExtractorService.');
-            exit(1);
-        }
-
-        function extractData($pattern, $text, $group = 1): ?string
-        {
-            if (preg_match($pattern, $text, $matches, PREG_UNMATCHED_AS_NULL)) {
-                if (isset($matches[$group])) {
-                    return trim($matches[$group]);
-                }
-            }
-
-            return null;
-        }
-
+    public function extractDataFromText(string $text): array
+    {
         $outputData = [];
 
-        // addresses added for future usage.
-        $outputData['deadline_withdraw'] = extractData('~DATA LIMITE PARA RETIRAR DA OFICINA\s+(\d{2}/\d{2}/\d{4})\s*$~m', $pdfTextContent);
-        $outputData['vehicle_model'] = extractData('~^MODELO\s+([^\s].*?)\s+VALOR FIPE~m', $pdfTextContent);
-        $outputData['vehicle_plate'] = extractData('~^\s+PLACA\s+([^\s]+)\s*$~m', $pdfTextContent);
-        $outputData['origin_city'] = extractData('~^CIDADE\s+([^\s].*?)\s*$~m', $pdfTextContent);
-        $outputData['origin_address'] = extractData('~^ENDEREÇO\s+([^\s].*?)\s+Nº~m', $pdfTextContent);
-        $outputData['origin_number'] = extractData('~Nº\s+(\d+)\s*$~m', $pdfTextContent);
-        $outputData['origin_name'] = extractData('~^LOCAL\s+(.*?)\s+CEP\s+\d+~m', $pdfTextContent);
-        $outputData['origin_zip_code'] = extractData('~CEP\s+(\d+)\s*$~m', $pdfTextContent);
-        $outputData['origin_district'] = extractData('~^BAIRRO\s+(.*?)\s+ESTADO~m', $pdfTextContent);
-        $outputData['deadline_delivery'] = extractData('~DATA LIMITE ENTREGA\s+(\d{2}/\d{2}/\d{4})\s*$~m', $pdfTextContent);
-        $outputData['destination_city'] = extractData('~PATIO DESTINO\s+([^-]+?)\s+-\s+\w{2}\s+DATA LIMITE ENTREGA~', $pdfTextContent);
-        $outputData['vehicle_id'] = extractData('~CÓDIGO VEÍCULO\s+(\d+)\s*$~m', $pdfTextContent);
-        $outputData['insurance'] = extractData('~DADOS DO COMITENTE\s+COMITENTE\s+(.*?)\s+SINISTRO~s', $pdfTextContent);
+        $outputData['deadline_withdraw'] = $this->extractValue('~DATA LIMITE PARA RETIRAR DA OFICINA\s+(\d{2}/\d{2}/\d{4})\s*$~m', $text);
+        $outputData['vehicle_model'] = $this->extractValue('~^MODELO\s+([^\s].*?)\s+VALOR FIPE~m', $text);
+        $outputData['vehicle_plate'] = $this->extractValue('~^\s+PLACA\s+([^\s]+)\s*$~m', $text);
+        $outputData['origin_city'] = $this->extractValue('~^CIDADE\s+([^\s].*?)\s*$~m', $text);
+        $outputData['origin_address'] = $this->extractValue('~^ENDEREÇO\s+([^\s].*?)\s+Nº~m', $text);
+        $outputData['origin_number'] = $this->extractValue('~Nº\s+(\d+)\s*$~m', $text);
+        $outputData['origin_name'] = $this->extractValue('~^LOCAL\s+(.*?)\s+CEP\s+\d+~m', $text);
+        $outputData['origin_zip_code'] = $this->extractValue('~CEP\s+(\d+)\s*$~m', $text);
+        $outputData['origin_district'] = $this->extractValue('~^BAIRRO\s+(.*?)\s+ESTADO~m', $text);
+        $outputData['deadline_delivery'] = $this->extractValue('~DATA LIMITE ENTREGA\s+(\d{2}/\d{2}/\d{4})\s*$~m', $text);
+        $outputData['destination_city'] = $this->extractValue('~PATIO DESTINO\s+([^-]+?)\s+-\s+\w{2}\s+DATA LIMITE ENTREGA~', $text);
+        $outputData['vehicle_id'] = $this->extractValue('~CÓDIGO VEÍCULO\s+(\d+)\s*$~m', $text);
+        $outputData['insurance'] = $this->extractValue('~DADOS DO COMITENTE\s+COMITENTE\s+(.*?)\s+SINISTRO~s', $text);
 
-        $phone1 = extractData('~TELEFONE 1\s+([\d\s]+)$~m', $pdfTextContent);
-        $phone2 = extractData('~TELEFONE 2\s+([\d\s]+)$~m', $pdfTextContent);
+        $phone1 = $this->extractValue('~TELEFONE 1\s+([\d\s]+)$~m', $text);
+        $phone2 = $this->extractValue('~TELEFONE 2\s+([\d\s]+)$~m', $text);
         $outputData['origin_phones'] = [];
         if ($phone1 !== null) {
             $outputData['origin_phones'][] = preg_replace('/\s+/', ' ', trim($phone1));
@@ -76,8 +70,17 @@ class PdfExtractorService
             $outputData['origin_phones'][] = preg_replace('/\s+/', ' ', trim($phone2));
         }
 
-        header('Content-Type: application/json; charset=utf-8');
-
         return $outputData;
+    }
+
+    private function extractValue(string $pattern, string $text, int $group = 1): ?string
+    {
+        if (preg_match($pattern, $text, $matches, PREG_UNMATCHED_AS_NULL) === 1
+            && array_key_exists($group, $matches)
+            && $matches[$group] !== null) {
+            return trim((string) $matches[$group]);
+        }
+
+        return null;
     }
 }

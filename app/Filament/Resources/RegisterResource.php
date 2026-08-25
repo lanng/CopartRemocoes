@@ -46,6 +46,8 @@ use Illuminate\Support\Facades\Storage;
 use Leandrocfe\FilamentPtbrFormFields\Money;
 use Maatwebsite\Excel\Excel as ExcelExcel;
 use Maatwebsite\Excel\Facades\Excel;
+use RuntimeException;
+use Throwable;
 
 class RegisterResource extends Resource
 {
@@ -184,10 +186,18 @@ class RegisterResource extends Resource
                                 return;
                             }
 
+                            $tempLocalPath = null;
+
                             try {
                                 $tempLocalPath = tempnam(sys_get_temp_dir(), 'pdf_process_');
 
-                                file_put_contents($tempLocalPath, $state->get());
+                                if (! is_string($tempLocalPath)) {
+                                    throw new RuntimeException('Não foi possível preparar o arquivo PDF.');
+                                }
+
+                                if (file_put_contents($tempLocalPath, $state->get()) === false) {
+                                    throw new RuntimeException('Não foi possível preparar o arquivo PDF.');
+                                }
 
                                 $extractor = app(PdfExtractorService::class);
 
@@ -239,7 +249,7 @@ class RegisterResource extends Resource
                                     ->body('Campos preenchidos com base no PDF. Por favor, revise e complete as informações.')
                                     ->send();
 
-                            } catch (Exception $e) {
+                            } catch (Throwable $e) {
                                 Notification::make()
                                     ->danger()
                                     ->title('Erro Inesperado')
@@ -247,7 +257,7 @@ class RegisterResource extends Resource
                                     ->send();
                                 Log::error('Unexpected error during PDF extraction service call: '.$e->getMessage(), ['state' => $state]);
                             } finally {
-                                if (file_exists($tempLocalPath)) {
+                                if (is_string($tempLocalPath) && file_exists($tempLocalPath)) {
                                     unlink($tempLocalPath);
                                 }
                             }
