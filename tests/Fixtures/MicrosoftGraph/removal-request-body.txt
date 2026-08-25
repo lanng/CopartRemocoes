@@ -1,0 +1,10 @@
+Outras características da carga: preencher apenas este código do transporte T708269;
+Remetente: dados do comitente ALLIANZ SEGUROS S/A;
+Destinatário: dados do pátio de destino Pirapora - SP;
+Valor total da mercadoria: informar o valor da FIPE: R$ 56.739,00;
+Valor total do serviço: informar o valor de frete R$ 866,48;
+Data para retirar o veículo da oficina 26/08/2026
+Pátio destino Pirapora - SP
+Data limite de entrega no pátio 03/09/2026
+Valor frete R$ 866,48
+Código veículo 1156340
