@@ -5,6 +5,7 @@ namespace Tests\Feature\MicrosoftGraph;
 use App\Models\MicrosoftGraphConnection;
 use App\Services\MicrosoftGraph\MicrosoftGraphClient;
 use DomainException;
+use GuzzleHttp\Psr7\FnStream;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\Client\Request;
 use Illuminate\Support\Carbon;
@@ -160,6 +161,46 @@ class MicrosoftGraphClientTest extends TestCase
             );
         } finally {
             $this->assertTrue(unlink($destinationPath));
+        }
+    }
+
+    public function test_limited_psr_stream_copy_does_not_write_chunks_after_the_limit(): void
+    {
+        $chunks = ['%PDF-first-chunk', '-after-limit'];
+        $readChunks = 0;
+        $closed = false;
+        $source = new FnStream([
+            'read' => function () use (&$chunks, &$readChunks): string {
+                $readChunks++;
+
+                return array_shift($chunks) ?? '';
+            },
+            'eof' => function () use (&$chunks): bool {
+                return $chunks === [];
+            },
+            'close' => function () use (&$closed): void {
+                $closed = true;
+            },
+            'isReadable' => function () use (&$closed): bool {
+                return ! $closed;
+            },
+        ]);
+        $destinationPath = tempnam(sys_get_temp_dir(), 'graph_attachment_');
+        $this->assertIsString($destinationPath);
+
+        try {
+            $this->expectException(DomainException::class);
+            app(MicrosoftGraphClient::class)->copyLimitedStreamToPath(
+                $source,
+                $destinationPath,
+                strlen('%PDF-first-chunk'),
+            );
+        } finally {
+            $this->assertSame('%PDF-first-chunk', file_get_contents($destinationPath));
+            $this->assertSame([], $chunks);
+            $this->assertSame(2, $readChunks);
+            $this->assertTrue($closed);
+            @unlink($destinationPath);
         }
     }
 

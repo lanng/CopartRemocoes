@@ -7,6 +7,7 @@ use DomainException;
 use Illuminate\Http\Client\PendingRequest;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Http;
+use Psr\Http\Message\StreamInterface;
 use RuntimeException;
 
 class MicrosoftGraphClient
@@ -105,12 +106,32 @@ class MicrosoftGraphClient
         }
 
         $response = $this->graphRequest($this->accessToken($connection))
+            ->withOptions(['stream' => true])
             ->get(self::GRAPH_BASE_URL.'/me/messages/'.rawurlencode($messageId).'/attachments/'.rawurlencode($attachmentId).'/$value')
             ->throw();
         $source = $response->toPsrResponse()->getBody();
+
+        return $this->copyLimitedStreamToPath($source, $destinationPath, $maxBytes);
+    }
+
+    /**
+     * Copies and closes both streams, stopping before writing a chunk beyond the limit.
+     *
+     * @throws DomainException
+     * @throws RuntimeException
+     */
+    public function copyLimitedStreamToPath(
+        StreamInterface $source,
+        string $destinationPath,
+        int $maxBytes,
+    ): int {
         $destination = null;
 
         try {
+            if ($maxBytes < 0) {
+                throw new DomainException('O limite máximo do anexo não pode ser negativo.');
+            }
+
             $destination = fopen($destinationPath, 'wb');
 
             if ($destination === false) {

@@ -43,9 +43,8 @@ class ProcessRemovalRequestEmailTest extends TestCase
         }
     }
 
-    public function test_it_exposes_the_configured_ten_megabyte_limit_and_documents_the_default(): void
+    public function test_it_uses_the_ten_megabyte_default_and_documents_the_environment_value(): void
     {
-        config(['services.removal_requests.max_pdf_bytes' => 10 * 1024 * 1024]);
         $envExample = file_get_contents(base_path('.env.example'));
 
         $this->assertSame(10 * 1024 * 1024, config('services.removal_requests.max_pdf_bytes'));
@@ -376,8 +375,16 @@ class ProcessRemovalRequestEmailTest extends TestCase
     public function test_it_closes_the_upload_stream_when_s3_throws(): void
     {
         $temporaryPath = $this->temporaryPdf('%PDF-storage');
+        $capturedStream = null;
         $disk = $this->mock(\Illuminate\Contracts\Filesystem\Filesystem::class);
-        $disk->shouldReceive('put')->once()->andThrow(new RuntimeException('s3 failed'));
+        $disk->shouldReceive('put')
+            ->once()
+            ->withArgs(function (string $path, $stream, array $options) use (&$capturedStream): bool {
+                $capturedStream = $stream;
+
+                return $options === ['visibility' => 'public'];
+            })
+            ->andThrow(new RuntimeException('s3 failed'));
         Storage::shouldReceive('disk')->once()->with('s3')->andReturn($disk);
         $pdf = new PreparedRemovalPdf($temporaryPath, 'hash', 'CartaDeRemoção FSG5551.pdf', []);
 
@@ -385,6 +392,7 @@ class ProcessRemovalRequestEmailTest extends TestCase
             $this->expectException(RuntimeException::class);
             app(RemovalRequestPdfStorage::class)->store($pdf, '1156340');
         } finally {
+            $this->assertFalse(is_resource($capturedStream));
             $this->assertTrue(unlink($temporaryPath));
         }
     }
