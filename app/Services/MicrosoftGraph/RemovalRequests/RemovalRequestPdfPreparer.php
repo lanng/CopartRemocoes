@@ -6,6 +6,7 @@ use App\Models\MicrosoftGraphConnection;
 use App\Services\MicrosoftGraph\MicrosoftGraphClient;
 use App\Services\PdfExtractorService;
 use DomainException;
+use RuntimeException;
 use Throwable;
 
 class RemovalRequestPdfPreparer
@@ -33,16 +34,6 @@ class RemovalRequestPdfPreparer
         }
 
         $attachment = $matchingAttachments[0];
-        $contents = $this->graphClient->downloadMessageAttachment(
-            $connection,
-            $messageId,
-            $attachment['id'],
-        );
-
-        if (strlen($contents) === 0 || strlen($contents) > $maxPdfBytes || ! str_starts_with($contents, '%PDF-')) {
-            throw new DomainException('O anexo baixado não é um PDF válido dentro do limite configurado.');
-        }
-
         $normalizedPlate = $this->normalizer->plate($plate);
 
         if ($normalizedPlate === null || ! preg_match('/^[A-Z]{3}(?:\d{4}|\d[A-Z]\d{2})$/', $normalizedPlate)) {
@@ -53,21 +44,55 @@ class RemovalRequestPdfPreparer
         $temporaryPath = tempnam(sys_get_temp_dir(), 'removal_request_pdf_');
 
         if ($temporaryPath === false) {
-            throw new \RuntimeException('Não foi possível criar o arquivo temporário do PDF.');
+            throw new RuntimeException('Não foi possível criar o arquivo temporário do PDF.');
         }
 
         try {
-            $writtenBytes = file_put_contents($temporaryPath, $contents);
+            $downloadedBytes = $this->graphClient->downloadMessageAttachmentToPath(
+                $connection,
+                $messageId,
+                $attachment['id'],
+                $temporaryPath,
+                $maxPdfBytes,
+            );
+            clearstatcache(true, $temporaryPath);
+            $actualSize = filesize($temporaryPath);
 
-            if ($writtenBytes !== strlen($contents)) {
-                throw new \RuntimeException('Não foi possível gravar integralmente o arquivo temporário do PDF.');
+            if ($actualSize === false || $actualSize !== $downloadedBytes) {
+                throw new RuntimeException('O tamanho do arquivo temporário do PDF não pôde ser confirmado.');
+            }
+
+            if ($actualSize === 0 || $actualSize > $maxPdfBytes) {
+                throw new DomainException('O anexo baixado não é um PDF válido dentro do limite configurado.');
+            }
+
+            $signatureStream = fopen($temporaryPath, 'rb');
+
+            if ($signatureStream === false) {
+                throw new RuntimeException('Não foi possível ler a assinatura do arquivo PDF.');
+            }
+
+            try {
+                $signature = fread($signatureStream, 5);
+            } finally {
+                fclose($signatureStream);
+            }
+
+            if ($signature !== '%PDF-') {
+                throw new DomainException('O anexo baixado não é um PDF válido dentro do limite configurado.');
+            }
+
+            $sha256 = hash_file('sha256', $temporaryPath);
+
+            if ($sha256 === false) {
+                throw new RuntimeException('Não foi possível calcular o hash do arquivo PDF.');
             }
 
             $extractedData = $this->pdfExtractor->extractData($temporaryPath);
 
             return new PreparedRemovalPdf(
                 temporaryPath: $temporaryPath,
-                sha256: hash('sha256', $contents),
+                sha256: $sha256,
                 fileName: $fileName,
                 extractedData: $extractedData,
             );

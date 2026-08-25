@@ -3,9 +3,11 @@
 namespace App\Services\MicrosoftGraph;
 
 use App\Models\MicrosoftGraphConnection;
+use DomainException;
 use Illuminate\Http\Client\PendingRequest;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Http;
+use RuntimeException;
 
 class MicrosoftGraphClient
 {
@@ -84,6 +86,81 @@ class MicrosoftGraphClient
             ->get(self::GRAPH_BASE_URL.'/me/messages/'.rawurlencode($messageId).'/attachments/'.rawurlencode($attachmentId).'/$value')
             ->throw()
             ->body();
+    }
+
+    /**
+     * @throws \Illuminate\Http\Client\RequestException
+     * @throws DomainException
+     * @throws RuntimeException
+     */
+    public function downloadMessageAttachmentToPath(
+        MicrosoftGraphConnection $connection,
+        string $messageId,
+        string $attachmentId,
+        string $destinationPath,
+        int $maxBytes,
+    ): int {
+        if ($maxBytes < 0) {
+            throw new DomainException('O limite máximo do anexo não pode ser negativo.');
+        }
+
+        $response = $this->graphRequest($this->accessToken($connection))
+            ->get(self::GRAPH_BASE_URL.'/me/messages/'.rawurlencode($messageId).'/attachments/'.rawurlencode($attachmentId).'/$value')
+            ->throw();
+        $source = $response->toPsrResponse()->getBody();
+        $destination = null;
+
+        try {
+            $destination = fopen($destinationPath, 'wb');
+
+            if ($destination === false) {
+                throw new RuntimeException('Não foi possível abrir o arquivo de destino do anexo.');
+            }
+
+            $copiedBytes = 0;
+
+            while (! $source->eof()) {
+                $chunk = $source->read(8192);
+
+                if ($chunk === '') {
+                    break;
+                }
+
+                $chunkSize = strlen($chunk);
+
+                if ($copiedBytes + $chunkSize > $maxBytes) {
+                    throw new DomainException('O anexo excede o limite máximo configurado.');
+                }
+
+                $this->writeChunk($destination, $chunk);
+                $copiedBytes += $chunkSize;
+            }
+
+            return $copiedBytes;
+        } finally {
+            if (is_resource($destination)) {
+                fclose($destination);
+            }
+
+            $source->close();
+        }
+    }
+
+    /** @param resource $destination */
+    private function writeChunk($destination, string $chunk): void
+    {
+        $offset = 0;
+        $chunkSize = strlen($chunk);
+
+        while ($offset < $chunkSize) {
+            $writtenBytes = fwrite($destination, substr($chunk, $offset));
+
+            if ($writtenBytes === false || $writtenBytes === 0) {
+                throw new RuntimeException('Não foi possível gravar integralmente o anexo.');
+            }
+
+            $offset += $writtenBytes;
+        }
     }
 
     private function graphRequest(string $accessToken): PendingRequest

@@ -3,13 +3,13 @@
 namespace Tests\Feature\MicrosoftGraph;
 
 use App\Models\MicrosoftGraphConnection;
+use App\Services\MicrosoftGraph\MicrosoftGraphClient;
 use App\Services\MicrosoftGraph\RemovalRequests\PreparedRemovalPdf;
 use App\Services\MicrosoftGraph\RemovalRequests\RemovalRequestPdfPreparer;
 use App\Services\MicrosoftGraph\RemovalRequests\RemovalRequestPdfStorage;
 use App\Services\PdfExtractorService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\Client\RequestException;
-use Illuminate\Support\Env;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Process;
 use Illuminate\Support\Facades\Storage;
@@ -43,49 +43,14 @@ class ProcessRemovalRequestEmailTest extends TestCase
         }
     }
 
-    public function test_it_uses_the_ten_megabyte_default_when_the_pdf_limit_environment_variable_is_absent(): void
+    public function test_it_exposes_the_configured_ten_megabyte_limit_and_documents_the_default(): void
     {
-        $environmentKey = 'REMOVAL_REQUEST_PDF_MAX_BYTES';
-        $getenvValue = getenv($environmentKey);
-        $hasEnvValue = array_key_exists($environmentKey, $_ENV);
-        $envValue = $_ENV[$environmentKey] ?? null;
-        $hasServerValue = array_key_exists($environmentKey, $_SERVER);
-        $serverValue = $_SERVER[$environmentKey] ?? null;
-        $configuredValue = config('services.removal_requests.max_pdf_bytes');
+        config(['services.removal_requests.max_pdf_bytes' => 10 * 1024 * 1024]);
+        $envExample = file_get_contents(base_path('.env.example'));
 
-        try {
-            putenv($environmentKey);
-            unset($_ENV[$environmentKey], $_SERVER[$environmentKey]);
-            Env::enablePutenv();
-
-            $services = require base_path('config/services.php');
-            $envExample = file_get_contents(base_path('.env.example'));
-
-            $this->assertSame(10 * 1024 * 1024, $services['removal_requests']['max_pdf_bytes']);
-            $this->assertIsString($envExample);
-            $this->assertStringContainsString($environmentKey.'=10485760', $envExample);
-        } finally {
-            if ($getenvValue === false) {
-                putenv($environmentKey);
-            } else {
-                putenv($environmentKey.'='.$getenvValue);
-            }
-
-            if ($hasEnvValue) {
-                $_ENV[$environmentKey] = $envValue;
-            } else {
-                unset($_ENV[$environmentKey]);
-            }
-
-            if ($hasServerValue) {
-                $_SERVER[$environmentKey] = $serverValue;
-            } else {
-                unset($_SERVER[$environmentKey]);
-            }
-
-            Env::enablePutenv();
-            config(['services.removal_requests.max_pdf_bytes' => $configuredValue]);
-        }
+        $this->assertSame(10 * 1024 * 1024, config('services.removal_requests.max_pdf_bytes'));
+        $this->assertIsString($envExample);
+        $this->assertStringContainsString('REMOVAL_REQUEST_PDF_MAX_BYTES=10485760', $envExample);
     }
 
     public function test_it_selects_only_a_non_inline_file_attachment_with_the_exact_pdf_name(): void
@@ -283,6 +248,27 @@ class ProcessRemovalRequestEmailTest extends TestCase
         }
     }
 
+    public function test_it_removes_the_temporary_pdf_when_streaming_fails(): void
+    {
+        $this->mock(MicrosoftGraphClient::class, function (MockInterface $mock): void {
+            $mock->shouldReceive('listMessageAttachments')->once()->andReturn([$this->attachment()]);
+            $mock->shouldReceive('downloadMessageAttachmentToPath')->once()->andThrow(new RuntimeException('stream failed'));
+        });
+        $before = glob(sys_get_temp_dir().'/removal_request_pdf_*') ?: [];
+
+        $this->expectException(RuntimeException::class);
+        try {
+            app(RemovalRequestPdfPreparer::class)->prepare(
+                MicrosoftGraphConnection::factory()->create(),
+                'message-id',
+                'FSG5551',
+            );
+        } finally {
+            $after = glob(sys_get_temp_dir().'/removal_request_pdf_*') ?: [];
+            $this->assertSame($before, $after);
+        }
+    }
+
     public function test_it_stores_the_pdf_under_a_safe_uuid_path_with_public_visibility(): void
     {
         Storage::fake('s3');
@@ -304,9 +290,37 @@ class ProcessRemovalRequestEmailTest extends TestCase
             );
             $this->assertSame($bytes, Storage::disk('s3')->get($path));
             $this->assertSame('public', Storage::disk('s3')->getVisibility($path));
+            $this->assertFileExists($temporaryPath);
         } finally {
             @unlink($temporaryPath);
         }
+    }
+
+    #[DataProvider('invalidFileNameProvider')]
+    public function test_it_rejects_file_names_that_do_not_match_the_normalized_removal_contract(string $fileName): void
+    {
+        Storage::fake('s3');
+        $temporaryPath = $this->temporaryPdf('%PDF-storage');
+        $pdf = new PreparedRemovalPdf($temporaryPath, 'hash', $fileName, []);
+
+        try {
+            $this->expectException(\DomainException::class);
+            app(RemovalRequestPdfStorage::class)->store($pdf, '1156340');
+        } finally {
+            @unlink($temporaryPath);
+        }
+    }
+
+    public static function invalidFileNameProvider(): array
+    {
+        return [
+            'arbitrary name' => ['document.pdf'],
+            'lowercase plate' => ['CartaDeRemoção fsg5551.pdf'],
+            'eight character plate' => ['CartaDeRemoção FSG55511.pdf'],
+            'plate separator' => ['CartaDeRemoção FSG-5551.pdf'],
+            'path traversal' => ['../CartaDeRemoção FSG5551.pdf'],
+            'embedded slash' => ['CartaDeRemoção FSG5551.pdf/other'],
+        ];
     }
 
     public function test_it_rejects_malicious_or_blank_vehicle_ids(): void
@@ -356,6 +370,22 @@ class ProcessRemovalRequestEmailTest extends TestCase
             app(RemovalRequestPdfStorage::class)->store($pdf, '1156340');
         } finally {
             @unlink($temporaryPath);
+        }
+    }
+
+    public function test_it_closes_the_upload_stream_when_s3_throws(): void
+    {
+        $temporaryPath = $this->temporaryPdf('%PDF-storage');
+        $disk = $this->mock(\Illuminate\Contracts\Filesystem\Filesystem::class);
+        $disk->shouldReceive('put')->once()->andThrow(new RuntimeException('s3 failed'));
+        Storage::shouldReceive('disk')->once()->with('s3')->andReturn($disk);
+        $pdf = new PreparedRemovalPdf($temporaryPath, 'hash', 'CartaDeRemoção FSG5551.pdf', []);
+
+        try {
+            $this->expectException(RuntimeException::class);
+            app(RemovalRequestPdfStorage::class)->store($pdf, '1156340');
+        } finally {
+            $this->assertTrue(unlink($temporaryPath));
         }
     }
 

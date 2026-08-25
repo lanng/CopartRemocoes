@@ -4,6 +4,7 @@ namespace Tests\Feature\MicrosoftGraph;
 
 use App\Models\MicrosoftGraphConnection;
 use App\Services\MicrosoftGraph\MicrosoftGraphClient;
+use DomainException;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\Client\Request;
 use Illuminate\Support\Carbon;
@@ -109,6 +110,80 @@ class MicrosoftGraphClientTest extends TestCase
         $this->expectException(\Illuminate\Http\Client\RequestException::class);
 
         app(MicrosoftGraphClient::class)->downloadMessageAttachment($connection, 'message-id', 'attachment-id');
+    }
+
+    public function test_it_streams_an_attachment_to_a_file_without_exceeding_the_limit(): void
+    {
+        $connection = MicrosoftGraphConnection::factory()->create();
+        $bytes = '%PDF-streamed-content';
+        $destinationPath = tempnam(sys_get_temp_dir(), 'graph_attachment_');
+        $this->assertIsString($destinationPath);
+        Http::fake([
+            'https://graph.microsoft.com/v1.0/me/messages/*/attachments/*/$value' => Http::response($bytes),
+        ]);
+
+        try {
+            $copiedBytes = app(MicrosoftGraphClient::class)->downloadMessageAttachmentToPath(
+                $connection,
+                'message-id',
+                'attachment-id',
+                $destinationPath,
+                strlen($bytes),
+            );
+
+            $this->assertSame(strlen($bytes), $copiedBytes);
+            $this->assertSame(strlen($bytes), filesize($destinationPath));
+            $this->assertSame($bytes, file_get_contents($destinationPath));
+        } finally {
+            @unlink($destinationPath);
+        }
+    }
+
+    public function test_streaming_an_attachment_aborts_when_the_body_exceeds_the_limit(): void
+    {
+        $connection = MicrosoftGraphConnection::factory()->create();
+        $bytes = '%PDF-streamed-content';
+        $destinationPath = tempnam(sys_get_temp_dir(), 'graph_attachment_');
+        $this->assertIsString($destinationPath);
+        Http::fake([
+            'https://graph.microsoft.com/v1.0/me/messages/*/attachments/*/$value' => Http::response($bytes),
+        ]);
+
+        try {
+            $this->expectException(DomainException::class);
+            app(MicrosoftGraphClient::class)->downloadMessageAttachmentToPath(
+                $connection,
+                'message-id',
+                'attachment-id',
+                $destinationPath,
+                strlen($bytes) - 1,
+            );
+        } finally {
+            $this->assertTrue(unlink($destinationPath));
+        }
+    }
+
+    public function test_streaming_an_attachment_propagates_graph_http_errors(): void
+    {
+        $destinationPath = tempnam(sys_get_temp_dir(), 'graph_attachment_');
+        $this->assertIsString($destinationPath);
+        Http::fake([
+            'https://graph.microsoft.com/*' => Http::response(['error' => ['message' => 'Attachment unavailable']], 404),
+        ]);
+
+        try {
+            $this->expectException(\Illuminate\Http\Client\RequestException::class);
+
+            app(MicrosoftGraphClient::class)->downloadMessageAttachmentToPath(
+                MicrosoftGraphConnection::factory()->create(),
+                'message-id',
+                'attachment-id',
+                $destinationPath,
+                1024,
+            );
+        } finally {
+            @unlink($destinationPath);
+        }
     }
 
     public function test_a_full_page_advances_only_to_the_last_message(): void

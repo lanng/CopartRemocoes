@@ -21,6 +21,10 @@ class RemovalRequestPdfStorage
             throw new DomainException('O ID do veículo é inválido.');
         }
 
+        if (preg_match('/^CartaDeRemoção [A-Z0-9]{7}\.pdf$/u', $pdf->fileName) !== 1) {
+            throw new DomainException('O nome do arquivo PDF é inválido.');
+        }
+
         if (! is_file($pdf->temporaryPath) || ! is_readable($pdf->temporaryPath)) {
             throw new RuntimeException('O arquivo temporário do PDF não está disponível.');
         }
