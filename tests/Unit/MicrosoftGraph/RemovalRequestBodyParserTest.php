@@ -142,6 +142,9 @@ class RemovalRequestBodyParserTest extends TestCase
             'repeated separator' => ['fipe_value', 'Valor da FIPE: R$ 56..739,00;'],
             'junk after value' => ['value', 'Valor frete R$ 866.48abc;'],
             'text after value' => ['value', 'Valor frete R$ 866,48 inválido;'],
+            'keyword text after value' => ['value', 'Valor frete R$ 866,48 data inválido;'],
+            'negative freight' => ['value', 'Valor frete R$ -866,48;'],
+            'negative fipe' => ['fipe_value', 'Valor da FIPE: R$ -56.739,00;'],
         ];
     }
 

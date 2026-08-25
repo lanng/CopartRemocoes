@@ -25,6 +25,7 @@ class RemovalRequestNormalizerTest extends TestCase
 
         $this->assertSame('ALLIANZ SEGUROS SA', $normalizer->insurance(' Allianz Seguros S/A '));
         $this->assertSame('SEGURADORA AGIL', $normalizer->insurance('Seguradora Ágil'));
+        $this->assertSame('LODZ', $normalizer->insurance('Łódź'));
         $this->assertSame('東京海上', $normalizer->insurance('東京海上'));
         $this->assertSame('ΑΣΦΑΛΙΣΤΙΚΉ', $normalizer->insurance('Ασφαλιστική'));
         $this->assertNull($normalizer->insurance(' / '));
@@ -56,13 +57,13 @@ class RemovalRequestNormalizerTest extends TestCase
     }
 
     #[DataProvider('invalidDecimalProvider')]
-    public function test_it_rejects_ambiguous_or_malformed_string_decimals(string $value): void
+    public function test_it_rejects_ambiguous_or_malformed_decimals(mixed $value): void
     {
         $this->assertNull((new RemovalRequestNormalizer)->decimal($value));
     }
 
     /**
-     * @return array<string, array{string}>
+     * @return array<string, array{string|float}>
      */
     public static function invalidDecimalProvider(): array
     {
@@ -76,6 +77,9 @@ class RemovalRequestNormalizerTest extends TestCase
             'space grouping' => ['1 234,56'],
             'trailing comma' => ['866,'],
             'missing integer part' => ['R$ ,48'],
+            'negative brazilian amount' => ['-866,48'],
+            'negative float amount' => [-866.48],
+            'float with three decimal places' => [0.001],
         ];
     }
 
@@ -112,6 +116,7 @@ class RemovalRequestNormalizerTest extends TestCase
             'plate formatting' => ['plate', 'ABC-1234', 'abc1234', true],
             'identifier whitespace' => ['vehicle_id', ' 1156340 ', '1156340', true],
             'insurance punctuation and case' => ['insurance', 'ALLIANZ SEGUROS S/A', 'Allianz Seguros SA', true],
+            'transliterated insurance' => ['insurance', 'Łódź', 'Lodz', true],
             'different insurance' => ['insurance', 'ALLIANZ SEGUROS SA', 'TOKIO MARINE', false],
             'freight decimal formats' => ['value', '866,48', '866.48', true],
             'fipe decimal formats' => ['fipe_value', '56.739,00', '56739.00', true],

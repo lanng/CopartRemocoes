@@ -2,6 +2,8 @@
 
 namespace App\Services\MicrosoftGraph\RemovalRequests;
 
+use Illuminate\Support\Str;
+
 class RemovalRequestNormalizer
 {
     public function plate(?string $value): ?string
@@ -47,22 +49,13 @@ class RemovalRequestNormalizer
             return null;
         }
 
-        $value = strtr($value, [
-            'À' => 'A', 'Á' => 'A', 'Â' => 'A', 'Ã' => 'A', 'Ä' => 'A', 'Å' => 'A',
-            'à' => 'a', 'á' => 'a', 'â' => 'a', 'ã' => 'a', 'ä' => 'a', 'å' => 'a',
-            'Ç' => 'C', 'ç' => 'c',
-            'È' => 'E', 'É' => 'E', 'Ê' => 'E', 'Ë' => 'E',
-            'è' => 'e', 'é' => 'e', 'ê' => 'e', 'ë' => 'e',
-            'Ì' => 'I', 'Í' => 'I', 'Î' => 'I', 'Ï' => 'I',
-            'ì' => 'i', 'í' => 'i', 'î' => 'i', 'ï' => 'i',
-            'Ñ' => 'N', 'ñ' => 'n',
-            'Ò' => 'O', 'Ó' => 'O', 'Ô' => 'O', 'Õ' => 'O', 'Ö' => 'O', 'Ø' => 'O',
-            'ò' => 'o', 'ó' => 'o', 'ô' => 'o', 'õ' => 'o', 'ö' => 'o', 'ø' => 'o',
-            'Ù' => 'U', 'Ú' => 'U', 'Û' => 'U', 'Ü' => 'U',
-            'ù' => 'u', 'ú' => 'u', 'û' => 'u', 'ü' => 'u',
-            'Ý' => 'Y', 'Ÿ' => 'Y', 'ý' => 'y', 'ÿ' => 'y',
-            'Æ' => 'AE', 'æ' => 'ae', 'Œ' => 'OE', 'œ' => 'oe',
-        ]);
+        $transliterated = Str::ascii($value);
+        $containsNonLatin = preg_match('/[^\p{Latin}\p{N}\p{P}\p{S}\p{Z}]/u', $value) === 1;
+
+        if (! $containsNonLatin && preg_match('/[\p{L}\p{N}]/u', $transliterated) === 1) {
+            $value = $transliterated;
+        }
+
         $value = mb_strtoupper($value, 'UTF-8');
         $value = preg_replace('/[^\p{L}\p{N}\s]/u', '', $value);
 
@@ -76,11 +69,23 @@ class RemovalRequestNormalizer
         }
 
         if (is_int($value)) {
-            return number_format($value, 2, '.', '');
+            return $value < 0 ? null : number_format($value, 2, '.', '');
         }
 
         if (is_float($value)) {
-            return is_finite($value) ? number_format($value, 2, '.', '') : null;
+            if (! is_finite($value) || $value < 0) {
+                return null;
+            }
+
+            $normalized = rtrim(rtrim(sprintf('%.15f', $value), '0'), '.');
+
+            $decimalSeparatorPosition = strpos($normalized, '.');
+
+            if ($decimalSeparatorPosition !== false && strlen($normalized) - $decimalSeparatorPosition - 1 > 2) {
+                return null;
+            }
+
+            return number_format($value, 2, '.', '');
         }
 
         $value = trim(str_replace("\xC2\xA0", ' ', $value));
@@ -88,7 +93,7 @@ class RemovalRequestNormalizer
         $value = preg_replace('/^r\$\s*/iu', '', $value);
         $value = trim((string) $value);
 
-        if ($value === '' || preg_match('/\s/u', $value)) {
+        if ($value === '' || str_starts_with($value, '-') || preg_match('/\s/u', $value)) {
             return null;
         }
 

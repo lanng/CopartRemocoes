@@ -4,7 +4,7 @@ namespace App\Services\MicrosoftGraph\RemovalRequests;
 
 class RemovalRequestBodyParser
 {
-    private const FIELD_BOUNDARY = '(?:;|$|remetente\b|destinat[áa]rio\b|p[aá]tio\b|valor\b|data\b|c[oó]digo\b)';
+    private const FIELD_BOUNDARY = '(?:;|\n|\z|remetente\s*:|destinat[áa]rio\s*:|p[aá]tio\s+(?:de\s+)?destino\b|valor\s+(?:total\s+da\s+mercadoria|total\s+do\s+serviço|da\s+fipe|(?:de\s+)?frete)\b|data\s+(?:para\s+retirar|limite\s+de\s+entrega)\b|c[oó]digo\s+(?:do\s+)?ve[ií]culo\b)';
 
     /**
      * @return array{valid: bool, data: array<string, string>, missing_fields: list<string>}
@@ -12,8 +12,9 @@ class RemovalRequestBodyParser
     public function parse(string $body): array
     {
         $body = html_entity_decode($body, ENT_QUOTES | ENT_HTML5, 'UTF-8');
-        $body = str_replace("\xC2\xA0", ' ', $body);
-        $body = preg_replace('/\s+/u', ' ', $body);
+        $body = str_replace(["\xC2\xA0", "\r\n", "\r"], [' ', "\n", "\n"], $body);
+        $body = preg_replace('/[^\S\n]+/u', ' ', $body);
+        $body = preg_replace('/\n+/u', "\n", (string) $body);
         $body = trim((string) $body);
         $normalizer = new RemovalRequestNormalizer;
         $data = [];
@@ -22,7 +23,7 @@ class RemovalRequestBodyParser
             $data['payment_code'] = mb_strtoupper((string) $normalizer->identifier($matches[1]), 'UTF-8');
         }
 
-        if (preg_match('~remetente\s*:\s*(?:dados\s+do\s+)?comitente\s+(.+?)(?=\s*(?:;|destinat[áa]rio\b|p[aá]tio\b|valor\b|data\b|c[oó]digo\b|$))~iu', $body, $matches)) {
+        if (preg_match('~remetente\s*:\s*(?:dados\s+do\s+)?comitente\s+([^\n;]+?)(?=[ \t]*'.self::FIELD_BOUNDARY.')~iu', $body, $matches)) {
             $value = $normalizer->insurance($matches[1]);
 
             if ($value !== null) {
@@ -62,7 +63,7 @@ class RemovalRequestBodyParser
             $data['deadline_delivery'] = $value;
         }
 
-        if (preg_match('~c[oó]digo\s+(?:do\s+)?ve[ií]culo\s*:?\s*(\d+)(?=\s*'.self::FIELD_BOUNDARY.')~iu', $body, $matches)) {
+        if (preg_match('~c[oó]digo\s+(?:do\s+)?ve[ií]culo\s*:?\s*(\d+)(?=[ \t]*'.self::FIELD_BOUNDARY.')~iu', $body, $matches)) {
             $data['vehicle_id'] = $normalizer->identifier($matches[1]);
         }
 
@@ -91,7 +92,7 @@ class RemovalRequestBodyParser
     private function extractMoney(string $body, string $labelPattern, RemovalRequestNormalizer $normalizer): ?string
     {
         if (! preg_match(
-            '~'.$labelPattern.'\s*:?\s*(?:r\$\s*)?([^\s;]+)(?=\s*'.self::FIELD_BOUNDARY.')~iu',
+            '~'.$labelPattern.'\s*:?\s*(?:r\$\s*)?([^\s;]+)(?=[ \t]*'.self::FIELD_BOUNDARY.')~iu',
             $body,
             $matches
         )) {
@@ -104,7 +105,7 @@ class RemovalRequestBodyParser
     private function extractDate(string $body, string $labelPattern, RemovalRequestNormalizer $normalizer): ?string
     {
         if (! preg_match(
-            '~'.$labelPattern.'\s*:?\s*(\d{2}[/-]\d{2}[/-]\d{4}|\d{4}-\d{2}-\d{2})(?=\s*'.self::FIELD_BOUNDARY.')~iu',
+            '~'.$labelPattern.'\s*:?\s*(\d{2}[/-]\d{2}[/-]\d{4}|\d{4}-\d{2}-\d{2})(?=[ \t]*'.self::FIELD_BOUNDARY.')~iu',
             $body,
             $matches
         )) {
