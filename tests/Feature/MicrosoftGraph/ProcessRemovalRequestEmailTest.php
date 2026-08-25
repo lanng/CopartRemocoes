@@ -34,7 +34,7 @@ class ProcessRemovalRequestEmailTest extends TestCase
         $this->assertSame('42', $job->uniqueId());
         $this->assertSame(3, $job->tries);
         $this->assertSame(120, $job->timeout);
-        $this->assertSame(360, $job->uniqueFor);
+        $this->assertSame(600, $job->uniqueFor);
         $this->assertSame([30, 120, 300], $job->backoff());
         $this->assertInstanceOf(WithoutOverlapping::class, $job->middleware()[0]);
     }

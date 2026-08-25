@@ -7,9 +7,13 @@ use App\Models\Register;
 use App\Services\MicrosoftGraph\RemovalRequests\PreparedRemovalPdf;
 use App\Services\MicrosoftGraph\RemovalRequests\RemovalRequestImporter;
 use App\Services\MicrosoftGraph\RemovalRequests\RemovalRequestPdfStorage;
+use Illuminate\Contracts\Cache\Lock;
+use Illuminate\Contracts\Cache\LockTimeoutException;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Storage;
+use Mockery;
 use Mockery\MockInterface;
 use PHPUnit\Framework\Attributes\DataProvider;
 use RuntimeException;
@@ -352,6 +356,98 @@ class RemovalRequestImporterTest extends TestCase
         } finally {
             $this->assertDatabaseCount('registers', 0);
             @unlink($pdf->temporaryPath);
+        }
+    }
+
+    public function test_it_uses_the_normalized_plate_in_the_import_lock_key(): void
+    {
+        Storage::fake('s3');
+        $item = $this->item(['subject' => ['vehicle_plate' => 'ABC-1D23']]);
+        $pdf = $this->pdf(['vehicle_plate' => 'ABC 1D23']);
+        $lock = Mockery::mock(Lock::class);
+        $lock->shouldReceive('block')
+            ->once()
+            ->with(1, Mockery::type('callable'))
+            ->andReturnUsing(fn (int $timeout, callable $callback): IntegrationInboxItem => $callback());
+        Cache::shouldReceive('lock')
+            ->once()
+            ->with('removal-request-import:plate:ABC1D23', 600)
+            ->andReturn($lock);
+
+        try {
+            $result = app(RemovalRequestImporter::class)->handle($item, $pdf);
+
+            $this->assertSame('processed', $result->status);
+        } finally {
+            @unlink($pdf->temporaryPath);
+        }
+    }
+
+    public function test_an_occupied_plate_lock_fails_without_creating_a_duplicate(): void
+    {
+        Storage::fake('s3');
+        $item = $this->item();
+        $pdf = $this->pdf();
+        $lock = Mockery::mock(Lock::class);
+        $lock->shouldReceive('block')
+            ->once()
+            ->with(1, Mockery::type('callable'))
+            ->andThrow(new LockTimeoutException);
+        Cache::shouldReceive('lock')
+            ->once()
+            ->with('removal-request-import:plate:ABC1D23', 600)
+            ->andReturn($lock);
+
+        try {
+            $this->expectException(LockTimeoutException::class);
+            app(RemovalRequestImporter::class)->handle($item, $pdf);
+        } finally {
+            $this->assertDatabaseCount('registers', 0);
+            $this->assertSame('queued', $item->refresh()->status);
+            @unlink($pdf->temporaryPath);
+        }
+    }
+
+    public function test_different_plates_use_independent_import_locks(): void
+    {
+        Storage::fake('s3');
+        $firstItem = $this->item();
+        $firstPdf = $this->pdf();
+        $secondItem = $this->item([
+            'subject' => ['vehicle_plate' => 'XYZ-9876', 'vehicle_id' => '2222222'],
+            'body' => ['vehicle_id' => '2222222'],
+        ]);
+        $secondPdf = $this->pdf([
+            'vehicle_plate' => 'XYZ 9876',
+            'vehicle_id' => '2222222',
+        ]);
+        $firstLock = Mockery::mock(Lock::class);
+        $firstLock->shouldReceive('block')
+            ->once()
+            ->with(1, Mockery::type('callable'))
+            ->andReturnUsing(fn (int $timeout, callable $callback): IntegrationInboxItem => $callback());
+        $secondLock = Mockery::mock(Lock::class);
+        $secondLock->shouldReceive('block')
+            ->once()
+            ->with(1, Mockery::type('callable'))
+            ->andReturnUsing(fn (int $timeout, callable $callback): IntegrationInboxItem => $callback());
+        Cache::shouldReceive('lock')
+            ->once()
+            ->with('removal-request-import:plate:ABC1D23', 600)
+            ->andReturn($firstLock);
+        Cache::shouldReceive('lock')
+            ->once()
+            ->with('removal-request-import:plate:XYZ9876', 600)
+            ->andReturn($secondLock);
+
+        try {
+            app(RemovalRequestImporter::class)->handle($firstItem, $firstPdf);
+            app(RemovalRequestImporter::class)->handle($secondItem, $secondPdf);
+
+            $this->assertDatabaseCount('registers', 2);
+        } finally {
+            @unlink($firstPdf->temporaryPath);
+            @unlink($secondPdf->temporaryPath);
         }
     }
 

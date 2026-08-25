@@ -7,11 +7,16 @@ use App\Enums\RegisterStatusEnum;
 use App\Models\IntegrationInboxItem;
 use App\Models\Register;
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Throwable;
 
 class RemovalRequestImporter
 {
+    private const IMPORT_LOCK_TTL = 600;
+
+    private const IMPORT_LOCK_WAIT = 1;
+
     private const REGISTER_FIELDS = [
         'vehicle_model',
         'vehicle_plate',
@@ -66,46 +71,51 @@ class RemovalRequestImporter
             return $this->markPending($item, $failureReason);
         }
 
-        return DB::transaction(function () use ($item, $pdf, $canonical): IntegrationInboxItem {
-            $identity = $this->resolveIdentity($canonical['vehicle_id'], $canonical['vehicle_plate']);
+        return Cache::lock(
+            'removal-request-import:plate:'.$canonical['vehicle_plate'],
+            self::IMPORT_LOCK_TTL,
+        )->block(self::IMPORT_LOCK_WAIT, function () use ($item, $pdf, $canonical): IntegrationInboxItem {
+            return DB::transaction(function () use ($item, $pdf, $canonical): IntegrationInboxItem {
+                $identity = $this->resolveIdentity($canonical['vehicle_id'], $canonical['vehicle_plate']);
 
-            if ($identity === null) {
-                return $this->markPending($item, 'identity_conflict');
-            }
-
-            if ($identity instanceof Register) {
-                return $this->handleExisting($item, $pdf, $canonical, $identity);
-            }
-
-            $uploadedPath = $this->storage->store($pdf, $canonical['vehicle_id']);
-
-            try {
-                $register = Register::query()->create($this->registerAttributes($canonical, $pdf, $uploadedPath));
-                $isZeroFipe = $canonical['fipe_value'] === '0.00';
-
-                $item->forceFill([
-                    'status' => $isZeroFipe ? 'alert' : 'processed',
-                    'register_id' => $register->id,
-                    'failure_reason' => null,
-                    'proposed_changes' => null,
-                    'alerts' => $isZeroFipe ? ['zero_fipe'] : null,
-                    'resolved_at' => $isZeroFipe ? null : now(),
-                ])->save();
-
-                return $item->refresh();
-            } catch (Throwable $exception) {
-                try {
-                    $this->storage->delete($uploadedPath);
-                } catch (Throwable $cleanupException) {
-                    throw new \RuntimeException(
-                        'Falha ao compensar o upload do PDF: '.$cleanupException->getMessage(),
-                        0,
-                        $exception,
-                    );
+                if ($identity === null) {
+                    return $this->markPending($item, 'identity_conflict');
                 }
 
-                throw $exception;
-            }
+                if ($identity instanceof Register) {
+                    return $this->handleExisting($item, $pdf, $canonical, $identity);
+                }
+
+                $uploadedPath = $this->storage->store($pdf, $canonical['vehicle_id']);
+
+                try {
+                    $register = Register::query()->create($this->registerAttributes($canonical, $pdf, $uploadedPath));
+                    $isZeroFipe = $canonical['fipe_value'] === '0.00';
+
+                    $item->forceFill([
+                        'status' => $isZeroFipe ? 'alert' : 'processed',
+                        'register_id' => $register->id,
+                        'failure_reason' => null,
+                        'proposed_changes' => null,
+                        'alerts' => $isZeroFipe ? ['zero_fipe'] : null,
+                        'resolved_at' => $isZeroFipe ? null : now(),
+                    ])->save();
+
+                    return $item->refresh();
+                } catch (Throwable $exception) {
+                    try {
+                        $this->storage->delete($uploadedPath);
+                    } catch (Throwable $cleanupException) {
+                        throw new \RuntimeException(
+                            'Falha ao compensar o upload do PDF: '.$cleanupException->getMessage(),
+                            0,
+                            $exception,
+                        );
+                    }
+
+                    throw $exception;
+                }
+            });
         });
     }
 

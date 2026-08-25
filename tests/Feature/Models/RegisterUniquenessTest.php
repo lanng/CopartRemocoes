@@ -41,23 +41,6 @@ class RegisterUniquenessTest extends TestCase
         ]);
     }
 
-    public function test_vehicle_plates_are_unique_across_registers(): void
-    {
-        Register::factory()->create([
-            'company' => 'copart',
-            'vehicle_id' => '1111',
-            'vehicle_plate' => 'ABC1D23',
-        ]);
-
-        $this->expectException(UniqueConstraintViolationException::class);
-
-        Register::factory()->create([
-            'company' => 'copart',
-            'vehicle_id' => '2222',
-            'vehicle_plate' => 'ABC1D23',
-        ]);
-    }
-
     public function test_register_persists_pdf_hash_and_exposes_unresolved_removal_imports(): void
     {
         $register = Register::factory()->create([

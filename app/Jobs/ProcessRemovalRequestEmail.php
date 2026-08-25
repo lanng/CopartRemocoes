@@ -22,7 +22,7 @@ class ProcessRemovalRequestEmail implements ShouldBeUnique, ShouldQueue
 
     public int $timeout = 120;
 
-    public int $uniqueFor = 360;
+    public int $uniqueFor = 600;
 
     public function __construct(public int $integrationInboxItemId) {}
 
