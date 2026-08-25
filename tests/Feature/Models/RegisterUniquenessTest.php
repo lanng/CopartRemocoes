@@ -45,6 +45,7 @@ class RegisterUniquenessTest extends TestCase
     {
         $register = Register::factory()->create([
             'pdf_sha256' => str_repeat('b', 64),
+            'fipe_value' => '1234.5',
         ]);
 
         $pendingRemoval = IntegrationInboxItem::factory()->create([
@@ -81,6 +82,7 @@ class RegisterUniquenessTest extends TestCase
         $reloadedRegister = Register::query()->findOrFail($register->id);
 
         $this->assertSame(str_repeat('b', 64), $reloadedRegister->pdf_sha256);
+        $this->assertSame('1234.50', $reloadedRegister->fipe_value);
         $this->assertEqualsCanonicalizing(
             [$pendingRemoval->id, $alertRemoval->id],
             $reloadedRegister->unresolvedRemovalImports->modelKeys(),
