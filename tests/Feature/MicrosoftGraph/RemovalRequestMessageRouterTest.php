@@ -146,10 +146,6 @@ class RemovalRequestMessageRouterTest extends TestCase
             $this->assertSame('queue unavailable', $exception->getMessage());
         } finally {
             $this->app->instance(Dispatcher::class, $realDispatcher);
-            $queuedItem = IntegrationInboxItem::query()
-                ->where('external_id', $message['external_id'])
-                ->firstOrFail();
-            Cache::lock(UniqueLock::getKey(new ProcessRemovalRequestEmail($queuedItem->id)))->forceRelease();
         }
 
         $item = $router->handle($message);
@@ -266,17 +262,19 @@ class RemovalRequestMessageRouterTest extends TestCase
     {
         $subjectParser = app(\App\Services\MicrosoftGraph\RemovalRequests\RemovalRequestSubjectParser::class);
         $bodyParser = app(\App\Services\MicrosoftGraph\RemovalRequests\RemovalRequestBodyParser::class);
+        $uniqueLock = app(UniqueLock::class);
 
-        return new class($subjectParser, $bodyParser, $exception) extends QueueRemovalRequestEmail
+        return new class($subjectParser, $bodyParser, $uniqueLock, $exception) extends QueueRemovalRequestEmail
         {
             private bool $firstLookup = true;
 
             public function __construct(
                 $subjectParser,
                 $bodyParser,
+                $uniqueLock,
                 private readonly QueryException $exception,
             ) {
-                parent::__construct($subjectParser, $bodyParser);
+                parent::__construct($subjectParser, $bodyParser, $uniqueLock);
             }
 
             protected function findItem(string $externalId): ?IntegrationInboxItem
