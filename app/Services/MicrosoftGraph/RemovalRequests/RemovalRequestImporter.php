@@ -94,7 +94,15 @@ class RemovalRequestImporter
 
                 return $item->refresh();
             } catch (Throwable $exception) {
-                $this->storage->delete($uploadedPath);
+                try {
+                    $this->storage->delete($uploadedPath);
+                } catch (Throwable $cleanupException) {
+                    throw new \RuntimeException(
+                        'Falha ao compensar o upload do PDF: '.$cleanupException->getMessage(),
+                        0,
+                        $exception,
+                    );
+                }
 
                 throw $exception;
             }
@@ -207,8 +215,8 @@ class RemovalRequestImporter
             || mb_strlen($canonical['destination_city']) > 50
             || $canonical['vehicle_id'] === null
             || preg_match('/^\d{1,10}$/', $canonical['vehicle_id']) !== 1
-            || $canonical['value'] === null
-            || $canonical['fipe_value'] === null
+            || $this->exceedsDecimal($canonical['value'], '9999.99')
+            || $this->exceedsDecimal($canonical['fipe_value'], '999999.99')
             || $canonical['payment_code'] === null
             || $canonical['insurance'] === null
         ) {
@@ -216,6 +224,24 @@ class RemovalRequestImporter
         }
 
         return null;
+    }
+
+    private function exceedsDecimal(?string $value, string $maximum): bool
+    {
+        if ($value === null) {
+            return true;
+        }
+
+        [$valueInteger, $valueFraction] = array_pad(explode('.', $value, 2), 2, '00');
+        [$maximumInteger, $maximumFraction] = array_pad(explode('.', $maximum, 2), 2, '00');
+        $valueInteger = ltrim($valueInteger, '0') ?: '0';
+        $maximumInteger = ltrim($maximumInteger, '0') ?: '0';
+
+        if (strlen($valueInteger) !== strlen($maximumInteger)) {
+            return strlen($valueInteger) > strlen($maximumInteger);
+        }
+
+        return ($valueInteger.$valueFraction) > ($maximumInteger.$maximumFraction);
     }
 
     /** @param array<string, mixed> $source */

@@ -22,7 +22,7 @@ class ProcessRemovalRequestEmail implements ShouldBeUnique, ShouldQueue
 
     public int $timeout = 120;
 
-    public int $uniqueFor = 900;
+    public int $uniqueFor = 360;
 
     public function __construct(public int $integrationInboxItemId) {}
 
@@ -101,17 +101,21 @@ class ProcessRemovalRequestEmail implements ShouldBeUnique, ShouldQueue
 
     public function failed(Throwable $exception): void
     {
-        $item = IntegrationInboxItem::query()->find($this->integrationInboxItemId);
+        DB::transaction(function (): void {
+            $item = IntegrationInboxItem::query()
+                ->lockForUpdate()
+                ->find($this->integrationInboxItemId);
 
-        if ($item === null || $this->isTerminal($item->status)) {
-            return;
-        }
+            if ($item === null || ! in_array($item->status, ['queued', 'processing'], true)) {
+                return;
+            }
 
-        $item->forceFill([
-            'status' => 'pending',
-            'failure_reason' => 'processing_failed',
-            'resolved_at' => null,
-        ])->save();
+            $item->forceFill([
+                'status' => 'pending',
+                'failure_reason' => 'processing_failed',
+                'resolved_at' => null,
+            ])->save();
+        });
     }
 
     private function markPending(string $failureReason): void

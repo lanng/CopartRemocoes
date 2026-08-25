@@ -15,6 +15,7 @@ use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Queue;
 use Mockery;
+use PHPUnit\Framework\Attributes\DataProvider;
 use Tests\TestCase;
 
 class RemovalRequestMessageRouterTest extends TestCase
@@ -124,6 +125,52 @@ class RemovalRequestMessageRouterTest extends TestCase
         Queue::assertPushed(ProcessRemovalRequestEmail::class, function (ProcessRemovalRequestEmail $job) use ($item): bool {
             return $job->uniqueId() === (string) $item->id;
         });
+    }
+
+    public function test_it_recovers_dispatch_for_an_existing_processing_item(): void
+    {
+        Queue::fake();
+        Cache::flush();
+        $message = $this->removalRequestMessage();
+        $item = IntegrationInboxItem::factory()->create([
+            'source' => 'microsoft_graph',
+            'external_id' => $message['external_id'],
+            'message_type' => 'removal_request',
+            'status' => 'processing',
+        ]);
+
+        $result = app(RemovalRequestMessageRouter::class)->handle($message);
+
+        $this->assertSame($item->id, $result->id);
+        Queue::assertPushed(ProcessRemovalRequestEmail::class, 1);
+    }
+
+    #[DataProvider('terminalStatusProvider')]
+    public function test_it_does_not_recover_dispatch_for_terminal_items(string $status): void
+    {
+        Queue::fake();
+        Cache::flush();
+        $message = $this->removalRequestMessage();
+        IntegrationInboxItem::factory()->create([
+            'source' => 'microsoft_graph',
+            'external_id' => $message['external_id'],
+            'message_type' => 'removal_request',
+            'status' => $status,
+        ]);
+
+        app(RemovalRequestMessageRouter::class)->handle($message);
+
+        Queue::assertNothingPushed();
+    }
+
+    public static function terminalStatusProvider(): array
+    {
+        return [
+            'processed' => ['processed'],
+            'no changes' => ['no_changes'],
+            'alert' => ['alert'],
+            'rejected' => ['rejected'],
+        ];
     }
 
     public function test_it_retries_dispatch_when_the_first_after_commit_dispatch_fails(): void

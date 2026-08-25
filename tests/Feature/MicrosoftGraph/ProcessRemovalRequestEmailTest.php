@@ -34,7 +34,7 @@ class ProcessRemovalRequestEmailTest extends TestCase
         $this->assertSame('42', $job->uniqueId());
         $this->assertSame(3, $job->tries);
         $this->assertSame(120, $job->timeout);
-        $this->assertSame(900, $job->uniqueFor);
+        $this->assertSame(360, $job->uniqueFor);
         $this->assertSame([30, 120, 300], $job->backoff());
         $this->assertInstanceOf(WithoutOverlapping::class, $job->middleware()[0]);
     }
@@ -190,6 +190,33 @@ class ProcessRemovalRequestEmailTest extends TestCase
         $this->assertSame('pending', $item->refresh()->status);
         $this->assertSame('processing_failed', $item->failure_reason);
         $this->assertStringNotContainsString('secret', (string) $item->failure_reason);
+    }
+
+    #[DataProvider('functionalStatusProvider')]
+    public function test_failed_does_not_overwrite_an_item_resolved_by_another_worker(string $status, ?string $resolvedAt): void
+    {
+        $item = IntegrationInboxItem::factory()->create([
+            'message_type' => 'removal_request',
+            'status' => $status,
+            'resolved_at' => $resolvedAt,
+            'failure_reason' => 'existing_reason',
+        ]);
+
+        (new ProcessRemovalRequestEmail($item->id))->failed(new RuntimeException('late failure'));
+
+        $this->assertSame($status, $item->refresh()->status);
+        $this->assertSame('existing_reason', $item->failure_reason);
+        $this->assertSame($resolvedAt, $item->resolved_at?->toDateTimeString());
+    }
+
+    public static function functionalStatusProvider(): array
+    {
+        return [
+            'processed' => ['processed', null],
+            'no changes' => ['no_changes', now()->toDateTimeString()],
+            'alert' => ['alert', null],
+            'resolved pending' => ['pending', now()->toDateTimeString()],
+        ];
     }
 
     public function test_it_accepts_metadata_and_bytes_exactly_at_the_configured_limit(): void
@@ -586,6 +613,26 @@ class ProcessRemovalRequestEmailTest extends TestCase
         } finally {
             @unlink($temporaryPath);
         }
+    }
+
+    public function test_delete_throws_when_s3_reports_failure(): void
+    {
+        $disk = $this->mock(\Illuminate\Contracts\Filesystem\Filesystem::class);
+        $disk->shouldReceive('delete')->once()->with('pdf/path.pdf')->andReturnFalse();
+        Storage::shouldReceive('disk')->once()->with('s3')->andReturn($disk);
+
+        $this->expectException(RuntimeException::class);
+        app(RemovalRequestPdfStorage::class)->delete('pdf/path.pdf');
+    }
+
+    public function test_delete_propagates_s3_exceptions(): void
+    {
+        $disk = $this->mock(\Illuminate\Contracts\Filesystem\Filesystem::class);
+        $disk->shouldReceive('delete')->once()->with('pdf/path.pdf')->andThrow(new RuntimeException('delete failed'));
+        Storage::shouldReceive('disk')->once()->with('s3')->andReturn($disk);
+
+        $this->expectExceptionMessage('delete failed');
+        app(RemovalRequestPdfStorage::class)->delete('pdf/path.pdf');
     }
 
     private function fakeGraph(array $attachments, string $bytes): void

@@ -66,7 +66,7 @@ class QueueRemovalRequestEmail
 
     private function scheduleRecoveryAfterCommit(IntegrationInboxItem $item): void
     {
-        if ($item->status !== 'queued') {
+        if (! in_array($item->status, ['queued', 'processing'], true)) {
             return;
         }
 

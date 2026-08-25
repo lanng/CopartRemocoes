@@ -12,6 +12,7 @@ use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Storage;
 use Mockery\MockInterface;
 use PHPUnit\Framework\Attributes\DataProvider;
+use RuntimeException;
 use Tests\TestCase;
 
 class RemovalRequestImporterTest extends TestCase
@@ -114,6 +115,39 @@ class RemovalRequestImporterTest extends TestCase
                 'pdf' => ['deadline_withdraw' => '04/09/2026'],
             ], 'invalid_constraints'],
             'invalid money' => [['body' => ['value' => 'not-money']], 'invalid_constraints'],
+            'value exceeds database precision' => [['body' => ['value' => '10000.00']], 'invalid_constraints'],
+            'fipe exceeds database precision' => [['body' => ['fipe_value' => '1000000.00']], 'invalid_constraints'],
+            'invalid body date' => [['body' => ['deadline_delivery' => '31/02/2026']], 'invalid_constraints'],
+            'invalid pdf date' => [['pdf' => ['deadline_delivery' => '31/02/2026']], 'invalid_constraints'],
+        ];
+    }
+
+    #[DataProvider('moneyBoundaryProvider')]
+    public function test_money_values_at_database_limits_are_imported(string $value, string $fipeValue): void
+    {
+        Storage::fake('s3');
+        $item = $this->item(['body' => [
+            'value' => $value,
+            'fipe_value' => $fipeValue,
+        ]]);
+        $pdf = $this->pdf();
+
+        try {
+            $result = app(RemovalRequestImporter::class)->handle($item, $pdf);
+
+            $this->assertSame('processed', $result->status);
+            $this->assertSame($value, Register::query()->sole()->value);
+            $this->assertSame($fipeValue, Register::query()->sole()->fipe_value);
+        } finally {
+            @unlink($pdf->temporaryPath);
+        }
+    }
+
+    public static function moneyBoundaryProvider(): array
+    {
+        return [
+            'value maximum' => ['9999.99', '43897.00'],
+            'fipe maximum' => ['500.00', '999999.99'],
         ];
     }
 
@@ -291,6 +325,32 @@ class RemovalRequestImporterTest extends TestCase
                 'id' => $item->id,
                 'status' => 'queued',
             ]);
+            @unlink($pdf->temporaryPath);
+        }
+    }
+
+    public function test_cleanup_failure_reports_cleanup_and_preserves_the_database_error(): void
+    {
+        Storage::fake('s3');
+        $item = $this->item();
+        $pdf = $this->pdf();
+        $uploadedPath = 'registros/copart/1156340/new/CartaDeRemoção ABC1D23.pdf';
+        $this->mock(RemovalRequestPdfStorage::class, function (MockInterface $mock) use ($uploadedPath): void {
+            $mock->shouldReceive('store')->once()->andReturn($uploadedPath);
+            $mock->shouldReceive('delete')->once()->with($uploadedPath)->andThrow(new RuntimeException('cleanup failed'));
+        });
+        Event::listen('eloquent.creating: '.Register::class, function (): void {
+            throw new RuntimeException('database failure');
+        });
+
+        try {
+            app(RemovalRequestImporter::class)->handle($item, $pdf);
+            $this->fail('The database failure should be propagated.');
+        } catch (RuntimeException $exception) {
+            $this->assertStringContainsString('cleanup failed', $exception->getMessage());
+            $this->assertSame('database failure', $exception->getPrevious()?->getMessage());
+        } finally {
+            $this->assertDatabaseCount('registers', 0);
             @unlink($pdf->temporaryPath);
         }
     }

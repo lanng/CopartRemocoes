@@ -54,6 +54,8 @@ class RemovalRequestPdfStorage
             return;
         }
 
-        Storage::disk('s3')->delete($path);
+        if (! Storage::disk('s3')->delete($path)) {
+            throw new RuntimeException('Não foi possível remover o PDF do S3: '.$path);
+        }
     }
 }
