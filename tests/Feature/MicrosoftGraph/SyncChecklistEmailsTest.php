@@ -3,13 +3,16 @@
 namespace Tests\Feature\MicrosoftGraph;
 
 use App\Enums\RegisterStatusEnum;
+use App\Jobs\ProcessRemovalRequestEmail;
 use App\Jobs\SyncChecklistEmails;
 use App\Models\MicrosoftGraphConnection;
 use App\Models\Register;
+use App\Services\MicrosoftGraph\SyncChecklistEmailsService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Queue\Middleware\WithoutOverlapping;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Queue;
 use Tests\TestCase;
 
 class SyncChecklistEmailsTest extends TestCase
@@ -62,6 +65,48 @@ class SyncChecklistEmailsTest extends TestCase
 
         $this->assertSame('2026-08-13 20:50:00', $connection->refresh()->last_synced_at->utc()->format('Y-m-d H:i:s'));
         $this->assertStringContainsString('Graph indisponível', (string) $connection->last_error);
+    }
+
+    public function test_it_routes_a_mixed_page_without_downloading_attachments_and_keeps_checkpoint_rules(): void
+    {
+        Carbon::setTestNow('2026-08-13 20:55:00');
+        $register = Register::factory()->create([
+            'vehicle_id' => '1146609',
+            'vehicle_plate' => 'ESN4A20',
+            'status' => RegisterStatusEnum::COLLECTED,
+        ]);
+        $connection = MicrosoftGraphConnection::factory()->create();
+        Queue::fake();
+        Http::fake([
+            'https://graph.microsoft.com/*' => Http::response([
+                'value' => [
+                    [
+                        'id' => 'checklist-message',
+                        'subject' => 'Checklist digital - 1146609',
+                        'sender' => ['emailAddress' => ['address' => 'remocao@copart.com.br']],
+                        'receivedDateTime' => '2026-08-13T20:52:00Z',
+                        'body' => ['content' => 'Veículo 1146609 - ESN4A20.', 'contentType' => 'text'],
+                        'hasAttachments' => true,
+                    ],
+                    [
+                        'id' => 'removal-message',
+                        'subject' => 'Pedido de Remoção - ESN4A20 - 1146609 - ALLIANZ SEGUROS S/A',
+                        'sender' => ['emailAddress' => ['address' => 'REMocao@copart.com.br']],
+                        'receivedDateTime' => '2026-08-13T20:53:00Z',
+                        'body' => ['content' => 'Corpo inválido para revisão.', 'contentType' => 'text'],
+                        'hasAttachments' => true,
+                    ],
+                ],
+            ]),
+        ]);
+
+        $result = app(SyncChecklistEmailsService::class)->handle();
+
+        $this->assertSame(['processed' => 2, 'ignored' => 0], $result);
+        $this->assertSame(RegisterStatusEnum::DELIVERED, $register->refresh()->status);
+        $this->assertSame('2026-08-13 20:55:00', $connection->refresh()->last_synced_at->utc()->format('Y-m-d H:i:s'));
+        Queue::assertPushed(ProcessRemovalRequestEmail::class);
+        Http::assertSentCount(1);
     }
 
     public function test_the_job_has_bounded_runtime_and_prevents_overlapping_syncs(): void

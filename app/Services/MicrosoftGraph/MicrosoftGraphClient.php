@@ -3,12 +3,15 @@
 namespace App\Services\MicrosoftGraph;
 
 use App\Models\MicrosoftGraphConnection;
+use Illuminate\Http\Client\PendingRequest;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Http;
 
 class MicrosoftGraphClient
 {
     private const GRAPH_BASE_URL = 'https://graph.microsoft.com/v1.0';
+
+    private const PREFER_HEADER = 'IdType="ImmutableId", outlook.body-content-type="text"';
 
     /**
      * @return array{messages: list<array<string, mixed>>, checkpoint_at: Carbon}
@@ -18,13 +21,10 @@ class MicrosoftGraphClient
         $accessToken = $this->accessToken($connection);
         $scanStartedAt = Carbon::now('UTC');
         $checkpoint = ($connection->last_synced_at ?? $connection->activated_at)->utc();
-        $response = Http::withToken($accessToken)
-            ->connectTimeout(10)
-            ->timeout(30)
+        $response = $this->graphRequest($accessToken)
             ->acceptJson()
-            ->withHeaders(['Prefer' => 'outlook.body-content-type="text"'])
             ->get(self::GRAPH_BASE_URL.'/me/mailFolders/inbox/messages', [
-                '$select' => 'id,subject,sender,receivedDateTime,body',
+                '$select' => 'id,subject,sender,receivedDateTime,body,hasAttachments',
                 '$filter' => 'receivedDateTime gt '.$checkpoint->toIso8601ZuluString(),
                 '$orderby' => 'receivedDateTime asc',
                 '$top' => 50,
@@ -37,6 +37,7 @@ class MicrosoftGraphClient
                 'subject' => $message['subject'] ?? '',
                 'body' => $message['body']['content'] ?? '',
                 'receivedDateTime' => $message['receivedDateTime'],
+                'hasAttachments' => (bool) ($message['hasAttachments'] ?? false),
             ])
             ->values()
             ->all();
@@ -49,6 +50,48 @@ class MicrosoftGraphClient
             'messages' => $messages,
             'checkpoint_at' => $checkpointAt,
         ];
+    }
+
+    /**
+     * @return list<array{id: string, name: string, content_type: ?string, size: int, is_inline: bool, type: ?string}>
+     */
+    public function listMessageAttachments(MicrosoftGraphConnection $connection, string $messageId): array
+    {
+        $response = $this->graphRequest($this->accessToken($connection))
+            ->acceptJson()
+            ->get(self::GRAPH_BASE_URL.'/me/messages/'.rawurlencode($messageId).'/attachments')
+            ->throw();
+
+        return collect($response->json('value', []))
+            ->map(fn (array $attachment): array => [
+                'id' => (string) ($attachment['id'] ?? ''),
+                'name' => (string) ($attachment['name'] ?? ''),
+                'content_type' => $attachment['contentType'] ?? null,
+                'size' => (int) ($attachment['size'] ?? 0),
+                'is_inline' => (bool) ($attachment['isInline'] ?? false),
+                'type' => $attachment['@odata.type'] ?? null,
+            ])
+            ->values()
+            ->all();
+    }
+
+    public function downloadMessageAttachment(
+        MicrosoftGraphConnection $connection,
+        string $messageId,
+        string $attachmentId,
+    ): string {
+        return $this->graphRequest($this->accessToken($connection))
+            ->get(self::GRAPH_BASE_URL.'/me/messages/'.rawurlencode($messageId).'/attachments/'.rawurlencode($attachmentId).'/$value')
+            ->throw()
+            ->body();
+    }
+
+    private function graphRequest(string $accessToken): PendingRequest
+    {
+        return Http::withToken($accessToken)
+            ->connectTimeout(10)
+            ->timeout(30)
+            ->withHeaders(['Prefer' => self::PREFER_HEADER]);
     }
 
     private function accessToken(MicrosoftGraphConnection $connection): string

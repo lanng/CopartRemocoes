@@ -28,6 +28,7 @@ class MicrosoftGraphClientTest extends TestCase
                     'sender' => ['emailAddress' => ['address' => 'remocao@copart.com.br']],
                     'receivedDateTime' => '2026-08-13T20:52:00Z',
                     'body' => ['content' => 'Veículo 1146609 - ESN4A20.', 'contentType' => 'text'],
+                    'hasAttachments' => true,
                 ]],
             ]),
         ]);
@@ -35,16 +36,78 @@ class MicrosoftGraphClientTest extends TestCase
         $result = app(MicrosoftGraphClient::class)->fetchNewMessages($connection);
 
         $this->assertSame('message-1', $result['messages'][0]['external_id']);
+        $this->assertTrue($result['messages'][0]['hasAttachments']);
         $this->assertSame('2026-08-13 20:55:00', $result['checkpoint_at']->format('Y-m-d H:i:s'));
         Http::assertSent(function (Request $request): bool {
             parse_str((string) parse_url($request->url(), PHP_URL_QUERY), $query);
 
             return str_starts_with($request->url(), 'https://graph.microsoft.com/v1.0/me/mailFolders/inbox/messages?')
+                && $request->header('Prefer') === ['IdType="ImmutableId", outlook.body-content-type="text"']
                 && $query['$top'] === '50'
                 && $query['$orderby'] === 'receivedDateTime asc'
                 && $query['$filter'] === 'receivedDateTime gt 2026-08-13T20:50:00Z';
         });
         Http::assertSentCount(1);
+    }
+
+    public function test_it_lists_and_downloads_message_attachments_with_encoded_immutable_ids(): void
+    {
+        $connection = MicrosoftGraphConnection::factory()->create();
+        $messageId = 'AAMk/message+id==';
+        $attachmentId = 'attachment/id==';
+        Http::fake([
+            'https://graph.microsoft.com/v1.0/me/messages/*/attachments' => Http::response([
+                'value' => [[
+                    '@odata.type' => '#microsoft.graph.fileAttachment',
+                    'id' => $attachmentId,
+                    'name' => 'CartaDeRemoção.pdf',
+                    'contentType' => 'application/pdf',
+                    'size' => 1234,
+                    'isInline' => false,
+                ]],
+            ]),
+            'https://graph.microsoft.com/v1.0/me/messages/*/attachments/*/$value' => Http::response('%PDF-test'),
+        ]);
+
+        $client = app(MicrosoftGraphClient::class);
+        $attachments = $client->listMessageAttachments($connection, $messageId);
+        $contents = $client->downloadMessageAttachment($connection, $messageId, $attachmentId);
+
+        $this->assertSame([[
+            'id' => $attachmentId,
+            'name' => 'CartaDeRemoção.pdf',
+            'content_type' => 'application/pdf',
+            'size' => 1234,
+            'is_inline' => false,
+            'type' => '#microsoft.graph.fileAttachment',
+        ]], $attachments);
+        $this->assertSame('%PDF-test', $contents);
+        Http::assertSentCount(2);
+        Http::assertSent(function (Request $request) use ($messageId): bool {
+            $encodedMessageId = rawurlencode($messageId);
+
+            return $request->url() === 'https://graph.microsoft.com/v1.0/me/messages/'.$encodedMessageId.'/attachments'
+                && $request->header('Prefer') === ['IdType="ImmutableId", outlook.body-content-type="text"'];
+        });
+        Http::assertSent(function (Request $request) use ($messageId, $attachmentId): bool {
+            $encodedMessageId = rawurlencode($messageId);
+            $encodedAttachmentId = rawurlencode($attachmentId);
+
+            return $request->url() === 'https://graph.microsoft.com/v1.0/me/messages/'.$encodedMessageId.'/attachments/'.$encodedAttachmentId.'/$value'
+                && $request->header('Prefer') === ['IdType="ImmutableId", outlook.body-content-type="text"'];
+        });
+    }
+
+    public function test_downloading_an_attachment_throws_when_graph_returns_an_http_error(): void
+    {
+        $connection = MicrosoftGraphConnection::factory()->create();
+        Http::fake([
+            'https://graph.microsoft.com/*' => Http::response(['error' => ['message' => 'Attachment unavailable']], 404),
+        ]);
+
+        $this->expectException(\Illuminate\Http\Client\RequestException::class);
+
+        app(MicrosoftGraphClient::class)->downloadMessageAttachment($connection, 'message-id', 'attachment-id');
     }
 
     public function test_a_full_page_advances_only_to_the_last_message(): void
