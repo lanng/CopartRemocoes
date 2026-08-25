@@ -45,6 +45,7 @@ class Register extends Model
         'value',
         'status',
         'pdf_path',
+        'pdf_sha256',
         'notes',
         'insurance',
         'fipe_value',
@@ -60,6 +61,7 @@ class Register extends Model
         'payment_deferred_at' => 'datetime',
         'status' => RegisterStatusEnum::class,
         'value' => 'decimal:2',
+        'fipe_value' => 'decimal:2',
         'company' => CompanyEnum::class,
     ];
 
@@ -108,6 +110,19 @@ class Register extends Model
     public function paymentBatchItems(): HasMany
     {
         return $this->hasMany(PaymentBatchItem::class);
+    }
+
+    public function integrationInboxItems(): HasMany
+    {
+        return $this->hasMany(IntegrationInboxItem::class);
+    }
+
+    public function unresolvedRemovalImports(): HasMany
+    {
+        return $this->integrationInboxItems()
+            ->where('message_type', 'removal_request')
+            ->whereIn('status', ['pending', 'alert'])
+            ->whereNull('resolved_at');
     }
 
     public function getActivitylogOptions(): LogOptions

@@ -12,8 +12,9 @@ class IntegrationInboxItem extends Model
     use HasFactory;
 
     protected $fillable = [
-        'source', 'external_id', 'status', 'sender', 'subject', 'received_at',
-        'extracted_vehicle_id', 'extracted_vehicle_plate', 'register_id',
+        'source', 'message_type', 'external_id', 'status', 'sender', 'subject', 'received_at',
+        'extracted_vehicle_id', 'extracted_vehicle_plate', 'extracted_data', 'proposed_changes',
+        'alerts', 'candidate_pdf_path', 'candidate_pdf_sha256', 'register_id',
         'previous_register_status', 'delivery_alert', 'authorized_cte_number_at_delivery',
         'failure_reason', 'resolved_by', 'resolved_at',
     ];
@@ -23,7 +24,21 @@ class IntegrationInboxItem extends Model
         return [
             'received_at' => 'datetime',
             'resolved_at' => 'datetime',
+            'extracted_data' => 'array',
+            'proposed_changes' => 'array',
+            'alerts' => 'array',
         ];
+    }
+
+    public function requiresAttention(): bool
+    {
+        return in_array($this->status, ['pending', 'alert'], true)
+            && $this->resolved_at === null;
+    }
+
+    public function isRemovalRequest(): bool
+    {
+        return $this->message_type === 'removal_request';
     }
 
     public function register(): BelongsTo

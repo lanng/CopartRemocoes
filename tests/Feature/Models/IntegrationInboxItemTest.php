@@ -36,6 +36,60 @@ class IntegrationInboxItemTest extends TestCase
         $this->assertSame('35260812345678901234550010000000011000000010', $reloadedItem->authorized_cte_number_at_delivery);
     }
 
+    public function test_removal_request_fields_are_persisted_with_expected_casts(): void
+    {
+        $item = IntegrationInboxItem::factory()->create([
+            'message_type' => 'removal_request',
+            'extracted_data' => [
+                'subject' => 'Pedido de Remoção - FSG5551',
+                'plate' => 'FSG5551',
+            ],
+            'proposed_changes' => [
+                'value' => [
+                    'current' => '800.00',
+                    'proposed' => '866.48',
+                ],
+            ],
+            'alerts' => ['freight_changed', 'zero_fipe'],
+            'candidate_pdf_path' => 'removal-requests/FSG5551.pdf',
+            'candidate_pdf_sha256' => str_repeat('a', 64),
+        ]);
+
+        $reloadedItem = IntegrationInboxItem::query()->findOrFail($item->id);
+
+        $this->assertSame('removal_request', $reloadedItem->message_type);
+        $this->assertSame([
+            'subject' => 'Pedido de Remoção - FSG5551',
+            'plate' => 'FSG5551',
+        ], $reloadedItem->extracted_data);
+        $this->assertSame([
+            'value' => [
+                'current' => '800.00',
+                'proposed' => '866.48',
+            ],
+        ], $reloadedItem->proposed_changes);
+        $this->assertSame(['freight_changed', 'zero_fipe'], $reloadedItem->alerts);
+        $this->assertSame('removal-requests/FSG5551.pdf', $reloadedItem->candidate_pdf_path);
+        $this->assertSame(str_repeat('a', 64), $reloadedItem->candidate_pdf_sha256);
+        $this->assertTrue($reloadedItem->requiresAttention());
+        $this->assertTrue($reloadedItem->isRemovalRequest());
+    }
+
+    public function test_requires_attention_is_false_for_resolved_and_processed_items(): void
+    {
+        $resolvedItem = IntegrationInboxItem::factory()->create([
+            'status' => 'alert',
+            'resolved_at' => now(),
+        ]);
+        $processedItem = IntegrationInboxItem::factory()->create([
+            'status' => 'processed',
+            'resolved_at' => null,
+        ]);
+
+        $this->assertFalse($resolvedItem->requiresAttention());
+        $this->assertFalse($processedItem->requiresAttention());
+    }
+
     #[\PHPUnit\Framework\Attributes\DataProvider('knownDeliveryAlerts')]
     public function test_known_delivery_alerts_have_expected_labels_and_colors(string $deliveryAlert, string $expectedLabel, string $expectedColor): void
     {

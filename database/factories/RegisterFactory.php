@@ -27,6 +27,7 @@ class RegisterFactory extends Factory
             'vehicle_id' => fake()->unique()->numerify('######'),
             'value' => '750.00',
             'status' => 'pending',
+            'pdf_sha256' => null,
             'insurance' => 'ALLIANZ SEGUROS SA',
             'fipe_value' => '43897.00',
             'payment_code' => 'T691299',
