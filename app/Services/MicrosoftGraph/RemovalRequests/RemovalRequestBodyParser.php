@@ -63,8 +63,10 @@ class RemovalRequestBodyParser
             $data['deadline_delivery'] = $value;
         }
 
-        if (preg_match('~c[oó]digo\s+(?:do\s+)?ve[ií]culo\s*:?\s*(\d+)(?=[ \t]*'.self::FIELD_BOUNDARY.')~iu', $body, $matches)) {
-            $data['vehicle_id'] = $normalizer->identifier($matches[1]);
+        $value = $this->extractIdentifier($body, 'c[oó]digo\s+(?:do\s+)?ve[ií]culo', $normalizer);
+
+        if ($value !== null) {
+            $data['vehicle_id'] = $value;
         }
 
         $requiredFields = [
@@ -105,7 +107,7 @@ class RemovalRequestBodyParser
     private function extractDate(string $body, string $labelPattern, RemovalRequestNormalizer $normalizer): ?string
     {
         if (! preg_match(
-            '~'.$labelPattern.'\s*:?\s*(\d{2}[/-]\d{2}[/-]\d{4}|\d{4}-\d{2}-\d{2})(?=[ \t]*'.self::FIELD_BOUNDARY.')~iu',
+            '~'.$labelPattern.'[ \t]*:?[ \t]*([^;\r\n]*?)(?:;|\r?\n|\z)~iu',
             $body,
             $matches
         )) {
@@ -113,5 +115,26 @@ class RemovalRequestBodyParser
         }
 
         return $normalizer->date($matches[1]);
+    }
+
+    private function extractIdentifier(string $body, string $labelPattern, RemovalRequestNormalizer $normalizer): ?string
+    {
+        if (! preg_match_all(
+            '~'.$labelPattern.'[ \t]*:?[ \t]*([^;\r\n]*?)(?:;|\r?\n|\z)~iu',
+            $body,
+            $matches
+        )) {
+            return null;
+        }
+
+        foreach ($matches[1] as $match) {
+            $value = trim($match);
+
+            if (preg_match('/^\d+$/', $value)) {
+                return $normalizer->identifier($value);
+            }
+        }
+
+        return null;
     }
 }

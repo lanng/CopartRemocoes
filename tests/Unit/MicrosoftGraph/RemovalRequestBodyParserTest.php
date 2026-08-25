@@ -159,6 +159,8 @@ class RemovalRequestBodyParserTest extends TestCase
             'withdraw date suffix' => ['deadline_withdraw', 'Data para retirar o veículo da oficina 26/08/2026xyz'],
             'delivery date suffix' => ['deadline_delivery', 'Data limite de entrega no pátio 03/09/2026xyz'],
             'vehicle id suffix' => ['vehicle_id', 'Código veículo 1156340abc'],
+            'date label text suffix' => ['deadline_withdraw', 'Data para retirar o veículo da oficina 26/08/2026 data limite de entrega inválido'],
+            'vehicle label text suffix' => ['vehicle_id', 'Código veículo 1156340 valor frete inválido'],
         ];
     }
 
