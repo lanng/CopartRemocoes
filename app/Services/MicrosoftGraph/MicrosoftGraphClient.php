@@ -6,6 +6,7 @@ use App\Models\MicrosoftGraphConnection;
 use DomainException;
 use Illuminate\Http\Client\PendingRequest;
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
 use Psr\Http\Message\StreamInterface;
 use RuntimeException;
@@ -198,25 +199,35 @@ class MicrosoftGraphClient
             return $connection->access_token;
         }
 
-        $payload = Http::asForm()
-            ->connectTimeout(10)
-            ->timeout(30)
-            ->post('https://login.microsoftonline.com/'.config('services.microsoft_graph.tenant').'/oauth2/v2.0/token', [
-                'client_id' => config('services.microsoft_graph.client_id'),
-                'client_secret' => config('services.microsoft_graph.client_secret'),
-                'grant_type' => 'refresh_token',
-                'refresh_token' => $connection->refresh_token,
-                'scope' => config('services.microsoft_graph.scopes'),
-            ])
-            ->throw()
-            ->json();
+        return DB::transaction(function () use ($connection): string {
+            $lockedConnection = MicrosoftGraphConnection::query()
+                ->lockForUpdate()
+                ->findOrFail($connection->id);
 
-        $connection->update([
-            'access_token' => $payload['access_token'],
-            'refresh_token' => $payload['refresh_token'] ?? $connection->refresh_token,
-            'expires_at' => now()->addSeconds($payload['expires_in'] ?? 3600),
-        ]);
+            if ($lockedConnection->expires_at?->isFuture()) {
+                return $lockedConnection->access_token;
+            }
 
-        return $payload['access_token'];
+            $payload = Http::asForm()
+                ->connectTimeout(10)
+                ->timeout(30)
+                ->post('https://login.microsoftonline.com/'.config('services.microsoft_graph.tenant').'/oauth2/v2.0/token', [
+                    'client_id' => config('services.microsoft_graph.client_id'),
+                    'client_secret' => config('services.microsoft_graph.client_secret'),
+                    'grant_type' => 'refresh_token',
+                    'refresh_token' => $lockedConnection->refresh_token,
+                    'scope' => config('services.microsoft_graph.scopes'),
+                ])
+                ->throw()
+                ->json();
+
+            $lockedConnection->update([
+                'access_token' => $payload['access_token'],
+                'refresh_token' => $payload['refresh_token'] ?? $lockedConnection->refresh_token,
+                'expires_at' => now()->addSeconds($payload['expires_in'] ?? 3600),
+            ]);
+
+            return $payload['access_token'];
+        });
     }
 }

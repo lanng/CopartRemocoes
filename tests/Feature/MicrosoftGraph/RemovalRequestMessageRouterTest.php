@@ -3,8 +3,10 @@
 namespace Tests\Feature\MicrosoftGraph;
 
 use App\Jobs\ProcessRemovalRequestEmail;
+use App\Models\IntegrationInboxItem;
 use App\Services\MicrosoftGraph\RemovalRequests\RemovalRequestMessageRouter;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Queue;
 use Tests\TestCase;
@@ -90,6 +92,32 @@ class RemovalRequestMessageRouterTest extends TestCase
 
         $this->assertDatabaseCount('integration_inbox_items', 0);
         Queue::assertNothingPushed();
+    }
+
+    public function test_it_recovers_dispatch_for_an_existing_queued_item(): void
+    {
+        Queue::fake();
+        Cache::flush();
+        $message = $this->removalRequestMessage();
+        IntegrationInboxItem::factory()->create([
+            'source' => 'microsoft_graph',
+            'external_id' => $message['external_id'],
+            'message_type' => 'removal_request',
+            'status' => 'queued',
+            'extracted_data' => [
+                'subject' => [],
+                'body' => [],
+                'body_missing_fields' => [],
+            ],
+        ]);
+
+        $item = app(RemovalRequestMessageRouter::class)->handle($message);
+
+        $this->assertSame('queued', $item->status);
+        Queue::assertPushed(ProcessRemovalRequestEmail::class, 1);
+        Queue::assertPushed(ProcessRemovalRequestEmail::class, function (ProcessRemovalRequestEmail $job) use ($item): bool {
+            return $job->uniqueId() === (string) $item->id;
+        });
     }
 
     public function test_replies_other_senders_and_irrelevant_subjects_are_ignored(): void

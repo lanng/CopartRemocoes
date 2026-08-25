@@ -2,14 +2,18 @@
 
 namespace Tests\Feature\MicrosoftGraph;
 
+use App\Jobs\ProcessRemovalRequestEmail;
+use App\Models\IntegrationInboxItem;
 use App\Models\MicrosoftGraphConnection;
 use App\Services\MicrosoftGraph\MicrosoftGraphClient;
 use App\Services\MicrosoftGraph\RemovalRequests\PreparedRemovalPdf;
+use App\Services\MicrosoftGraph\RemovalRequests\RemovalRequestImporter;
 use App\Services\MicrosoftGraph\RemovalRequests\RemovalRequestPdfPreparer;
 use App\Services\MicrosoftGraph\RemovalRequests\RemovalRequestPdfStorage;
 use App\Services\PdfExtractorService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\Client\RequestException;
+use Illuminate\Queue\Middleware\WithoutOverlapping;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Process;
 use Illuminate\Support\Facades\Storage;
@@ -21,6 +25,172 @@ use Tests\TestCase;
 class ProcessRemovalRequestEmailTest extends TestCase
 {
     use RefreshDatabase;
+
+    public function test_the_job_has_unique_retry_and_timeout_options(): void
+    {
+        $job = new ProcessRemovalRequestEmail(42);
+
+        $this->assertInstanceOf(\Illuminate\Contracts\Queue\ShouldBeUnique::class, $job);
+        $this->assertSame('42', $job->uniqueId());
+        $this->assertSame(3, $job->tries);
+        $this->assertSame(120, $job->timeout);
+        $this->assertSame(900, $job->uniqueFor);
+        $this->assertSame([30, 120, 300], $job->backoff());
+        $this->assertInstanceOf(WithoutOverlapping::class, $job->middleware()[0]);
+    }
+
+    public function test_it_prepares_imports_and_removes_the_temporary_file(): void
+    {
+        $item = IntegrationInboxItem::factory()->create([
+            'message_type' => 'removal_request',
+            'status' => 'queued',
+            'external_id' => 'message-id',
+            'extracted_vehicle_plate' => 'ABC1D23',
+        ]);
+        $pdf = new PreparedRemovalPdf(
+            temporaryPath: $this->temporaryPdf('%PDF-job'),
+            sha256: hash('sha256', '%PDF-job'),
+            fileName: 'CartaDeRemoção ABC1D23.pdf',
+            extractedData: [],
+        );
+        $connection = MicrosoftGraphConnection::factory()->create();
+        $this->mock(RemovalRequestPdfPreparer::class, function (MockInterface $mock) use ($connection, $pdf): void {
+            $mock->shouldReceive('prepare')->once()->withArgs(function (MicrosoftGraphConnection $actual, string $messageId, string $plate) use ($connection): bool {
+                return $actual->is($connection) || $actual->id === $connection->id
+                    ? $messageId === 'message-id' && $plate === 'ABC1D23'
+                    : false;
+            })->andReturn($pdf);
+        });
+        $this->mock(RemovalRequestImporter::class, function (MockInterface $mock) use ($item, $pdf): void {
+            $mock->shouldReceive('handle')->once()->withArgs(function (IntegrationInboxItem $actualItem, PreparedRemovalPdf $actualPdf) use ($item, $pdf): bool {
+                return $actualItem->is($item) && $actualPdf === $pdf;
+            })->andReturn($item->refresh()->fill(['status' => 'processed']));
+        });
+
+        try {
+            (new ProcessRemovalRequestEmail($item->id))->handle(
+                app(RemovalRequestPdfPreparer::class),
+                app(RemovalRequestImporter::class),
+            );
+
+            $this->assertFileDoesNotExist($pdf->temporaryPath);
+            $this->assertSame('processing', $item->refresh()->status);
+        } finally {
+            @unlink($pdf->temporaryPath);
+        }
+    }
+
+    public function test_domain_failures_become_safe_pending_and_cleanup_the_pdf(): void
+    {
+        $item = IntegrationInboxItem::factory()->create([
+            'message_type' => 'removal_request',
+            'status' => 'queued',
+            'extracted_vehicle_plate' => 'ABC1D23',
+        ]);
+        MicrosoftGraphConnection::factory()->create();
+        $pdf = new PreparedRemovalPdf($this->temporaryPdf('%PDF-domain'), 'hash', 'CartaDeRemoção ABC1D23.pdf', []);
+        $this->mock(RemovalRequestPdfPreparer::class, function (MockInterface $mock) use ($pdf): void {
+            $mock->shouldReceive('prepare')->andReturn($pdf);
+        });
+        $this->mock(RemovalRequestImporter::class, function (MockInterface $mock): void {
+            $mock->shouldReceive('handle')->andThrow(new \DomainException('unsafe body'));
+        });
+
+        (new ProcessRemovalRequestEmail($item->id))->handle(
+            app(RemovalRequestPdfPreparer::class),
+            app(RemovalRequestImporter::class),
+        );
+
+        $this->assertSame('pending', $item->refresh()->status);
+        $this->assertSame('domain_error', $item->failure_reason);
+        $this->assertFileDoesNotExist($pdf->temporaryPath);
+    }
+
+    public function test_transient_failures_are_rethrown_and_cleanup_the_pdf(): void
+    {
+        $item = IntegrationInboxItem::factory()->create([
+            'message_type' => 'removal_request',
+            'status' => 'queued',
+            'extracted_vehicle_plate' => 'ABC1D23',
+        ]);
+        MicrosoftGraphConnection::factory()->create();
+        $pdf = new PreparedRemovalPdf($this->temporaryPdf('%PDF-transient'), 'hash', 'CartaDeRemoção ABC1D23.pdf', []);
+        $this->mock(RemovalRequestPdfPreparer::class, function (MockInterface $mock) use ($pdf): void {
+            $mock->shouldReceive('prepare')->andReturn($pdf);
+        });
+        $this->mock(RemovalRequestImporter::class, function (MockInterface $mock): void {
+            $mock->shouldReceive('handle')->andThrow(new RuntimeException('storage unavailable'));
+        });
+
+        try {
+            $this->expectException(RuntimeException::class);
+            (new ProcessRemovalRequestEmail($item->id))->handle(
+                app(RemovalRequestPdfPreparer::class),
+                app(RemovalRequestImporter::class),
+            );
+        } finally {
+            $this->assertFileDoesNotExist($pdf->temporaryPath);
+        }
+    }
+
+    public function test_terminal_items_are_idempotent_and_failed_marks_processing_failed(): void
+    {
+        $item = IntegrationInboxItem::factory()->create([
+            'message_type' => 'removal_request',
+            'status' => 'processed',
+        ]);
+        $this->mock(RemovalRequestPdfPreparer::class, function (MockInterface $mock): void {
+            $mock->shouldReceive('prepare')->never();
+        });
+        $this->mock(RemovalRequestImporter::class, function (MockInterface $mock): void {
+            $mock->shouldReceive('handle')->never();
+        });
+
+        (new ProcessRemovalRequestEmail($item->id))->handle(
+            app(RemovalRequestPdfPreparer::class),
+            app(RemovalRequestImporter::class),
+        );
+        (new ProcessRemovalRequestEmail($item->id))->failed(new RuntimeException('secret body'));
+
+        $this->assertSame('processed', $item->refresh()->status);
+        $this->assertNull($item->failure_reason);
+    }
+
+    public function test_missing_graph_connection_becomes_pending_without_preparing_a_pdf(): void
+    {
+        $item = IntegrationInboxItem::factory()->create([
+            'message_type' => 'removal_request',
+            'status' => 'queued',
+        ]);
+        $this->mock(RemovalRequestPdfPreparer::class, function (MockInterface $mock): void {
+            $mock->shouldReceive('prepare')->never();
+        });
+        $this->mock(RemovalRequestImporter::class, function (MockInterface $mock): void {
+            $mock->shouldReceive('handle')->never();
+        });
+
+        (new ProcessRemovalRequestEmail($item->id))->handle(
+            app(RemovalRequestPdfPreparer::class),
+            app(RemovalRequestImporter::class),
+        );
+
+        $this->assertSame('pending', $item->refresh()->status);
+        $this->assertSame('graph_connection_missing', $item->failure_reason);
+    }
+
+    public function test_failed_marks_a_non_terminal_item_with_a_safe_reason(): void
+    {
+        $item = IntegrationInboxItem::factory()->create([
+            'message_type' => 'removal_request',
+            'status' => 'processing',
+        ]);
+
+        (new ProcessRemovalRequestEmail($item->id))->failed(new RuntimeException('secret body and token'));
+
+        $this->assertSame('pending', $item->refresh()->status);
+        $this->assertSame('processing_failed', $item->failure_reason);
+        $this->assertStringNotContainsString('secret', (string) $item->failure_reason);
+    }
 
     public function test_it_accepts_metadata_and_bytes_exactly_at_the_configured_limit(): void
     {

@@ -269,4 +269,31 @@ class MicrosoftGraphClientTest extends TestCase
         $this->assertSame('new-access-token', $connection->refresh()->access_token);
         $this->assertSame('new-refresh-token', $connection->refresh()->refresh_token);
     }
+
+    public function test_it_refreshes_an_expired_token_only_once_for_stale_models(): void
+    {
+        $stored = MicrosoftGraphConnection::factory()->create([
+            'access_token' => 'old-access-token',
+            'refresh_token' => 'old-refresh-token',
+            'expires_at' => now()->subMinute(),
+        ]);
+        $firstStale = $stored->fresh();
+        $secondStale = $stored->fresh();
+
+        Http::fake([
+            'https://login.microsoftonline.com/*/oauth2/v2.0/token' => Http::response([
+                'access_token' => 'new-access-token',
+                'refresh_token' => 'new-refresh-token',
+                'expires_in' => 3600,
+            ]),
+            'https://graph.microsoft.com/*' => Http::response(['value' => []]),
+        ]);
+
+        app(MicrosoftGraphClient::class)->fetchNewMessages($firstStale);
+        app(MicrosoftGraphClient::class)->fetchNewMessages($secondStale);
+
+        Http::assertSentCount(3);
+        $this->assertSame('new-access-token', $stored->refresh()->access_token);
+        $this->assertSame('new-refresh-token', $stored->refresh()->refresh_token);
+    }
 }
