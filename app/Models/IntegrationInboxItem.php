@@ -56,6 +56,8 @@ class IntegrationInboxItem extends Model
         return match ($this->status) {
             'pending' => 'Pendente',
             'processed' => 'Processado',
+            'alert' => 'Alerta',
+            'no_changes' => 'Sem alterações',
             'duplicate' => 'Duplicado',
             default => 'Desconhecido',
         };
@@ -71,6 +73,11 @@ class IntegrationInboxItem extends Model
             'vehicle_id_mismatch' => 'ID do veículo divergente',
             'register_not_found_or_ambiguous' => 'Registro não encontrado ou ambíguo',
             'vehicle_plate_mismatch' => 'Placa divergente',
+            'identity_conflict' => 'Identidade ambígua ou divergente',
+            'missing_body_fields' => 'Campos do corpo ausentes',
+            'missing_pdf_fields' => 'Campos do PDF ausentes',
+            'invalid_constraints' => 'Restrições inválidas',
+            'update_blocked_by_status' => 'Atualização bloqueada pelo status',
             'delivery_already_confirmed' => 'Entrega já confirmada',
             default => $this->failure_reason,
         };

@@ -128,7 +128,25 @@ class Register extends Model
     public function getActivitylogOptions(): LogOptions
     {
         return LogOptions::defaults()
-            ->logOnly(['vehicle_model', 'vehicle_plate', 'origin_city', 'notes', 'status', 'driver', 'collected_date'])
+            ->logOnly([
+                'vehicle_model',
+                'vehicle_plate',
+                'origin_city',
+                'destination_city',
+                'deadline_withdraw',
+                'deadline_delivery',
+                'vehicle_id',
+                'value',
+                'notes',
+                'status',
+                'driver',
+                'collected_date',
+                'insurance',
+                'fipe_value',
+                'payment_code',
+                'pdf_path',
+                'pdf_sha256',
+            ])
             ->logOnlyDirty()
             ->dontSubmitEmptyLogs()
             ->setDescriptionForEvent(fn (string $eventName) => "O registro foi {$eventName}")

@@ -75,34 +75,61 @@ class RemovalRequestImporter
             'removal-request-import:plate:'.$canonical['vehicle_plate'],
             self::IMPORT_LOCK_TTL,
         )->block(self::IMPORT_LOCK_WAIT, function () use ($item, $pdf, $canonical): IntegrationInboxItem {
-            return DB::transaction(function () use ($item, $pdf, $canonical): IntegrationInboxItem {
-                $identity = $this->resolveIdentity($canonical['vehicle_id'], $canonical['vehicle_plate']);
+            $identity = $this->resolveIdentity($canonical['vehicle_id'], $canonical['vehicle_plate']);
 
-                if ($identity === null) {
-                    return $this->markPending($item, 'identity_conflict');
+            if ($identity === null) {
+                return $this->markPending($item, 'identity_conflict');
+            }
+
+            $uploadedPath = $this->uploadBeforeTransaction($item, $pdf, $canonical, $identity);
+
+            try {
+                $result = DB::transaction(function () use ($item, $pdf, $canonical, $uploadedPath): array {
+                    $lockedIdentity = $this->resolveIdentity(
+                        $canonical['vehicle_id'],
+                        $canonical['vehicle_plate'],
+                        true,
+                    );
+
+                    if ($lockedIdentity === null) {
+                        return [
+                            'item' => $this->markPending($item, 'identity_conflict'),
+                            'old_pdf_path' => null,
+                            'old_candidate_path' => null,
+                            'discard_upload' => true,
+                        ];
+                    }
+
+                    if ($lockedIdentity instanceof Register) {
+                        return $this->persistExisting(
+                            $item,
+                            $pdf,
+                            $canonical,
+                            $lockedIdentity,
+                            $uploadedPath,
+                        );
+                    }
+
+                    return $this->persistNew($item, $pdf, $canonical, $uploadedPath);
+                });
+
+                if ($result['discard_upload'] && $uploadedPath !== null) {
+                    try {
+                        $this->storage->delete($uploadedPath);
+                    } finally {
+                        $uploadedPath = null;
+                    }
                 }
 
-                if ($identity instanceof Register) {
-                    return $this->handleExisting($item, $pdf, $canonical, $identity);
-                }
+                $this->cleanupAfterCommit(
+                    $result['item'],
+                    $result['old_pdf_path'],
+                    $result['old_candidate_path'],
+                );
 
-                $uploadedPath = $this->storage->store($pdf, $canonical['vehicle_id']);
-
-                try {
-                    $register = Register::query()->create($this->registerAttributes($canonical, $pdf, $uploadedPath));
-                    $isZeroFipe = $canonical['fipe_value'] === '0.00';
-
-                    $item->forceFill([
-                        'status' => $isZeroFipe ? 'alert' : 'processed',
-                        'register_id' => $register->id,
-                        'failure_reason' => null,
-                        'proposed_changes' => null,
-                        'alerts' => $isZeroFipe ? ['zero_fipe'] : null,
-                        'resolved_at' => $isZeroFipe ? null : now(),
-                    ])->save();
-
-                    return $item->refresh();
-                } catch (Throwable $exception) {
+                return $result['item']->refresh();
+            } catch (Throwable $exception) {
+                if ($uploadedPath !== null) {
                     try {
                         $this->storage->delete($uploadedPath);
                     } catch (Throwable $cleanupException) {
@@ -112,11 +139,40 @@ class RemovalRequestImporter
                             $exception,
                         );
                     }
-
-                    throw $exception;
                 }
-            });
+
+                throw $exception;
+            }
         });
+    }
+
+    /** @param array<string, string|null> $canonical */
+    private function uploadBeforeTransaction(
+        IntegrationInboxItem $item,
+        PreparedRemovalPdf $pdf,
+        array $canonical,
+        Register|false $identity,
+    ): ?string {
+        if (! $identity instanceof Register) {
+            return $this->storage->store($pdf, $canonical['vehicle_id']);
+        }
+
+        $changes = $this->changes($identity, $canonical, $pdf);
+        $pdfChanged = array_key_exists('pdf_path', $changes);
+
+        if (! $pdfChanged) {
+            return null;
+        }
+
+        if ($this->canUpdateRegister($identity)) {
+            return $this->storage->store($pdf, $canonical['vehicle_id']);
+        }
+
+        if ($item->candidate_pdf_sha256 === $pdf->sha256 && $item->candidate_pdf_path !== null) {
+            return null;
+        }
+
+        return $this->storage->store($pdf, $canonical['vehicle_id']);
     }
 
     /** @return array<string, mixed> */
@@ -286,17 +342,21 @@ class RemovalRequestImporter
         return preg_replace('/\s+-\s+[A-Z]{2}\s*$/iu', '', $value) ?: $value;
     }
 
-    private function resolveIdentity(string $vehicleId, string $plate): Register|false|null
+    private function resolveIdentity(string $vehicleId, string $plate, bool $lockForUpdate = false): Register|false|null
     {
-        $registers = Register::query()
+        $query = Register::query()
             ->where('company', CompanyEnum::COPART->value)
             ->where(function ($query) use ($vehicleId, $plate): void {
                 $query
                     ->where('vehicle_id', $vehicleId)
                     ->orWhereRaw("REPLACE(REPLACE(UPPER(vehicle_plate), '-', ''), ' ', '') = ?", [$plate]);
-            })
-            ->lockForUpdate()
-            ->get();
+            });
+
+        if ($lockForUpdate) {
+            $query->lockForUpdate();
+        }
+
+        $registers = $query->get();
 
         if ($registers->isEmpty()) {
             return false;
@@ -313,13 +373,208 @@ class RemovalRequestImporter
         return $sameId && $samePlate ? $register : null;
     }
 
-    /** @param array<string, string|null> $canonical */
-    private function handleExisting(
+    /**
+     * @param  array<string, string|null>  $canonical
+     * @return array{item: IntegrationInboxItem, old_pdf_path: ?string, old_candidate_path: ?string, discard_upload: bool}
+     */
+    private function persistExisting(
         IntegrationInboxItem $item,
         PreparedRemovalPdf $pdf,
         array $canonical,
         Register $register,
-    ): IntegrationInboxItem {
+        ?string $uploadedPath,
+    ): array {
+        $changes = $this->changes($register, $canonical, $pdf);
+
+        if (! $this->canUpdateRegister($register)) {
+            return $this->persistBlocked(
+                $item,
+                $pdf,
+                $register,
+                $changes,
+                $uploadedPath,
+            );
+        }
+
+        if ($changes === []) {
+            $oldCandidatePath = $item->candidate_pdf_path;
+
+            $item->forceFill([
+                'status' => 'no_changes',
+                'register_id' => $register->id,
+                'proposed_changes' => [],
+                'alerts' => null,
+                'candidate_pdf_path' => null,
+                'candidate_pdf_sha256' => null,
+                'failure_reason' => null,
+                'resolved_at' => now(),
+            ])->save();
+
+            return [
+                'item' => $item,
+                'old_pdf_path' => null,
+                'old_candidate_path' => $oldCandidatePath,
+                'discard_upload' => false,
+            ];
+        }
+
+        $pdfChanged = array_key_exists('pdf_path', $changes);
+        $newPdfPath = $uploadedPath;
+
+        if ($pdfChanged && $newPdfPath === null && $item->candidate_pdf_sha256 === $pdf->sha256) {
+            $newPdfPath = $item->candidate_pdf_path;
+        }
+
+        if ($pdfChanged && $newPdfPath === null) {
+            throw new \RuntimeException('O PDF atualizado não foi preparado antes da transação.');
+        }
+
+        $proposed = $this->registerAttributes($canonical, $pdf, $register->pdf_path);
+        $proposed['notes'] = $this->mergePhoneLine(
+            $this->comparableRegisterValue($register, 'notes'),
+            $pdf->extractedData['origin_phones'] ?? null,
+        );
+        $updates = [];
+
+        foreach (self::REGISTER_FIELDS as $field) {
+            $current = $this->comparableRegisterValue($register, $field);
+            $next = $proposed[$field] ?? null;
+
+            if (! $this->normalizer->equivalent($this->normalizationField($field), $current, $next)) {
+                $updates[$field] = $next;
+            }
+        }
+
+        $oldPdfPath = null;
+
+        if ($pdfChanged) {
+            $oldPdfPath = $register->pdf_path !== null
+                && trim($register->pdf_path) !== ''
+                && $register->pdf_path !== $newPdfPath
+                ? $register->pdf_path
+                : null;
+            $updates['pdf_path'] = $newPdfPath;
+            $updates['pdf_sha256'] = $pdf->sha256;
+        }
+
+        $register->forceFill($updates)->save();
+
+        $alerts = $this->alertsForUpdate($changes, $canonical['fipe_value']);
+        $oldCandidatePath = $item->candidate_pdf_path;
+
+        $item->forceFill([
+            'status' => $alerts === [] ? 'processed' : 'alert',
+            'register_id' => $register->id,
+            'failure_reason' => null,
+            'proposed_changes' => null,
+            'alerts' => $alerts === [] ? null : $alerts,
+            'candidate_pdf_path' => null,
+            'candidate_pdf_sha256' => null,
+            'resolved_at' => $alerts === [] ? now() : null,
+        ])->save();
+
+        return [
+            'item' => $item,
+            'old_pdf_path' => $oldPdfPath,
+            'old_candidate_path' => $oldCandidatePath === $newPdfPath ? null : $oldCandidatePath,
+            'discard_upload' => false,
+        ];
+    }
+
+    /**
+     * @param  array<string, string|null>  $canonical
+     * @return array{item: IntegrationInboxItem, old_pdf_path: ?string, old_candidate_path: ?string, discard_upload: bool}
+     */
+    private function persistNew(
+        IntegrationInboxItem $item,
+        PreparedRemovalPdf $pdf,
+        array $canonical,
+        ?string $uploadedPath,
+    ): array {
+        if ($uploadedPath === null) {
+            throw new \RuntimeException('O PDF do novo registro não foi preparado antes da transação.');
+        }
+
+        $register = Register::query()->create($this->registerAttributes($canonical, $pdf, $uploadedPath));
+        $isZeroFipe = $canonical['fipe_value'] === '0.00';
+
+        $item->forceFill([
+            'status' => $isZeroFipe ? 'alert' : 'processed',
+            'register_id' => $register->id,
+            'failure_reason' => null,
+            'proposed_changes' => null,
+            'alerts' => $isZeroFipe ? ['zero_fipe'] : null,
+            'candidate_pdf_path' => null,
+            'candidate_pdf_sha256' => null,
+            'resolved_at' => $isZeroFipe ? null : now(),
+        ])->save();
+
+        return [
+            'item' => $item,
+            'old_pdf_path' => null,
+            'old_candidate_path' => null,
+            'discard_upload' => false,
+        ];
+    }
+
+    /**
+     * @param  array<string, array{current: mixed, proposed: mixed}>  $changes
+     * @return array{item: IntegrationInboxItem, old_pdf_path: ?string, old_candidate_path: ?string, discard_upload: bool}
+     */
+    private function persistBlocked(
+        IntegrationInboxItem $item,
+        PreparedRemovalPdf $pdf,
+        Register $register,
+        array $changes,
+        ?string $uploadedPath,
+    ): array {
+        $pdfChanged = array_key_exists('pdf_path', $changes);
+        $candidatePath = null;
+        $candidateHash = null;
+
+        if ($pdfChanged) {
+            $candidatePath = $uploadedPath;
+
+            if ($candidatePath === null && $item->candidate_pdf_sha256 === $pdf->sha256) {
+                $candidatePath = $item->candidate_pdf_path;
+            }
+
+            if ($candidatePath === null) {
+                throw new \RuntimeException('O PDF candidato não foi preparado antes da transação.');
+            }
+
+            $candidateHash = $pdf->sha256;
+        }
+
+        $oldCandidatePath = $item->candidate_pdf_path === $candidatePath
+            ? null
+            : $item->candidate_pdf_path;
+
+        $item->forceFill([
+            'status' => 'pending',
+            'register_id' => $register->id,
+            'proposed_changes' => $changes,
+            'failure_reason' => 'update_blocked_by_status',
+            'alerts' => null,
+            'candidate_pdf_path' => $candidatePath,
+            'candidate_pdf_sha256' => $candidateHash,
+            'resolved_at' => null,
+        ])->save();
+
+        return [
+            'item' => $item,
+            'old_pdf_path' => null,
+            'old_candidate_path' => $oldCandidatePath,
+            'discard_upload' => false,
+        ];
+    }
+
+    /**
+     * @param  array<string, string|null>  $canonical
+     * @return array<string, array{current: mixed, proposed: mixed}>
+     */
+    private function changes(Register $register, array $canonical, PreparedRemovalPdf $pdf): array
+    {
         $proposed = $this->registerAttributes($canonical, $pdf, $register->pdf_path);
         $proposed['notes'] = $this->mergePhoneLine(
             $this->comparableRegisterValue($register, 'notes'),
@@ -332,11 +587,14 @@ class RemovalRequestImporter
             $next = $proposed[$field] ?? null;
 
             if (! $this->normalizer->equivalent($this->normalizationField($field), $current, $next)) {
-                $changes[$field] = ['current' => $current, 'proposed' => $next];
+                $changes[$field] = [
+                    'current' => $this->serializeChangeValue($field, $current),
+                    'proposed' => $this->serializeChangeValue($field, $next),
+                ];
             }
         }
 
-        if ($register->pdf_sha256 === null || ! hash_equals($register->pdf_sha256, $pdf->sha256)) {
+        if ($this->pdfChanged($register, $pdf)) {
             $changes['pdf_path'] = [
                 'current' => [
                     'path' => $register->pdf_path,
@@ -349,27 +607,89 @@ class RemovalRequestImporter
             ];
         }
 
-        if ($register->pdf_sha256 !== null && hash_equals($register->pdf_sha256, $pdf->sha256) && $changes === []) {
-            $item->forceFill([
-                'status' => 'no_changes',
-                'register_id' => $register->id,
-                'proposed_changes' => [],
-                'failure_reason' => null,
-                'resolved_at' => now(),
-            ])->save();
+        return $changes;
+    }
 
-            return $item->refresh();
+    private function pdfChanged(Register $register, PreparedRemovalPdf $pdf): bool
+    {
+        return $register->pdf_sha256 === null
+            || ! hash_equals($register->pdf_sha256, $pdf->sha256);
+    }
+
+    private function canUpdateRegister(Register $register): bool
+    {
+        return in_array($register->status, [
+            RegisterStatusEnum::PENDING,
+            RegisterStatusEnum::COLLECTED,
+        ], true);
+    }
+
+    /** @param array<string, array{current: mixed, proposed: mixed}> $changes @return list<string> */
+    private function alertsForUpdate(array $changes, ?string $fipeValue): array
+    {
+        $alerts = [];
+
+        if (array_key_exists('value', $changes)) {
+            $alerts[] = 'freight_changed';
         }
 
-        $item->forceFill([
-            'status' => 'pending',
-            'register_id' => $register->id,
-            'proposed_changes' => $changes,
-            'failure_reason' => 'update_required',
-            'resolved_at' => null,
-        ])->save();
+        if ($fipeValue === '0.00') {
+            $alerts[] = 'zero_fipe';
+        }
 
-        return $item->refresh();
+        return array_values(array_unique($alerts));
+    }
+
+    private function serializeChangeValue(string $field, mixed $value): mixed
+    {
+        if ($value instanceof Carbon) {
+            return $value->toISOString();
+        }
+
+        if (in_array($field, ['deadline_withdraw', 'deadline_delivery'], true) && is_string($value)) {
+            return Carbon::createFromFormat('!Y-m-d', $value)->toISOString();
+        }
+
+        if (in_array($field, ['value', 'fipe_value'], true)) {
+            return $this->normalizer->decimal(is_scalar($value) ? (string) $value : null);
+        }
+
+        return $value;
+    }
+
+    private function cleanupAfterCommit(
+        IntegrationInboxItem $item,
+        ?string $oldPdfPath,
+        ?string $oldCandidatePath,
+    ): void {
+        $paths = array_unique(array_filter(
+            [$oldPdfPath, $oldCandidatePath],
+            fn (?string $path): bool => $path !== null && trim($path) !== '',
+        ));
+
+        foreach ($paths as $path) {
+            try {
+                $this->storage->delete($path);
+            } catch (Throwable) {
+                $this->recordCleanupFailure($item, $path);
+            }
+        }
+    }
+
+    private function recordCleanupFailure(IntegrationInboxItem $item, string $path): void
+    {
+        $data = is_array($item->extracted_data) ? $item->extracted_data : [];
+        $alerts = is_array($data['technical_alerts'] ?? null) ? $data['technical_alerts'] : [];
+        $alerts[] = [
+            'type' => 'pdf_cleanup_failed',
+            'path' => $path,
+        ];
+        $data['technical_alerts'] = $alerts;
+
+        try {
+            $item->forceFill(['extracted_data' => $data])->save();
+        } catch (Throwable) {
+        }
     }
 
     /** @param array<string, string|null> $canonical @return array<string, mixed> */
@@ -457,14 +777,26 @@ class RemovalRequestImporter
 
     private function markPending(IntegrationInboxItem $item, string $failureReason): IntegrationInboxItem
     {
+        $oldCandidatePath = $item->candidate_pdf_path;
+
         $item->forceFill([
             'status' => 'pending',
             'register_id' => null,
             'failure_reason' => $failureReason,
             'proposed_changes' => null,
             'alerts' => null,
+            'candidate_pdf_path' => null,
+            'candidate_pdf_sha256' => null,
             'resolved_at' => null,
         ])->save();
+
+        if ($oldCandidatePath !== null && trim($oldCandidatePath) !== '') {
+            try {
+                $this->storage->delete($oldCandidatePath);
+            } catch (Throwable) {
+                $this->recordCleanupFailure($item, $oldCandidatePath);
+            }
+        }
 
         return $item->refresh();
     }
