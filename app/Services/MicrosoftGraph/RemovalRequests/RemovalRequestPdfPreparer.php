@@ -114,7 +114,7 @@ class RemovalRequestPdfPreparer
             && preg_replace('/^#?microsoft\.graph\./', '', $type) === 'fileAttachment'
             && ($attachment['is_inline'] ?? null) === false
             && ($attachment['name'] ?? null) === 'CartaDeRemoção.pdf'
-            && ($attachment['content_type'] ?? null) === 'application/pdf'
+            && in_array($attachment['content_type'] ?? null, ['application/pdf', 'application/octet-stream'], true)
             && is_int($attachment['size'] ?? null)
             && $attachment['size'] > 0
             && $attachment['size'] <= $maxPdfBytes;

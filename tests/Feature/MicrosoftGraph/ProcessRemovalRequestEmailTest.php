@@ -274,6 +274,31 @@ class ProcessRemovalRequestEmailTest extends TestCase
         }
     }
 
+    public function test_it_accepts_a_pdf_reported_as_an_octet_stream_by_graph(): void
+    {
+        $bytes = '%PDF-octet-stream';
+        $this->fakeGraph([
+            $this->attachment([
+                'content_type' => 'application/octet-stream',
+                'size' => strlen($bytes),
+            ]),
+        ], $bytes);
+        Process::fake(fn () => Process::result($this->fixtureText()));
+
+        $pdf = app(RemovalRequestPdfPreparer::class)->prepare(
+            MicrosoftGraphConnection::factory()->create(),
+            'message-id',
+            'FSG5551',
+        );
+
+        try {
+            $this->assertSame('CartaDeRemoção FSG5551.pdf', $pdf->fileName);
+            $this->assertSame(hash('sha256', $bytes), $pdf->sha256);
+        } finally {
+            @unlink($pdf->temporaryPath);
+        }
+    }
+
     #[DataProvider('invalidAttachmentNameProvider')]
     public function test_it_rejects_an_attachment_with_a_name_that_is_not_exactly_the_required_unicode_name(string $name): void
     {
@@ -342,7 +367,7 @@ class ProcessRemovalRequestEmailTest extends TestCase
     public static function invalidMetadataProvider(): array
     {
         return [
-            'wrong mime' => [['content_type' => 'application/octet-stream']],
+            'wrong mime' => [['content_type' => 'application/zip']],
             'zero size' => [['size' => 0]],
             'over configured limit' => [['size' => 17]],
         ];
