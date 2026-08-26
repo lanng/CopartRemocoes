@@ -7,6 +7,7 @@ use App\Filament\Resources\IntegrationInboxItemResource\Pages;
 use App\Models\IntegrationInboxItem;
 use App\Models\Register;
 use App\Services\MicrosoftGraph\RemovalRequests\ResolveRemovalRequestImport;
+use App\Services\MicrosoftGraph\RemovalRequests\RetryRemovalRequestImport;
 use App\Services\MicrosoftGraph\ResolveIntegrationInboxItem;
 use Filament\Forms\Components\CheckboxList;
 use Filament\Forms\Components\Select;
@@ -16,6 +17,7 @@ use Filament\Forms\Form;
 use Filament\Infolists\Components\RepeatableEntry;
 use Filament\Infolists\Components\TextEntry;
 use Filament\Infolists\Infolist;
+use Filament\Notifications\Notification;
 use Filament\Resources\Resource;
 use Filament\Tables;
 use Filament\Tables\Table;
@@ -154,6 +156,23 @@ class IntegrationInboxItemResource extends Resource
             ])
             ->actions([
                 Tables\Actions\ViewAction::make(),
+                Tables\Actions\Action::make('acceptRemovalRequest')
+                    ->label('Aceitar importação')
+                    ->icon('heroicon-o-check-circle')
+                    ->color('success')
+                    ->visible(fn (IntegrationInboxItem $record): bool => $record->isRemovalRequest()
+                        && $record->status === 'pending'
+                        && $record->register_id !== null
+                        && ($record->proposed_changes !== null || $record->candidate_pdf_path !== null))
+                    ->requiresConfirmation()
+                    ->action(function (IntegrationInboxItem $record): void {
+                        app(ResolveRemovalRequestImport::class)->apply(
+                            $record,
+                            auth()->user(),
+                            array_map('strval', array_keys($record->proposed_changes ?? [])),
+                            $record->candidate_pdf_path !== null,
+                        );
+                    }),
                 Tables\Actions\Action::make('reviewRemovalRequest')
                     ->label('Revisar importação')
                     ->icon('heroicon-o-pencil-square')
@@ -191,6 +210,26 @@ class IntegrationInboxItemResource extends Resource
                             (bool) ($data['replace_pdf'] ?? false),
                         );
                     }),
+                Tables\Actions\Action::make('retryRemovalRequest')
+                    ->label('Tentar novamente')
+                    ->icon('heroicon-o-arrow-path')
+                    ->color('warning')
+                    ->visible(fn (IntegrationInboxItem $record): bool => $record->isRemovalRequest()
+                        && $record->status === 'pending'
+                        && in_array($record->failure_reason, [
+                            'domain_error',
+                            'processing_failed',
+                            'graph_connection_missing',
+                        ], true))
+                    ->requiresConfirmation()
+                    ->action(function (IntegrationInboxItem $record): void {
+                        app(RetryRemovalRequestImport::class)->handle($record);
+
+                        Notification::make()
+                            ->title('Importação reenfileirada')
+                            ->success()
+                            ->send();
+                    }),
                 Tables\Actions\Action::make('rejectRemovalRequest')
                     ->label('Rejeitar importação')
                     ->icon('heroicon-o-x-circle')
@@ -214,16 +253,18 @@ class IntegrationInboxItemResource extends Resource
                     ->icon('heroicon-o-check-badge')
                     ->color('success')
                     ->visible(fn (IntegrationInboxItem $record): bool => ! $record->isRemovalRequest() && $record->status === 'pending')
+                    ->disabled(fn (IntegrationInboxItem $record): bool => self::matchingRegisterOptions($record) === [])
+                    ->tooltip(fn (IntegrationInboxItem $record): ?string => self::matchingRegisterOptions($record) === []
+                        ? 'Nenhum registro compatível encontrado para esta baixa.'
+                        : null)
                     ->form(fn (IntegrationInboxItem $record): array => [
                         Select::make('register_id')
                             ->label('Registro')
-                            ->options(Register::query()
-                                ->where('company', 'copart')
-                                ->where('vehicle_id', $record->extracted_vehicle_id)
-                                ->get()
-                                ->filter(fn (Register $register): bool => strtoupper(str_replace('-', '', $register->vehicle_plate)) === strtoupper((string) $record->extracted_vehicle_plate))
-                                ->mapWithKeys(fn (Register $register): array => [$register->id => "{$register->vehicle_id} - {$register->vehicle_plate}"])
-                                ->all())
+                            ->options(self::matchingRegisterOptions($record))
+                            ->disabled(fn (IntegrationInboxItem $record): bool => self::matchingRegisterOptions($record) === [])
+                            ->helperText(fn (IntegrationInboxItem $record): ?string => self::matchingRegisterOptions($record) === []
+                                ? 'Nenhum registro compatível encontrado para esta baixa.'
+                                : null)
                             ->required(),
                         Textarea::make('reason')->label('Justificativa')->required()->maxLength(1000),
                     ])
@@ -255,5 +296,17 @@ class IntegrationInboxItemResource extends Resource
             'index' => Pages\ListIntegrationInboxItems::route('/'),
             'view' => Pages\ViewIntegrationInboxItem::route('/{record}'),
         ];
+    }
+
+    /** @return array<int|string, string> */
+    private static function matchingRegisterOptions(IntegrationInboxItem $item): array
+    {
+        return Register::query()
+            ->where('company', 'copart')
+            ->where('vehicle_id', $item->extracted_vehicle_id)
+            ->get()
+            ->filter(fn (Register $register): bool => strtoupper(str_replace('-', '', $register->vehicle_plate)) === strtoupper((string) $item->extracted_vehicle_plate))
+            ->mapWithKeys(fn (Register $register): array => [$register->id => "{$register->vehicle_id} - {$register->vehicle_plate}"])
+            ->all();
     }
 }

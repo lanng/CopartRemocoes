@@ -135,6 +135,9 @@ class IntegrationInboxItem extends Model
             'missing_pdf_fields' => 'Campos do PDF ausentes',
             'invalid_constraints' => 'Restrições inválidas',
             'update_blocked_by_status' => 'Atualização bloqueada pelo status',
+            'domain_error' => 'Falha na validação da importação',
+            'processing_failed' => 'Falha no processamento',
+            'graph_connection_missing' => 'Conexão com o Graph ausente',
             'delivery_already_confirmed' => 'Entrega já confirmada',
             default => $this->failure_reason,
         };

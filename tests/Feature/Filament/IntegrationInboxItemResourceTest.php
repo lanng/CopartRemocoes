@@ -11,6 +11,7 @@ use Filament\Facades\Filament;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\File;
+use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Str;
 use Livewire\Livewire;
 use Tests\TestCase;
@@ -230,6 +231,79 @@ class IntegrationInboxItemResourceTest extends TestCase
         $this->assertFalse($table->getAction('resolve')->record($pending)->isVisible());
         $this->assertTrue($table->getAction('acknowledgeRemovalAlert')->record($alert)->isVisible());
         $this->assertSame(['FIPE zerada'], $alert->removalAlertLabels());
+    }
+
+    public function test_it_exposes_accept_and_retry_actions_for_removal_imports(): void
+    {
+        $register = \App\Models\Register::factory()->create();
+        $removal = IntegrationInboxItem::factory()->create([
+            'message_type' => 'removal_request',
+            'status' => 'pending',
+            'register_id' => $register->id,
+            'proposed_changes' => [
+                'value' => ['current' => '800.00', 'proposed' => '866.48'],
+            ],
+        ]);
+        $domainError = IntegrationInboxItem::factory()->create([
+            'message_type' => 'removal_request',
+            'status' => 'pending',
+            'failure_reason' => 'domain_error',
+        ]);
+        $checklist = IntegrationInboxItem::factory()->create([
+            'message_type' => 'checklist',
+            'status' => 'pending',
+        ]);
+        $table = Livewire::test(ListIntegrationInboxItems::class)->instance()->getTable();
+
+        $this->assertTrue($table->getAction('acceptRemovalRequest')->record($removal)->isVisible());
+        $this->assertTrue($table->getAction('reviewRemovalRequest')->record($removal)->isVisible());
+        $this->assertTrue($table->getAction('retryRemovalRequest')->record($domainError)->isVisible());
+        $this->assertFalse($table->getAction('acceptRemovalRequest')->record($domainError)->isVisible());
+        $this->assertFalse($table->getAction('retryRemovalRequest')->record($checklist)->isVisible());
+        $this->assertSame('Falha na validação da importação', $domainError->failureReasonLabel());
+    }
+
+    public function test_it_disables_checklist_reconciliation_when_no_register_matches(): void
+    {
+        $checklist = IntegrationInboxItem::factory()->create([
+            'message_type' => 'checklist',
+            'status' => 'pending',
+            'extracted_vehicle_id' => 'missing-vehicle',
+            'extracted_vehicle_plate' => 'ZZZ9Z99',
+        ]);
+        $table = Livewire::test(ListIntegrationInboxItems::class)->instance()->getTable();
+        $resolveAction = $table->getAction('resolve')->record($checklist);
+
+        $this->assertTrue($resolveAction->isVisible());
+        $this->assertTrue($resolveAction->isDisabled());
+    }
+
+    public function test_it_accepts_all_removal_changes_and_can_retry_a_processing_failure(): void
+    {
+        Queue::fake();
+        $register = \App\Models\Register::factory()->create(['value' => '800.00']);
+        $removal = IntegrationInboxItem::factory()->create([
+            'message_type' => 'removal_request',
+            'status' => 'pending',
+            'register_id' => $register->id,
+            'proposed_changes' => [
+                'value' => ['current' => '800.00', 'proposed' => '866.48'],
+            ],
+        ]);
+        $domainError = IntegrationInboxItem::factory()->create([
+            'message_type' => 'removal_request',
+            'status' => 'pending',
+            'failure_reason' => 'domain_error',
+        ]);
+
+        Livewire::test(ListIntegrationInboxItems::class)
+            ->callTableAction('acceptRemovalRequest', $removal)
+            ->callTableAction('retryRemovalRequest', $domainError);
+
+        $this->assertSame('processed', $removal->refresh()->status);
+        $this->assertSame('866.48', $register->refresh()->value);
+        $this->assertSame('queued', $domainError->refresh()->status);
+        Queue::assertPushed(\App\Jobs\ProcessRemovalRequestEmail::class, fn (\App\Jobs\ProcessRemovalRequestEmail $job): bool => $job->integrationInboxItemId === $domainError->id);
     }
 
     public function test_it_displays_proposed_removal_changes_in_the_item_view(): void
