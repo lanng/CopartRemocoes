@@ -16,8 +16,7 @@ class ProcessChecklistEmail
         $sender = strtolower(trim((string) ($message['sender'] ?? '')));
         $subject = trim((string) ($message['subject'] ?? ''));
 
-        // TEMPORARIO: remover antes do commit/push; usado apenas no teste manual de e-mail.
-        if (! in_array($sender, ['remocao@copart.com.br', 'victorlanguer@hotmail.com'], true)
+        if ($sender !== 'remocao@copart.com.br'
             || ! str_starts_with(mb_strtolower($subject), mb_strtolower('Checklist digital'))) {
             return null;
         }

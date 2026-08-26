@@ -12,8 +12,7 @@ class ChecklistEmailParser
      */
     public function parse(array $message): array
     {
-        // TEMPORARIO: remover antes do commit/push junto com a excecao do processador.
-        if (! in_array(strtolower(trim($message['sender'])), ['remocao@copart.com.br', 'victorlanguer@hotmail.com'], true)) {
+        if (strtolower(trim($message['sender'])) !== 'remocao@copart.com.br') {
             return ['valid' => false, 'reason' => 'untrusted_sender'];
         }
 

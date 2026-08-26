@@ -97,7 +97,7 @@ class ProcessChecklistEmailTest extends TestCase
         $this->assertSame('delivered', $register->refresh()->status->value);
     }
 
-    public function test_temporary_personal_sender_is_accepted_for_integration_testing(): void
+    public function test_sender_comparison_is_case_insensitive_for_integration_testing(): void
     {
         $register = Register::factory()->create([
             'vehicle_id' => '1146609',
@@ -105,7 +105,7 @@ class ProcessChecklistEmailTest extends TestCase
             'status' => 'invoiced',
         ]);
         $message = $this->message();
-        $message['sender'] = 'victorlanguer@hotmail.com';
+        $message['sender'] = ' REMOCAO@COPART.COM.BR ';
 
         $result = app(ProcessChecklistEmail::class)->handle($message);
 
