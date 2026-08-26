@@ -125,4 +125,22 @@ class RegisterResourceTest extends TestCase
 
         $this->assertTrue($register->unresolvedRemovalImports()->whereKey($item->id)->exists());
     }
+
+    public function test_register_alert_uses_a_table_action_instead_of_a_nested_link(): void
+    {
+        $register = Register::factory()->create();
+        IntegrationInboxItem::factory()->create([
+            'message_type' => 'removal_request',
+            'status' => 'pending',
+            'register_id' => $register->id,
+        ]);
+        $register->load('unresolvedRemovalImports');
+
+        $table = Livewire::test(ListRegisters::class)->instance()->getTable();
+        $alertColumn = $table->getColumn('unresolved_removal_imports_exists')->record($register);
+
+        $this->assertNull($alertColumn->getUrl());
+        $this->assertTrue($table->hasAction('viewRemovalImport'));
+        $this->assertTrue($table->getAction('viewRemovalImport')->record($register)->isVisible());
+    }
 }

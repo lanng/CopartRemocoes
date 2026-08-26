@@ -397,14 +397,7 @@ class RegisterResource extends Resource
                             ->label('Integração')
                             ->state(fn (Register $record): ?string => $record->unresolved_removal_imports_exists ? 'Revisão pendente' : null)
                             ->icon('heroicon-o-exclamation-triangle')
-                            ->color('warning')
-                            ->url(function (Register $record): ?string {
-                                $item = $record->getRelation('unresolvedRemovalImports')->first();
-
-                                return $item === null
-                                    ? null
-                                    : IntegrationInboxItemResource::getUrl('view', ['record' => $item]);
-                            }),
+                            ->color('warning'),
                     ]),
 
                     Stack::make([
@@ -464,6 +457,18 @@ class RegisterResource extends Resource
                     ->options(RegisterStatusEnum::optionsWithLabels()),
             ])
             ->actions([
+                Action::make('viewRemovalImport')
+                    ->label('Revisão')
+                    ->icon('heroicon-o-exclamation-triangle')
+                    ->color('warning')
+                    ->visible(fn (Register $record): bool => self::hasUnresolvedRemovalImport($record))
+                    ->url(function (Register $record): ?string {
+                        $item = $record->getRelation('unresolvedRemovalImports')->first();
+
+                        return $item === null
+                            ? null
+                            : IntegrationInboxItemResource::getUrl('view', ['record' => $item]);
+                    }),
                 EditAction::make()->iconButton(),
                 Action::make('updateStatusSingle')
                     ->label('Atual. Situação')
@@ -617,5 +622,12 @@ class RegisterResource extends Resource
             'view' => ViewRegister::route('/{record}'),
             'edit' => EditRegister::route('/{record}/edit'),
         ];
+    }
+
+    private static function hasUnresolvedRemovalImport(Register $record): bool
+    {
+        return $record->relationLoaded('unresolvedRemovalImports')
+            ? $record->getRelation('unresolvedRemovalImports')->isNotEmpty()
+            : (bool) $record->unresolved_removal_imports_exists;
     }
 }
