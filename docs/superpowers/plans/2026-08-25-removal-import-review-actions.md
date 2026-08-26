@@ -17,7 +17,7 @@
 - Modify: `app/Models/IntegrationInboxItem.php`
 - Test: `tests/Feature/Services/RetryRemovalRequestImportTest.php`
 
-- [ ] **Step 1: Escrever o teste de retry que falha**
+- [x] **Step 1: Escrever o teste de retry que falha**
 
 Criar um item `removal_request` com status `pending` e `failure_reason = domain_error`. Chamar o servico e verificar que o item fica `queued`, o motivo e `resolved_at` sao limpos e `ProcessRemovalRequestEmail` e despachado.
 
@@ -38,7 +38,7 @@ $this->assertNull($item->resolved_at);
 Queue::assertPushed(ProcessRemovalRequestEmail::class, fn (ProcessRemovalRequestEmail $job): bool => $job->integrationInboxItemId === $item->id);
 ```
 
-- [ ] **Step 2: Confirmar RED**
+- [x] **Step 2: Confirmar RED**
 
 Run:
 
@@ -48,15 +48,15 @@ php artisan test --compact tests/Feature/Services/RetryRemovalRequestImportTest.
 
 Expected: FAIL porque o servico ainda nao existe.
 
-- [ ] **Step 3: Implementar o servico minimo**
+- [x] **Step 3: Implementar o servico minimo**
 
 Criar `RetryRemovalRequestImport::handle(IntegrationInboxItem $item): IntegrationInboxItem`. Dentro de uma transacao com lock, aceitar somente pedidos de remocao nos estados `pending` ou `alert`, limpar `failure_reason` e `resolved_at`, definir `queued` e despachar `ProcessRemovalRequestEmail` com `afterCommit()`. Para estados finais ou tipos diferentes, lancar `DomainException`.
 
-- [ ] **Step 4: Adicionar os casos de concorrencia e rejeicao**
+- [x] **Step 4: Adicionar os casos de concorrencia e rejeicao**
 
 Cobrir no mesmo teste: checklist nao pode ser reprocessado; item `processed` nao pode ser reprocessado; duas chamadas para o mesmo item devem manter um unico estado `queued` e depender da unicidade do job.
 
-- [ ] **Step 5: Confirmar GREEN e formatar**
+- [x] **Step 5: Confirmar GREEN e formatar**
 
 Run:
 
@@ -65,7 +65,7 @@ php artisan test --compact tests/Feature/Services/RetryRemovalRequestImportTest.
 vendor/bin/pint --dirty --format agent
 ```
 
-- [ ] **Step 6: Commitar a task**
+- [x] **Step 6: Commitar a task**
 
 ```bash
 git add app/Services/MicrosoftGraph/RemovalRequests/RetryRemovalRequestImport.php app/Models/IntegrationInboxItem.php tests/Feature/Services/RetryRemovalRequestImportTest.php
@@ -79,7 +79,7 @@ git commit -m "feat(integration): retry failed removal imports"
 - Modify: `app/Models/IntegrationInboxItem.php`
 - Test: `tests/Feature/Filament/IntegrationInboxItemResourceTest.php`
 
-- [ ] **Step 1: Escrever os testes de acoes e conciliacao sem opcoes**
+- [x] **Step 1: Escrever os testes de acoes e conciliacao sem opcoes**
 
 Adicionar testes que verifiquem:
 
@@ -110,7 +110,7 @@ $this->assertFalse($table->getAction('retryRemovalRequest')->record($checklist)-
 
 Criar tambem um item checklist sem `Register` compativel e verificar que a acao `resolve` fica desabilitada e informa que nao ha registro compativel.
 
-- [ ] **Step 2: Confirmar RED**
+- [x] **Step 2: Confirmar RED**
 
 Run:
 
@@ -120,23 +120,23 @@ php artisan test --compact tests/Feature/Filament/IntegrationInboxItemResourceTe
 
 Expected: FAIL porque as novas acoes e o estado desabilitado ainda nao existem.
 
-- [ ] **Step 3: Implementar `acceptRemovalRequest`**
+- [x] **Step 3: Implementar `acceptRemovalRequest`**
 
 Adicionar uma acao de confirmacao visivel para pedidos `pending` que possuam `proposed_changes` ou `candidate_pdf_path`. Ela deve chamar `ResolveRemovalRequestImport::apply()` com todas as chaves propostas e `replacePdf = true` quando houver PDF candidato. Se nao houver campos nem candidato, a acao nao aparece.
 
-- [ ] **Step 4: Implementar `retryRemovalRequest`**
+- [x] **Step 4: Implementar `retryRemovalRequest`**
 
 Adicionar uma acao de cor `warning`, visivel somente para pedido de remocao `pending` com falha de processamento (`domain_error`, `processing_failed` ou `graph_connection_missing`) e chamar `RetryRemovalRequestImport`. Exibir notificacao de sucesso apos o despacho.
 
-- [ ] **Step 5: Desabilitar conciliacao sem correspondencia**
+- [x] **Step 5: Desabilitar conciliacao sem correspondencia**
 
 Extrair a montagem das opcoes compativeis para um metodo privado da resource. Usar o mesmo resultado no `Select` e em `Action::disabled()`. Quando vazio, manter a acao visivel para diagnostico, mas desabilitada, com tooltip `Nenhum registro compatível encontrado para esta baixa.`. O `Select` tambem deve ficar desabilitado e nao permitir envio.
 
-- [ ] **Step 6: Traduzir os novos motivos**
+- [x] **Step 6: Traduzir os novos motivos**
 
 Adicionar em `IntegrationInboxItem::failureReasonLabel()` os rotulos de `domain_error`, `processing_failed` e `graph_connection_missing`, evitando que o painel exponha somente chaves internas.
 
-- [ ] **Step 7: Confirmar GREEN e formatar**
+- [x] **Step 7: Confirmar GREEN e formatar**
 
 Run:
 
@@ -145,7 +145,7 @@ php artisan test --compact tests/Feature/Filament/IntegrationInboxItemResourceTe
 vendor/bin/pint --dirty --format agent
 ```
 
-- [ ] **Step 8: Commitar a task**
+- [x] **Step 8: Commitar a task**
 
 ```bash
 git add app/Filament/Resources/IntegrationInboxItemResource.php app/Models/IntegrationInboxItem.php tests/Feature/Filament/IntegrationInboxItemResourceTest.php
@@ -158,7 +158,7 @@ git commit -m "feat(filament): add removal import decisions"
 - Modify: `docs/superpowers/specs/2026-08-25-removal-import-review-actions-design.md`
 - Modify: `docs/superpowers/plans/2026-08-25-removal-import-review-actions.md`
 
-- [ ] **Step 1: Rodar a cobertura focada**
+- [x] **Step 1: Rodar a cobertura focada**
 
 ```bash
 php artisan test --compact tests/Feature/Services/RetryRemovalRequestImportTest.php tests/Feature/Filament/IntegrationInboxItemResourceTest.php tests/Feature/MicrosoftGraph/ProcessRemovalRequestEmailTest.php
@@ -166,7 +166,7 @@ php artisan test --compact tests/Feature/Services/RetryRemovalRequestImportTest.
 
 Expected: todos PASS.
 
-- [ ] **Step 2: Rodar a suite completa**
+- [x] **Step 2: Rodar a suite completa**
 
 ```bash
 php artisan test --compact
@@ -174,7 +174,7 @@ php artisan test --compact
 
 Expected: todos PASS, sem regressao no importer, conciliacao ou limpeza.
 
-- [ ] **Step 3: Verificar qualidade e atualizar o plano**
+- [x] **Step 3: Verificar qualidade e atualizar o plano**
 
 ```bash
 vendor/bin/pint --dirty --format agent
@@ -183,7 +183,7 @@ git status --short --branch
 
 Marcar as tasks concluidas no plano e confirmar que a branch nao possui alteracoes nao commitadas.
 
-- [ ] **Step 4: Commit final**
+- [x] **Step 4: Commit final**
 
 ```bash
 git add docs/superpowers/specs/2026-08-25-removal-import-review-actions-design.md docs/superpowers/plans/2026-08-25-removal-import-review-actions.md
