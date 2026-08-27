@@ -22,8 +22,13 @@ class Register extends Model
         parent::boot();
 
         static::deleting(function ($register) {
-            if ($register->pdf_path) {
-                Storage::disk('s3')->delete($register->pdf_path);
+            $paths = array_values(array_filter([
+                $register->pdf_path,
+                $register->consignor_letter_path,
+            ]));
+
+            if ($paths !== []) {
+                Storage::disk('s3')->delete($paths);
             }
         });
     }
@@ -46,6 +51,8 @@ class Register extends Model
         'status',
         'pdf_path',
         'pdf_sha256',
+        'consignor_letter_path',
+        'consignor_letter_sha256',
         'notes',
         'insurance',
         'fipe_value',
@@ -146,6 +153,8 @@ class Register extends Model
                 'payment_code',
                 'pdf_path',
                 'pdf_sha256',
+                'consignor_letter_path',
+                'consignor_letter_sha256',
             ])
             ->logOnlyDirty()
             ->dontSubmitEmptyLogs()

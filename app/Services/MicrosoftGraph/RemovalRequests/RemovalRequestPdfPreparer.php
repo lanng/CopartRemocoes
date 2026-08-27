@@ -103,8 +103,94 @@ class RemovalRequestPdfPreparer
         }
     }
 
+    public function prepareConsignorLetter(
+        MicrosoftGraphConnection $connection,
+        string $messageId,
+        string $plate,
+    ): ?PreparedConsignorLetter {
+        $maxPdfBytes = (int) config('services.removal_requests.max_pdf_bytes');
+        $attachments = array_values(array_filter(
+            $this->graphClient->listMessageAttachments($connection, $messageId),
+            fn (array $attachment): bool => ($attachment['name'] ?? null) === 'CartaDoComitente.pdf',
+        ));
+
+        if ($attachments === []) {
+            return null;
+        }
+
+        if (count($attachments) !== 1 || ! $this->isValidNamedAttachment($attachments[0], $maxPdfBytes, 'CartaDoComitente.pdf')) {
+            throw new DomainException('A CartaDoComitente.pdf não é um anexo PDF válido.');
+        }
+
+        $normalizedPlate = $this->normalizer->plate($plate);
+
+        if ($normalizedPlate === null || ! preg_match('/^[A-Z]{3}(?:\d{4}|\d[A-Z]\d{2})$/', $normalizedPlate)) {
+            throw new DomainException('A placa da solicitação é inválida.');
+        }
+
+        $temporaryPath = tempnam(sys_get_temp_dir(), 'consignor_letter_pdf_');
+
+        if ($temporaryPath === false) {
+            throw new RuntimeException('Não foi possível criar o arquivo temporário da Carta do Comitente.');
+        }
+
+        try {
+            $downloadedBytes = $this->graphClient->downloadMessageAttachmentToPath(
+                $connection,
+                $messageId,
+                $attachments[0]['id'],
+                $temporaryPath,
+                $maxPdfBytes,
+            );
+            clearstatcache(true, $temporaryPath);
+            $actualSize = filesize($temporaryPath);
+
+            if ($actualSize === false || $actualSize !== $downloadedBytes || $actualSize === 0 || $actualSize > $maxPdfBytes) {
+                throw new DomainException('A CartaDoComitente.pdf baixada não é válida dentro do limite configurado.');
+            }
+
+            $signatureStream = fopen($temporaryPath, 'rb');
+
+            if ($signatureStream === false) {
+                throw new RuntimeException('Não foi possível ler a assinatura da Carta do Comitente.');
+            }
+
+            try {
+                $signature = fread($signatureStream, 5);
+            } finally {
+                fclose($signatureStream);
+            }
+
+            if ($signature !== '%PDF-') {
+                throw new DomainException('A CartaDoComitente.pdf baixada não é um PDF válido.');
+            }
+
+            $sha256 = hash_file('sha256', $temporaryPath);
+
+            if ($sha256 === false) {
+                throw new RuntimeException('Não foi possível calcular o hash da Carta do Comitente.');
+            }
+
+            return new PreparedConsignorLetter(
+                temporaryPath: $temporaryPath,
+                sha256: $sha256,
+                fileName: 'CartaDoComitente '.$normalizedPlate.'.pdf',
+            );
+        } catch (Throwable $exception) {
+            @unlink($temporaryPath);
+
+            throw $exception;
+        }
+    }
+
     /** @param array<string, mixed> $attachment */
     private function isValidAttachment(array $attachment, int $maxPdfBytes): bool
+    {
+        return $this->isValidNamedAttachment($attachment, $maxPdfBytes, 'CartaDeRemoção.pdf');
+    }
+
+    /** @param array<string, mixed> $attachment */
+    private function isValidNamedAttachment(array $attachment, int $maxPdfBytes, string $name): bool
     {
         $type = $attachment['type'] ?? null;
 
@@ -113,7 +199,7 @@ class RemovalRequestPdfPreparer
             && is_string($type)
             && preg_replace('/^#?microsoft\.graph\./', '', $type) === 'fileAttachment'
             && ($attachment['is_inline'] ?? null) === false
-            && ($attachment['name'] ?? null) === 'CartaDeRemoção.pdf'
+            && ($attachment['name'] ?? null) === $name
             && in_array($attachment['content_type'] ?? null, ['application/pdf', 'application/octet-stream'], true)
             && is_int($attachment['size'] ?? null)
             && $attachment['size'] > 0

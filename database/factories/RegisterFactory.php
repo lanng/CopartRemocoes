@@ -28,6 +28,8 @@ class RegisterFactory extends Factory
             'value' => '750.00',
             'status' => 'pending',
             'pdf_sha256' => null,
+            'consignor_letter_path' => null,
+            'consignor_letter_sha256' => null,
             'insurance' => 'ALLIANZ SEGUROS SA',
             'fipe_value' => '43897.00',
             'payment_code' => 'T691299',

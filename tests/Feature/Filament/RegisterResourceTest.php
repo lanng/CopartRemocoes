@@ -88,6 +88,7 @@ class RegisterResourceTest extends TestCase
             ->assertFormFieldIsDisabled('origin_city')
             ->assertFormFieldExists('status')
             ->assertFormFieldIsDisabled('status')
+            ->assertFormFieldExists('consignor_letter_path')
             ->assertFormFieldExists('value')
             ->assertFormFieldIsDisabled('value')
             ->assertSee('Número do CT-e')
@@ -142,5 +143,18 @@ class RegisterResourceTest extends TestCase
         $this->assertNull($alertColumn->getUrl());
         $this->assertTrue($table->hasAction('viewRemovalImport'));
         $this->assertTrue($table->getAction('viewRemovalImport')->record($register)->isVisible());
+    }
+
+    public function test_register_list_shows_the_consignor_letter_when_it_exists(): void
+    {
+        $register = Register::factory()->create([
+            'consignor_letter_path' => 'registros/copart/123/CartaDoComitente ABC1D23.pdf',
+        ]);
+
+        $table = Livewire::test(ListRegisters::class)->instance()->getTable();
+        $column = $table->getColumn('consignor_letter_path')->record($register);
+
+        $this->assertSame('Comitente', $column->formatState($column->getState()));
+        $this->assertNotNull($column->getUrl());
     }
 }

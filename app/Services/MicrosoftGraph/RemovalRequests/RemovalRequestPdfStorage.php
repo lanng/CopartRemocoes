@@ -15,27 +15,51 @@ class RemovalRequestPdfStorage
 
     public function store(PreparedRemovalPdf $pdf, string $vehicleId): string
     {
+        return $this->storeFile(
+            $pdf->temporaryPath,
+            $pdf->fileName,
+            $vehicleId,
+            '/^CartaDeRemoção [A-Z0-9]{7}\.pdf$/u',
+        );
+    }
+
+    public function storeConsignorLetter(PreparedConsignorLetter $letter, string $vehicleId): string
+    {
+        return $this->storeFile(
+            $letter->temporaryPath,
+            $letter->fileName,
+            $vehicleId,
+            '/^CartaDoComitente [A-Z0-9]{7}\.pdf$/u',
+        );
+    }
+
+    private function storeFile(
+        string $temporaryPath,
+        string $fileName,
+        string $vehicleId,
+        string $fileNamePattern,
+    ): string {
         $normalizedVehicleId = $this->normalizer->identifier($vehicleId);
 
         if ($normalizedVehicleId === null || preg_match('/^\d+$/D', $normalizedVehicleId) !== 1) {
             throw new DomainException('O ID do veículo é inválido.');
         }
 
-        if (preg_match('/^CartaDeRemoção [A-Z0-9]{7}\.pdf$/u', $pdf->fileName) !== 1) {
+        if (preg_match($fileNamePattern, $fileName) !== 1) {
             throw new DomainException('O nome do arquivo PDF é inválido.');
         }
 
-        if (! is_file($pdf->temporaryPath) || ! is_readable($pdf->temporaryPath)) {
+        if (! is_file($temporaryPath) || ! is_readable($temporaryPath)) {
             throw new RuntimeException('O arquivo temporário do PDF não está disponível.');
         }
 
-        $stream = fopen($pdf->temporaryPath, 'rb');
+        $stream = fopen($temporaryPath, 'rb');
 
         if ($stream === false) {
             throw new RuntimeException('Não foi possível abrir o arquivo temporário do PDF.');
         }
 
-        $path = 'registros/copart/'.$normalizedVehicleId.'/'.Str::uuid().'/'.$pdf->fileName;
+        $path = 'registros/copart/'.$normalizedVehicleId.'/'.Str::uuid().'/'.$fileName;
 
         try {
             if (! Storage::disk('s3')->put($path, $stream, ['visibility' => 'public'])) {

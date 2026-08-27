@@ -207,7 +207,7 @@ class SyncChecklistEmailsTest extends TestCase
         $this->assertSame('processed', $item->status);
         $this->assertSame('ABC1D23', $item->refresh()->extracted_vehicle_plate);
         $this->assertCount(2, Register::query()->get());
-        Http::assertSentCount(3);
+        Http::assertSentCount(4);
         Http::assertSent(function ($request): bool {
             return str_ends_with($request->url(), '/attachments/attachment-id/$value');
         });

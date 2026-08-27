@@ -4,6 +4,7 @@ namespace App\Jobs;
 
 use App\Models\IntegrationInboxItem;
 use App\Models\MicrosoftGraphConnection;
+use App\Services\MicrosoftGraph\RemovalRequests\AttachConsignorLetterToRegister;
 use App\Services\MicrosoftGraph\RemovalRequests\RemovalRequestImporter;
 use App\Services\MicrosoftGraph\RemovalRequests\RemovalRequestPdfPreparer;
 use DomainException;
@@ -50,6 +51,7 @@ class ProcessRemovalRequestEmail implements ShouldBeUnique, ShouldQueue
     public function handle(
         RemovalRequestPdfPreparer $preparer,
         RemovalRequestImporter $importer,
+        ?AttachConsignorLetterToRegister $consignorLetterAttacher = null,
     ): void {
         $item = DB::transaction(function (): ?IntegrationInboxItem {
             $item = IntegrationInboxItem::query()
@@ -89,7 +91,8 @@ class ProcessRemovalRequestEmail implements ShouldBeUnique, ShouldQueue
                 $item->external_id,
                 (string) $item->extracted_vehicle_plate,
             );
-            $importer->handle($item, $pdf);
+            $item = $importer->handle($item, $pdf);
+            ($consignorLetterAttacher ?? app(AttachConsignorLetterToRegister::class))->handle($item, $connection);
         } catch (DomainException) {
             $this->markPending('domain_error');
         } finally {

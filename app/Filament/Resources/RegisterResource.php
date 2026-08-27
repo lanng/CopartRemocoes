@@ -44,6 +44,7 @@ use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
 use Leandrocfe\FilamentPtbrFormFields\Money;
+use Livewire\Features\SupportFileUploads\TemporaryUploadedFile;
 use Maatwebsite\Excel\Excel as ExcelExcel;
 use Maatwebsite\Excel\Facades\Excel;
 use RuntimeException;
@@ -163,7 +164,7 @@ class RegisterResource extends Resource
 
                 Section::make('Documentos e Observações')->schema([
                     FileUpload::make('pdf_path')
-                        ->label('PDF')
+                        ->label('Carta de Remoção')
                         ->disk('s3')
                         ->directory(config('awss3.s3_bucket'))
                         ->visibility('public')
@@ -318,6 +319,27 @@ class RegisterResource extends Resource
                                 Log::error('WhatsappExtractorService Error: '.$e->getMessage(), ['text' => $state]);
                             }
                         }),
+                    FileUpload::make('consignor_letter_path')
+                        ->label('Carta do Comitente')
+                        ->disk('s3')
+                        ->directory(config('awss3.s3_bucket'))
+                        ->visibility('public')
+                        ->downloadable()
+                        ->openable()
+                        ->acceptedFileTypes(['application/pdf'])
+                        ->getUploadedFileNameForStorageUsing(function (TemporaryUploadedFile $file, Get $get): string {
+                            $plate = strtoupper(str_replace('-', '', (string) $get('vehicle_plate')));
+
+                            return "CartaDoComitente {$plate}.pdf";
+                        })
+                        ->deleteUploadedFileUsing(function (string|TemporaryUploadedFile $file): void {
+                            if ($file instanceof TemporaryUploadedFile) {
+                                return;
+                            }
+
+                            Storage::disk('s3')->delete($file);
+                        })
+                        ->visible(fn (Get $get): bool => $get('company') === 'copart'),
                 ]),
 
                 Section::make('CT-e e entrega')
@@ -402,9 +424,17 @@ class RegisterResource extends Resource
 
                     Stack::make([
                         TextColumn::make('pdf_path')
+                            ->label('Carta de Remoção')
                             ->icon('heroicon-o-document-text')
                             ->formatStateUsing(fn () => 'Ver PDF')
                             ->url(fn ($record): ?string => $record->pdf_path ? Storage::disk('s3')->url($record->pdf_path) : null)
+                            ->openUrlInNewTab()
+                            ->hidden(fn (?Register $record) => $record?->company === CompanyEnum::MILLAN),
+                        TextColumn::make('consignor_letter_path')
+                            ->label('Carta do Comitente')
+                            ->icon('heroicon-o-document-text')
+                            ->formatStateUsing(fn (?string $state): ?string => $state ? 'Comitente' : null)
+                            ->url(fn (?Register $record): ?string => $record?->consignor_letter_path ? Storage::disk('s3')->url($record->consignor_letter_path) : null)
                             ->openUrlInNewTab()
                             ->hidden(fn (?Register $record) => $record?->company === CompanyEnum::MILLAN),
                     ]),

@@ -6,6 +6,8 @@ use App\Jobs\ProcessRemovalRequestEmail;
 use App\Models\IntegrationInboxItem;
 use App\Models\MicrosoftGraphConnection;
 use App\Services\MicrosoftGraph\MicrosoftGraphClient;
+use App\Services\MicrosoftGraph\RemovalRequests\AttachConsignorLetterToRegister;
+use App\Services\MicrosoftGraph\RemovalRequests\PreparedConsignorLetter;
 use App\Services\MicrosoftGraph\RemovalRequests\PreparedRemovalPdf;
 use App\Services\MicrosoftGraph\RemovalRequests\RemovalRequestImporter;
 use App\Services\MicrosoftGraph\RemovalRequests\RemovalRequestPdfPreparer;
@@ -75,6 +77,46 @@ class ProcessRemovalRequestEmailTest extends TestCase
 
             $this->assertFileDoesNotExist($pdf->temporaryPath);
             $this->assertSame('processing', $item->refresh()->status);
+        } finally {
+            @unlink($pdf->temporaryPath);
+        }
+    }
+
+    public function test_it_processes_the_optional_consignor_letter_after_the_main_import(): void
+    {
+        $item = IntegrationInboxItem::factory()->create([
+            'message_type' => 'removal_request',
+            'status' => 'queued',
+            'external_id' => 'message-id',
+            'extracted_vehicle_plate' => 'ABC1D23',
+        ]);
+        $pdf = new PreparedRemovalPdf(
+            temporaryPath: $this->temporaryPdf('%PDF-job'),
+            sha256: hash('sha256', '%PDF-job'),
+            fileName: 'CartaDeRemoção ABC1D23.pdf',
+            extractedData: [],
+        );
+        $connection = MicrosoftGraphConnection::factory()->create();
+        $this->mock(RemovalRequestPdfPreparer::class, function (MockInterface $mock) use ($pdf): void {
+            $mock->shouldReceive('prepare')->once()->andReturn($pdf);
+        });
+        $this->mock(RemovalRequestImporter::class, function (MockInterface $mock) use ($item, $pdf): void {
+            $mock->shouldReceive('handle')->once()->withArgs(function (IntegrationInboxItem $actualItem, PreparedRemovalPdf $actualPdf) use ($item, $pdf): bool {
+                return $actualItem->is($item) && $actualPdf === $pdf;
+            })->andReturn($item);
+        });
+        $this->mock(AttachConsignorLetterToRegister::class, function (MockInterface $mock) use ($item, $connection): void {
+            $mock->shouldReceive('handle')->once()->withArgs(function (IntegrationInboxItem $actualItem, MicrosoftGraphConnection $actualConnection) use ($item, $connection): bool {
+                return $actualItem->is($item) && $actualConnection->is($connection);
+            })->andReturn($item);
+        });
+
+        try {
+            (new ProcessRemovalRequestEmail($item->id))->handle(
+                app(RemovalRequestPdfPreparer::class),
+                app(RemovalRequestImporter::class),
+                app(AttachConsignorLetterToRegister::class),
+            );
         } finally {
             @unlink($pdf->temporaryPath);
         }
@@ -271,6 +313,78 @@ class ProcessRemovalRequestEmailTest extends TestCase
             });
         } finally {
             @unlink($pdf->temporaryPath);
+        }
+    }
+
+    public function test_it_prepares_a_valid_optional_consignor_letter_without_extracting_text(): void
+    {
+        $bytes = '%PDF-consignor';
+        $this->fakeGraph([
+            $this->attachment(),
+            $this->attachment([
+                'id' => 'consignor-letter',
+                'name' => 'CartaDoComitente.pdf',
+                'size' => strlen($bytes),
+            ]),
+        ], $bytes);
+        $this->mock(PdfExtractorService::class, function (MockInterface $mock): void {
+            $mock->shouldReceive('extractData')->never();
+        });
+
+        $letter = app(RemovalRequestPdfPreparer::class)->prepareConsignorLetter(
+            MicrosoftGraphConnection::factory()->create(),
+            'message-id',
+            'FSG5551',
+        );
+
+        try {
+            $this->assertInstanceOf(PreparedConsignorLetter::class, $letter);
+            $this->assertSame('CartaDoComitente FSG5551.pdf', $letter->fileName);
+            $this->assertSame(hash('sha256', $bytes), $letter->sha256);
+            $this->assertFileExists($letter->temporaryPath);
+            Http::assertSent(fn ($request): bool => str_ends_with($request->url(), '/attachments/consignor-letter/$value'));
+        } finally {
+            if ($letter !== null) {
+                @unlink($letter->temporaryPath);
+            }
+        }
+    }
+
+    public function test_it_returns_no_optional_letter_when_the_attachment_is_absent(): void
+    {
+        $this->fakeGraph([$this->attachment()], '%PDF-removal');
+
+        $letter = app(RemovalRequestPdfPreparer::class)->prepareConsignorLetter(
+            MicrosoftGraphConnection::factory()->create(),
+            'message-id',
+            'FSG5551',
+        );
+
+        $this->assertNull($letter);
+    }
+
+    public function test_it_rejects_an_invalid_optional_letter_and_removes_its_temporary_file(): void
+    {
+        $bytes = 'not a PDF';
+        $this->fakeGraph([[
+            ...$this->attachment(),
+            'id' => 'consignor-letter',
+            'name' => 'CartaDoComitente.pdf',
+            'size' => strlen($bytes),
+        ]], $bytes);
+        $before = glob(sys_get_temp_dir().'/consignor_letter_pdf_*') ?: [];
+
+        $this->expectException(\DomainException::class);
+
+        try {
+            app(RemovalRequestPdfPreparer::class)->prepareConsignorLetter(
+                MicrosoftGraphConnection::factory()->create(),
+                'message-id',
+                'FSG5551',
+            );
+        } finally {
+            $after = glob(sys_get_temp_dir().'/consignor_letter_pdf_*') ?: [];
+            $this->assertSame($before, $after);
         }
     }
 
@@ -512,6 +626,31 @@ class ProcessRemovalRequestEmailTest extends TestCase
             $this->assertSame($bytes, Storage::disk('s3')->get($path));
             $this->assertSame('public', Storage::disk('s3')->getVisibility($path));
             $this->assertFileExists($temporaryPath);
+        } finally {
+            @unlink($temporaryPath);
+        }
+    }
+
+    public function test_it_stores_the_consignor_letter_under_a_safe_uuid_path_with_public_visibility(): void
+    {
+        Storage::fake('s3');
+        $bytes = '%PDF-consignor-storage';
+        $temporaryPath = $this->temporaryPdf($bytes);
+        $letter = new PreparedConsignorLetter(
+            temporaryPath: $temporaryPath,
+            sha256: hash('sha256', $bytes),
+            fileName: 'CartaDoComitente FSG5551.pdf',
+        );
+
+        try {
+            $path = app(RemovalRequestPdfStorage::class)->storeConsignorLetter($letter, '1156340');
+
+            $this->assertMatchesRegularExpression(
+                '#^registros/copart/1156340/[0-9a-f-]{36}/CartaDoComitente FSG5551\.pdf$#u',
+                $path,
+            );
+            $this->assertSame($bytes, Storage::disk('s3')->get($path));
+            $this->assertSame('public', Storage::disk('s3')->getVisibility($path));
         } finally {
             @unlink($temporaryPath);
         }
