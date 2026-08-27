@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -16,7 +17,7 @@ class IntegrationInboxItem extends Model
         'extracted_vehicle_id', 'extracted_vehicle_plate', 'extracted_data', 'proposed_changes',
         'alerts', 'candidate_pdf_path', 'candidate_pdf_sha256', 'register_id',
         'previous_register_status', 'delivery_alert', 'authorized_cte_number_at_delivery',
-        'failure_reason', 'resolved_by', 'resolved_at',
+        'failure_reason', 'resolved_by', 'resolved_at', 'acknowledged_by', 'acknowledged_at',
     ];
 
     protected function casts(): array
@@ -24,6 +25,7 @@ class IntegrationInboxItem extends Model
         return [
             'received_at' => 'datetime',
             'resolved_at' => 'datetime',
+            'acknowledged_at' => 'datetime',
             'extracted_data' => 'array',
             'proposed_changes' => 'array',
             'alerts' => 'array',
@@ -41,11 +43,85 @@ class IntegrationInboxItem extends Model
         return $this->message_type === 'removal_request';
     }
 
+    public function requiresUserAction(): bool
+    {
+        if ($this->acknowledged_at !== null) {
+            return false;
+        }
+
+        if ($this->message_type === 'checklist') {
+            return $this->status === 'pending' || $this->delivery_alert !== null;
+        }
+
+        return $this->message_type === 'removal_request'
+            && in_array($this->status, ['pending', 'alert'], true)
+            && $this->resolved_at === null;
+    }
+
+    public function scopeRequiringUserAction(Builder $query): Builder
+    {
+        return $query
+            ->whereNull('acknowledged_at')
+            ->where(function (Builder $query): void {
+                $query
+                    ->where(function (Builder $query): void {
+                        $query->where('message_type', 'checklist')
+                            ->where(function (Builder $query): void {
+                                $query->where('status', 'pending')->orWhereNotNull('delivery_alert');
+                            });
+                    })
+                    ->orWhere(function (Builder $query): void {
+                        $query->where('message_type', 'removal_request')
+                            ->whereIn('status', ['pending', 'alert'])
+                            ->whereNull('resolved_at');
+                    });
+            });
+    }
+
+    public function scopeByActionPriority(Builder $query): Builder
+    {
+        return $query
+            ->orderByRaw("CASE
+                WHEN delivery_alert = 'missing_authorized_cte' THEN 1
+                WHEN message_type = 'removal_request' AND status IN ('pending', 'alert') THEN 2
+                WHEN delivery_alert = 'unexpected_status' THEN 3
+                WHEN status = 'pending' THEN 4
+                WHEN status = 'alert' THEN 5
+                ELSE 6
+            END")
+            ->orderByDesc('received_at')
+            ->orderByDesc('id');
+    }
+
+    public function actionPriority(): int
+    {
+        return match (true) {
+            $this->delivery_alert === 'missing_authorized_cte' => 1,
+            $this->isRemovalRequest() && in_array($this->status, ['pending', 'alert'], true) => 2,
+            $this->delivery_alert === 'unexpected_status' => 3,
+            $this->status === 'pending' => 4,
+            $this->status === 'alert' => 5,
+            default => 6,
+        };
+    }
+
+    public function actionLabel(): string
+    {
+        return match (true) {
+            $this->delivery_alert === 'missing_authorized_cte' => 'Entrega sem CT-e',
+            $this->delivery_alert === 'unexpected_status' => 'Entrega fora do fluxo',
+            $this->isRemovalRequest() && $this->failure_reason !== null => $this->failureReasonLabel() ?? 'Falha na importação',
+            $this->isRemovalRequest() && $this->hasRemovalAlert() => implode(', ', $this->removalAlertLabels()),
+            $this->status === 'pending' => 'Conciliação pendente',
+            default => 'Revisão pendente',
+        };
+    }
+
     public function messageTypeLabel(): string
     {
         return match ($this->message_type) {
-            'removal_request' => 'Pedido de remoção',
-            'checklist' => 'Checklist digital',
+            'removal_request' => 'Inclusão de registro',
+            'checklist' => 'Baixa de entrega',
             default => $this->message_type,
         };
     }
@@ -56,6 +132,7 @@ class IntegrationInboxItem extends Model
             ->map(fn (string $alert): string => match ($alert) {
                 'freight_changed' => 'Frete alterado',
                 'zero_fipe' => 'FIPE zerada',
+                'consignor_letter_failed' => 'Falha ao salvar Carta do Comitente',
                 default => $alert,
             })
             ->values()
@@ -106,6 +183,11 @@ class IntegrationInboxItem extends Model
     public function resolver(): BelongsTo
     {
         return $this->belongsTo(User::class, 'resolved_by');
+    }
+
+    public function acknowledger(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'acknowledged_by');
     }
 
     public function statusLabel(): string

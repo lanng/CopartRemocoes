@@ -4,8 +4,10 @@ namespace App\Filament\Resources;
 
 use App\Enums\RegisterStatusEnum;
 use App\Filament\Resources\IntegrationInboxItemResource\Pages;
+use App\Filament\Support\IntegrationInboxItemPresentation;
 use App\Models\IntegrationInboxItem;
 use App\Models\Register;
+use App\Services\MicrosoftGraph\AcknowledgeIntegrationAlert;
 use App\Services\MicrosoftGraph\RemovalRequests\ResolveRemovalRequestImport;
 use App\Services\MicrosoftGraph\RemovalRequests\RetryRemovalRequestImport;
 use App\Services\MicrosoftGraph\ResolveIntegrationInboxItem;
@@ -32,11 +34,11 @@ class IntegrationInboxItemResource extends Resource
 
     protected static ?string $navigationGroup = 'Financeiro';
 
-    protected static ?string $navigationLabel = 'Baixas por e-mail';
+    protected static ?string $navigationLabel = 'Integrações por e-mail';
 
-    protected static ?string $modelLabel = 'Baixa por e-mail';
+    protected static ?string $modelLabel = 'Integração por e-mail';
 
-    protected static ?string $pluralModelLabel = 'Baixas por e-mail';
+    protected static ?string $pluralModelLabel = 'Integrações por e-mail';
 
     public static function form(Form $form): Form
     {
@@ -93,6 +95,8 @@ class IntegrationInboxItemResource extends Resource
                 ->placeholder('Não encontrado'),
             TextEntry::make('resolver.name')->label('Conciliado por')->placeholder('Não informado'),
             TextEntry::make('resolved_at')->label('Data da conciliação')->dateTime('d/m/Y H:i')->timezone('America/Sao_Paulo')->placeholder('Não informado'),
+            TextEntry::make('acknowledger.name')->label('Alerta reconhecido por')->placeholder('Não reconhecido'),
+            TextEntry::make('acknowledged_at')->label('Data do reconhecimento')->dateTime('d/m/Y H:i')->timezone('America/Sao_Paulo')->placeholder('Não reconhecido'),
         ]);
     }
 
@@ -101,6 +105,11 @@ class IntegrationInboxItemResource extends Resource
         return $table
             ->columns([
                 Tables\Columns\TextColumn::make('status')->label('Situação')->formatStateUsing(fn (IntegrationInboxItem $record): string => $record->statusLabel())->badge()->searchable(),
+                Tables\Columns\TextColumn::make('message_type')
+                    ->label('Tipo')
+                    ->formatStateUsing(fn (IntegrationInboxItem $record): string => $record->messageTypeLabel())
+                    ->badge()
+                    ->color(fn (IntegrationInboxItem $record): string => $record->isRemovalRequest() ? 'info' : 'gray'),
                 Tables\Columns\TextColumn::make('extracted_vehicle_id')
                     ->label('Veículo')
                     ->description(fn (IntegrationInboxItem $record): ?string => $record->extracted_vehicle_plate)
@@ -156,6 +165,15 @@ class IntegrationInboxItemResource extends Resource
             ])
             ->actions([
                 Tables\Actions\ViewAction::make(),
+                Tables\Actions\Action::make('acknowledgeDeliveryAlert')
+                    ->label('Reconhecer')
+                    ->icon('heroicon-o-check')
+                    ->color('success')
+                    ->visible(fn (IntegrationInboxItem $record): bool => ! $record->isRemovalRequest()
+                        && $record->delivery_alert !== null
+                        && $record->acknowledged_at === null)
+                    ->requiresConfirmation()
+                    ->action(fn (IntegrationInboxItem $record): IntegrationInboxItem => app(AcknowledgeIntegrationAlert::class)->handle($record, auth()->user())),
                 Tables\Actions\Action::make('acceptRemovalRequest')
                     ->label('Aceitar importação')
                     ->icon('heroicon-o-check-circle')
@@ -215,12 +233,14 @@ class IntegrationInboxItemResource extends Resource
                     ->icon('heroicon-o-arrow-path')
                     ->color('warning')
                     ->visible(fn (IntegrationInboxItem $record): bool => $record->isRemovalRequest()
-                        && $record->status === 'pending'
-                        && in_array($record->failure_reason, [
-                            'domain_error',
-                            'processing_failed',
-                            'graph_connection_missing',
-                        ], true))
+                        && (($record->status === 'pending'
+                            && in_array($record->failure_reason, [
+                                'domain_error',
+                                'processing_failed',
+                                'graph_connection_missing',
+                            ], true))
+                            || ($record->status === 'alert'
+                                && in_array('consignor_letter_failed', $record->alerts ?? [], true))))
                     ->requiresConfirmation()
                     ->action(function (IntegrationInboxItem $record): void {
                         app(RetryRemovalRequestImport::class)->handle($record);
@@ -253,16 +273,16 @@ class IntegrationInboxItemResource extends Resource
                     ->icon('heroicon-o-check-badge')
                     ->color('success')
                     ->visible(fn (IntegrationInboxItem $record): bool => ! $record->isRemovalRequest() && $record->status === 'pending')
-                    ->disabled(fn (IntegrationInboxItem $record): bool => self::matchingRegisterOptions($record) === [])
-                    ->tooltip(fn (IntegrationInboxItem $record): ?string => self::matchingRegisterOptions($record) === []
+                    ->disabled(fn (IntegrationInboxItem $record): bool => IntegrationInboxItemPresentation::matchingRegisterOptions($record) === [])
+                    ->tooltip(fn (IntegrationInboxItem $record): ?string => IntegrationInboxItemPresentation::matchingRegisterOptions($record) === []
                         ? 'Nenhum registro compatível encontrado para esta baixa.'
                         : null)
                     ->form(fn (IntegrationInboxItem $record): array => [
                         Select::make('register_id')
                             ->label('Registro')
-                            ->options(self::matchingRegisterOptions($record))
-                            ->disabled(fn (IntegrationInboxItem $record): bool => self::matchingRegisterOptions($record) === [])
-                            ->helperText(fn (IntegrationInboxItem $record): ?string => self::matchingRegisterOptions($record) === []
+                            ->options(IntegrationInboxItemPresentation::matchingRegisterOptions($record))
+                            ->disabled(fn (IntegrationInboxItem $record): bool => IntegrationInboxItemPresentation::matchingRegisterOptions($record) === [])
+                            ->helperText(fn (IntegrationInboxItem $record): ?string => IntegrationInboxItemPresentation::matchingRegisterOptions($record) === []
                                 ? 'Nenhum registro compatível encontrado para esta baixa.'
                                 : null)
                             ->required(),
@@ -296,17 +316,5 @@ class IntegrationInboxItemResource extends Resource
             'index' => Pages\ListIntegrationInboxItems::route('/'),
             'view' => Pages\ViewIntegrationInboxItem::route('/{record}'),
         ];
-    }
-
-    /** @return array<int|string, string> */
-    private static function matchingRegisterOptions(IntegrationInboxItem $item): array
-    {
-        return Register::query()
-            ->where('company', 'copart')
-            ->where('vehicle_id', $item->extracted_vehicle_id)
-            ->get()
-            ->filter(fn (Register $register): bool => strtoupper(str_replace('-', '', $register->vehicle_plate)) === strtoupper((string) $item->extracted_vehicle_plate))
-            ->mapWithKeys(fn (Register $register): array => [$register->id => "{$register->vehicle_id} - {$register->vehicle_plate}"])
-            ->all();
     }
 }

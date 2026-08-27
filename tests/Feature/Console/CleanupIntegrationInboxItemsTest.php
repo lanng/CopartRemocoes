@@ -17,6 +17,12 @@ class CleanupIntegrationInboxItemsTest extends TestCase
             'status' => 'processed',
             'delivery_alert' => 'missing_authorized_cte',
             'resolved_at' => Carbon::now()->subDays(31),
+            'acknowledged_at' => Carbon::now()->subDays(31),
+        ]);
+        $unacknowledgedAlert = IntegrationInboxItem::factory()->create([
+            'status' => 'processed',
+            'delivery_alert' => 'unexpected_status',
+            'resolved_at' => Carbon::now()->subDays(31),
         ]);
         $duplicate = IntegrationInboxItem::factory()->create([
             'status' => 'duplicate',
@@ -36,6 +42,7 @@ class CleanupIntegrationInboxItemsTest extends TestCase
 
         $this->assertModelMissing($processed);
         $this->assertModelMissing($duplicate);
+        $this->assertModelExists($unacknowledgedAlert);
         $this->assertModelExists($pending);
         $this->assertModelExists($recent);
     }
@@ -52,5 +59,20 @@ class CleanupIntegrationInboxItemsTest extends TestCase
             ->assertSuccessful();
 
         $this->assertModelMissing($item);
+    }
+
+    public function test_it_keeps_an_old_delivery_alert_until_it_is_acknowledged(): void
+    {
+        $item = IntegrationInboxItem::factory()->create([
+            'status' => 'processed',
+            'delivery_alert' => 'missing_authorized_cte',
+            'resolved_at' => Carbon::now()->subDays(31),
+            'acknowledged_at' => null,
+        ]);
+
+        $this->artisan('app:cleanup-integration-inbox-items')
+            ->assertSuccessful();
+
+        $this->assertModelExists($item);
     }
 }

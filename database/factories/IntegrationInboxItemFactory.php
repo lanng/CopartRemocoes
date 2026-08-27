@@ -41,6 +41,8 @@ class IntegrationInboxItemFactory extends Factory
             'failure_reason' => null,
             'resolved_by' => null,
             'resolved_at' => null,
+            'acknowledged_by' => null,
+            'acknowledged_at' => null,
         ];
     }
 }

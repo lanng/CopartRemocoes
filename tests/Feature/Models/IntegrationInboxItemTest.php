@@ -3,6 +3,7 @@
 namespace Tests\Feature\Models;
 
 use App\Models\IntegrationInboxItem;
+use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
 
@@ -127,5 +128,93 @@ class IntegrationInboxItemTest extends TestCase
         $this->assertTrue($item->hasDeliveryAlert());
         $this->assertSame('future_alert', $item->deliveryAlertLabel());
         $this->assertSame('gray', $item->deliveryAlertColor());
+    }
+
+    public function test_it_persists_alert_acknowledgement_separately_from_resolution(): void
+    {
+        $user = User::factory()->create();
+        $item = IntegrationInboxItem::factory()->create([
+            'status' => 'processed',
+            'delivery_alert' => 'missing_authorized_cte',
+            'resolved_at' => '2026-08-19 12:00:00',
+            'acknowledged_by' => $user->id,
+            'acknowledged_at' => '2026-08-20 13:00:00',
+        ])->refresh();
+
+        $this->assertSame('2026-08-19 12:00:00', $item->resolved_at->format('Y-m-d H:i:s'));
+        $this->assertSame('2026-08-20 13:00:00', $item->acknowledged_at->format('Y-m-d H:i:s'));
+        $this->assertTrue($item->acknowledger->is($user));
+    }
+
+    public function test_it_labels_a_failed_consignor_letter_alert(): void
+    {
+        $item = new IntegrationInboxItem([
+            'message_type' => 'removal_request',
+            'alerts' => ['consignor_letter_failed'],
+        ]);
+
+        $this->assertSame(['Falha ao salvar Carta do Comitente'], $item->removalAlertLabels());
+    }
+
+    #[\PHPUnit\Framework\Attributes\DataProvider('actionableItemProvider')]
+    public function test_it_classifies_items_that_require_user_action(array $attributes, bool $expected): void
+    {
+        $item = IntegrationInboxItem::factory()->create($attributes);
+
+        $this->assertSame($expected, $item->requiresUserAction());
+        $this->assertSame($expected, IntegrationInboxItem::query()
+            ->requiringUserAction()
+            ->whereKey($item->id)
+            ->exists());
+    }
+
+    /** @return array<string, array{0: array<string, mixed>, 1: bool}> */
+    public static function actionableItemProvider(): array
+    {
+        return [
+            'checklist pending' => [['message_type' => 'checklist', 'status' => 'pending'], true],
+            'missing cte' => [['message_type' => 'checklist', 'status' => 'processed', 'delivery_alert' => 'missing_authorized_cte'], true],
+            'unexpected flow' => [['message_type' => 'checklist', 'status' => 'processed', 'delivery_alert' => 'unexpected_status'], true],
+            'removal error' => [['message_type' => 'removal_request', 'status' => 'pending', 'failure_reason' => 'domain_error'], true],
+            'removal review' => [['message_type' => 'removal_request', 'status' => 'pending', 'proposed_changes' => ['value' => ['current' => '1.00', 'proposed' => '2.00']]], true],
+            'removal alert' => [['message_type' => 'removal_request', 'status' => 'alert', 'alerts' => ['zero_fipe']], true],
+            'acknowledged delivery' => [['message_type' => 'checklist', 'status' => 'processed', 'delivery_alert' => 'unexpected_status', 'acknowledged_at' => now()], false],
+            'processed removal' => [['message_type' => 'removal_request', 'status' => 'processed'], false],
+        ];
+    }
+
+    public function test_it_orders_actionable_items_by_priority_and_received_at(): void
+    {
+        $oldestAlert = IntegrationInboxItem::factory()->create([
+            'message_type' => 'removal_request',
+            'status' => 'alert',
+            'alerts' => ['zero_fipe'],
+            'received_at' => '2026-08-10 10:00:00',
+        ]);
+        $pendingRemoval = IntegrationInboxItem::factory()->create([
+            'message_type' => 'removal_request',
+            'status' => 'pending',
+            'failure_reason' => 'domain_error',
+            'received_at' => '2026-08-12 10:00:00',
+        ]);
+        $missingCte = IntegrationInboxItem::factory()->create([
+            'message_type' => 'checklist',
+            'status' => 'processed',
+            'delivery_alert' => 'missing_authorized_cte',
+            'received_at' => '2026-08-13 10:00:00',
+        ]);
+        $olderPending = IntegrationInboxItem::factory()->create([
+            'message_type' => 'checklist',
+            'status' => 'pending',
+            'received_at' => '2026-08-09 10:00:00',
+        ]);
+
+        $ordered = IntegrationInboxItem::query()
+            ->requiringUserAction()
+            ->byActionPriority()
+            ->pluck('id')
+            ->all();
+
+        $this->assertSame([$missingCte->id, $pendingRemoval->id, $oldestAlert->id, $olderPending->id], $ordered);
     }
 }

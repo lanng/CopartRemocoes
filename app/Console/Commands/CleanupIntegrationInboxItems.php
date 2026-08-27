@@ -4,6 +4,7 @@ namespace App\Console\Commands;
 
 use App\Models\IntegrationInboxItem;
 use Illuminate\Console\Command;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Storage;
 
@@ -20,6 +21,9 @@ class CleanupIntegrationInboxItems extends Command
 
         IntegrationInboxItem::query()
             ->whereIn('status', ['processed', 'duplicate', 'no_changes', 'rejected'])
+            ->where(function (Builder $query): void {
+                $query->whereNull('delivery_alert')->orWhereNotNull('acknowledged_at');
+            })
             ->whereRaw('COALESCE(resolved_at, updated_at) <= ?', [$cutoff])
             ->chunkById(100, function ($items) use (&$deleted): void {
                 foreach ($items as $item) {

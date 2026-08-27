@@ -39,7 +39,7 @@ class IntegrationInboxItemResourceTest extends TestCase
         ]);
         $processed = IntegrationInboxItem::factory()->create(['status' => 'processed']);
 
-        $this->assertSame('Baixas por e-mail', IntegrationInboxItemResource::getNavigationLabel());
+        $this->assertSame('Integrações por e-mail', IntegrationInboxItemResource::getNavigationLabel());
         $this->assertSame('Financeiro', IntegrationInboxItemResource::getNavigationGroup());
 
         Livewire::test(ListIntegrationInboxItems::class)
@@ -61,7 +61,7 @@ class IntegrationInboxItemResourceTest extends TestCase
         $table = $list->instance()->getTable();
 
         $this->assertSame(
-            ['status', 'extracted_vehicle_id', 'received_at', 'occurrence'],
+            ['status', 'message_type', 'extracted_vehicle_id', 'received_at', 'occurrence'],
             array_keys($table->getColumns()),
         );
         $this->assertTrue($table->getColumn('status')->isBadge());
@@ -70,6 +70,45 @@ class IntegrationInboxItemResourceTest extends TestCase
         $this->assertSame('Ocorrência', $table->getColumn('occurrence')->getLabel());
         $this->assertSame(['extracted_vehicle_id', 'extracted_vehicle_plate', 'sender'], $table->getColumn('extracted_vehicle_id')->getSearchColumns());
         $this->assertTrue($table->getColumn('occurrence')->isBadge());
+    }
+
+    public function test_it_distinguishes_delivery_and_register_inclusion_messages(): void
+    {
+        $checklist = IntegrationInboxItem::factory()->create([
+            'message_type' => 'checklist',
+            'status' => 'processed',
+            'delivery_alert' => 'unexpected_status',
+        ]);
+        $removal = IntegrationInboxItem::factory()->create([
+            'message_type' => 'removal_request',
+            'status' => 'processed',
+        ]);
+        $table = Livewire::test(ListIntegrationInboxItems::class)->instance()->getTable();
+
+        $this->assertSame('Baixa de entrega', $checklist->messageTypeLabel());
+        $this->assertSame('Inclusão de registro', $removal->messageTypeLabel());
+        $messageTypeColumn = $table->getColumn('message_type');
+        $this->assertSame('Baixa de entrega', $messageTypeColumn->formatState($messageTypeColumn->record($checklist)->getState()));
+        $this->assertSame('Inclusão de registro', $messageTypeColumn->formatState($messageTypeColumn->record($removal)->getState()));
+    }
+
+    public function test_it_acknowledges_delivery_alerts_from_the_inbox(): void
+    {
+        $checklist = IntegrationInboxItem::factory()->create([
+            'message_type' => 'checklist',
+            'status' => 'processed',
+            'delivery_alert' => 'missing_authorized_cte',
+        ]);
+        $user = User::query()->firstOrFail();
+
+        $table = Livewire::test(ListIntegrationInboxItems::class)->instance()->getTable();
+        $this->assertTrue($table->getAction('acknowledgeDeliveryAlert')->record($checklist)->isVisible());
+
+        Livewire::test(ListIntegrationInboxItems::class)
+            ->callTableAction('acknowledgeDeliveryAlert', $checklist);
+
+        $this->assertSame($user->id, $checklist->refresh()->acknowledged_by);
+        $this->assertNotNull($checklist->acknowledged_at);
     }
 
     public function test_it_renders_vehicle_id_and_plate_description(): void
@@ -249,6 +288,11 @@ class IntegrationInboxItemResourceTest extends TestCase
             'status' => 'pending',
             'failure_reason' => 'domain_error',
         ]);
+        $consignorLetterFailure = IntegrationInboxItem::factory()->create([
+            'message_type' => 'removal_request',
+            'status' => 'alert',
+            'alerts' => ['consignor_letter_failed'],
+        ]);
         $checklist = IntegrationInboxItem::factory()->create([
             'message_type' => 'checklist',
             'status' => 'pending',
@@ -258,6 +302,7 @@ class IntegrationInboxItemResourceTest extends TestCase
         $this->assertTrue($table->getAction('acceptRemovalRequest')->record($removal)->isVisible());
         $this->assertTrue($table->getAction('reviewRemovalRequest')->record($removal)->isVisible());
         $this->assertTrue($table->getAction('retryRemovalRequest')->record($domainError)->isVisible());
+        $this->assertTrue($table->getAction('retryRemovalRequest')->record($consignorLetterFailure)->isVisible());
         $this->assertFalse($table->getAction('acceptRemovalRequest')->record($domainError)->isVisible());
         $this->assertFalse($table->getAction('retryRemovalRequest')->record($checklist)->isVisible());
         $this->assertSame('Falha na validação da importação', $domainError->failureReasonLabel());
