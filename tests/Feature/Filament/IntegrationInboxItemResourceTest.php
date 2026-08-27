@@ -11,6 +11,7 @@ use Filament\Facades\Filament;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\File;
+use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Str;
 use Livewire\Livewire;
 use Tests\TestCase;
@@ -38,7 +39,7 @@ class IntegrationInboxItemResourceTest extends TestCase
         ]);
         $processed = IntegrationInboxItem::factory()->create(['status' => 'processed']);
 
-        $this->assertSame('Baixas por e-mail', IntegrationInboxItemResource::getNavigationLabel());
+        $this->assertSame('Integrações por e-mail', IntegrationInboxItemResource::getNavigationLabel());
         $this->assertSame('Financeiro', IntegrationInboxItemResource::getNavigationGroup());
 
         Livewire::test(ListIntegrationInboxItems::class)
@@ -60,7 +61,7 @@ class IntegrationInboxItemResourceTest extends TestCase
         $table = $list->instance()->getTable();
 
         $this->assertSame(
-            ['status', 'extracted_vehicle_id', 'received_at', 'occurrence'],
+            ['status', 'message_type', 'extracted_vehicle_id', 'received_at', 'occurrence'],
             array_keys($table->getColumns()),
         );
         $this->assertTrue($table->getColumn('status')->isBadge());
@@ -69,6 +70,45 @@ class IntegrationInboxItemResourceTest extends TestCase
         $this->assertSame('Ocorrência', $table->getColumn('occurrence')->getLabel());
         $this->assertSame(['extracted_vehicle_id', 'extracted_vehicle_plate', 'sender'], $table->getColumn('extracted_vehicle_id')->getSearchColumns());
         $this->assertTrue($table->getColumn('occurrence')->isBadge());
+    }
+
+    public function test_it_distinguishes_delivery_and_register_inclusion_messages(): void
+    {
+        $checklist = IntegrationInboxItem::factory()->create([
+            'message_type' => 'checklist',
+            'status' => 'processed',
+            'delivery_alert' => 'unexpected_status',
+        ]);
+        $removal = IntegrationInboxItem::factory()->create([
+            'message_type' => 'removal_request',
+            'status' => 'processed',
+        ]);
+        $table = Livewire::test(ListIntegrationInboxItems::class)->instance()->getTable();
+
+        $this->assertSame('Baixa de entrega', $checklist->messageTypeLabel());
+        $this->assertSame('Inclusão de registro', $removal->messageTypeLabel());
+        $messageTypeColumn = $table->getColumn('message_type');
+        $this->assertSame('Baixa de entrega', $messageTypeColumn->formatState($messageTypeColumn->record($checklist)->getState()));
+        $this->assertSame('Inclusão de registro', $messageTypeColumn->formatState($messageTypeColumn->record($removal)->getState()));
+    }
+
+    public function test_it_acknowledges_delivery_alerts_from_the_inbox(): void
+    {
+        $checklist = IntegrationInboxItem::factory()->create([
+            'message_type' => 'checklist',
+            'status' => 'processed',
+            'delivery_alert' => 'missing_authorized_cte',
+        ]);
+        $user = User::query()->firstOrFail();
+
+        $table = Livewire::test(ListIntegrationInboxItems::class)->instance()->getTable();
+        $this->assertTrue($table->getAction('acknowledgeDeliveryAlert')->record($checklist)->isVisible());
+
+        Livewire::test(ListIntegrationInboxItems::class)
+            ->callTableAction('acknowledgeDeliveryAlert', $checklist);
+
+        $this->assertSame($user->id, $checklist->refresh()->acknowledged_by);
+        $this->assertNotNull($checklist->acknowledged_at);
     }
 
     public function test_it_renders_vehicle_id_and_plate_description(): void
@@ -208,6 +248,124 @@ class IntegrationInboxItemResourceTest extends TestCase
         $this->assertNotNull($resolveAction);
         $this->assertTrue($resolveAction->record($pending)->isVisible());
         $this->assertFalse($resolveAction->record($processed)->isVisible());
+    }
+
+    public function test_it_exposes_removal_request_review_actions_without_using_checklist_reconciliation(): void
+    {
+        $pending = IntegrationInboxItem::factory()->create([
+            'message_type' => 'removal_request',
+            'status' => 'pending',
+            'proposed_changes' => [
+                'destination_city' => ['current' => 'Pirapora', 'proposed' => 'Jundiaí'],
+            ],
+        ]);
+        $alert = IntegrationInboxItem::factory()->create([
+            'message_type' => 'removal_request',
+            'status' => 'alert',
+            'alerts' => ['zero_fipe'],
+        ]);
+        $table = Livewire::test(ListIntegrationInboxItems::class)->instance()->getTable();
+
+        $this->assertTrue($table->getAction('reviewRemovalRequest')->record($pending)->isVisible());
+        $this->assertFalse($table->getAction('resolve')->record($pending)->isVisible());
+        $this->assertTrue($table->getAction('acknowledgeRemovalAlert')->record($alert)->isVisible());
+        $this->assertSame(['FIPE zerada'], $alert->removalAlertLabels());
+    }
+
+    public function test_it_exposes_accept_and_retry_actions_for_removal_imports(): void
+    {
+        $register = \App\Models\Register::factory()->create();
+        $removal = IntegrationInboxItem::factory()->create([
+            'message_type' => 'removal_request',
+            'status' => 'pending',
+            'register_id' => $register->id,
+            'proposed_changes' => [
+                'value' => ['current' => '800.00', 'proposed' => '866.48'],
+            ],
+        ]);
+        $domainError = IntegrationInboxItem::factory()->create([
+            'message_type' => 'removal_request',
+            'status' => 'pending',
+            'failure_reason' => 'domain_error',
+        ]);
+        $consignorLetterFailure = IntegrationInboxItem::factory()->create([
+            'message_type' => 'removal_request',
+            'status' => 'alert',
+            'alerts' => ['consignor_letter_failed'],
+        ]);
+        $checklist = IntegrationInboxItem::factory()->create([
+            'message_type' => 'checklist',
+            'status' => 'pending',
+        ]);
+        $table = Livewire::test(ListIntegrationInboxItems::class)->instance()->getTable();
+
+        $this->assertTrue($table->getAction('acceptRemovalRequest')->record($removal)->isVisible());
+        $this->assertTrue($table->getAction('reviewRemovalRequest')->record($removal)->isVisible());
+        $this->assertTrue($table->getAction('retryRemovalRequest')->record($domainError)->isVisible());
+        $this->assertTrue($table->getAction('retryRemovalRequest')->record($consignorLetterFailure)->isVisible());
+        $this->assertFalse($table->getAction('acceptRemovalRequest')->record($domainError)->isVisible());
+        $this->assertFalse($table->getAction('retryRemovalRequest')->record($checklist)->isVisible());
+        $this->assertSame('Falha na validação da importação', $domainError->failureReasonLabel());
+    }
+
+    public function test_it_disables_checklist_reconciliation_when_no_register_matches(): void
+    {
+        $checklist = IntegrationInboxItem::factory()->create([
+            'message_type' => 'checklist',
+            'status' => 'pending',
+            'extracted_vehicle_id' => 'missing-vehicle',
+            'extracted_vehicle_plate' => 'ZZZ9Z99',
+        ]);
+        $table = Livewire::test(ListIntegrationInboxItems::class)->instance()->getTable();
+        $resolveAction = $table->getAction('resolve')->record($checklist);
+
+        $this->assertTrue($resolveAction->isVisible());
+        $this->assertTrue($resolveAction->isDisabled());
+    }
+
+    public function test_it_accepts_all_removal_changes_and_can_retry_a_processing_failure(): void
+    {
+        Queue::fake();
+        $register = \App\Models\Register::factory()->create(['value' => '800.00']);
+        $removal = IntegrationInboxItem::factory()->create([
+            'message_type' => 'removal_request',
+            'status' => 'pending',
+            'register_id' => $register->id,
+            'proposed_changes' => [
+                'value' => ['current' => '800.00', 'proposed' => '866.48'],
+            ],
+        ]);
+        $domainError = IntegrationInboxItem::factory()->create([
+            'message_type' => 'removal_request',
+            'status' => 'pending',
+            'failure_reason' => 'domain_error',
+        ]);
+
+        Livewire::test(ListIntegrationInboxItems::class)
+            ->callTableAction('acceptRemovalRequest', $removal)
+            ->callTableAction('retryRemovalRequest', $domainError);
+
+        $this->assertSame('processed', $removal->refresh()->status);
+        $this->assertSame('866.48', $register->refresh()->value);
+        $this->assertSame('queued', $domainError->refresh()->status);
+        Queue::assertPushed(\App\Jobs\ProcessRemovalRequestEmail::class, fn (\App\Jobs\ProcessRemovalRequestEmail $job): bool => $job->integrationInboxItemId === $domainError->id);
+    }
+
+    public function test_it_displays_proposed_removal_changes_in_the_item_view(): void
+    {
+        $item = IntegrationInboxItem::factory()->create([
+            'message_type' => 'removal_request',
+            'status' => 'pending',
+            'proposed_changes' => [
+                'destination_city' => ['current' => 'Pirapora', 'proposed' => 'Jundiaí'],
+            ],
+        ]);
+
+        Livewire::test(ViewIntegrationInboxItem::class, ['record' => $item->getRouteKey()])
+            ->assertSee('Alterações propostas')
+            ->assertSee('Cidade de destino')
+            ->assertSee('Pirapora')
+            ->assertSee('Jundiaí');
     }
 
     public function test_it_sorts_by_received_at_in_both_directions(): void

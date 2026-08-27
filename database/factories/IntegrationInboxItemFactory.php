@@ -21,6 +21,7 @@ class IntegrationInboxItemFactory extends Factory
     {
         return [
             'source' => 'microsoft_graph',
+            'message_type' => 'checklist',
             'external_id' => fake()->unique()->uuid(),
             'status' => 'pending',
             'sender' => 'remocao@copart.com.br',
@@ -28,6 +29,11 @@ class IntegrationInboxItemFactory extends Factory
             'received_at' => now(),
             'extracted_vehicle_id' => '1146609',
             'extracted_vehicle_plate' => 'ESN4A20',
+            'extracted_data' => null,
+            'proposed_changes' => null,
+            'alerts' => null,
+            'candidate_pdf_path' => null,
+            'candidate_pdf_sha256' => null,
             'register_id' => null,
             'previous_register_status' => null,
             'delivery_alert' => null,
@@ -35,6 +41,8 @@ class IntegrationInboxItemFactory extends Factory
             'failure_reason' => null,
             'resolved_by' => null,
             'resolved_at' => null,
+            'acknowledged_by' => null,
+            'acknowledged_at' => null,
         ];
     }
 }

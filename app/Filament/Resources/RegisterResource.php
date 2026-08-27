@@ -44,8 +44,11 @@ use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
 use Leandrocfe\FilamentPtbrFormFields\Money;
+use Livewire\Features\SupportFileUploads\TemporaryUploadedFile;
 use Maatwebsite\Excel\Excel as ExcelExcel;
 use Maatwebsite\Excel\Facades\Excel;
+use RuntimeException;
+use Throwable;
 
 class RegisterResource extends Resource
 {
@@ -161,7 +164,7 @@ class RegisterResource extends Resource
 
                 Section::make('Documentos e Observações')->schema([
                     FileUpload::make('pdf_path')
-                        ->label('PDF')
+                        ->label('Carta de Remoção')
                         ->disk('s3')
                         ->directory(config('awss3.s3_bucket'))
                         ->visibility('public')
@@ -184,10 +187,18 @@ class RegisterResource extends Resource
                                 return;
                             }
 
+                            $tempLocalPath = null;
+
                             try {
                                 $tempLocalPath = tempnam(sys_get_temp_dir(), 'pdf_process_');
 
-                                file_put_contents($tempLocalPath, $state->get());
+                                if (! is_string($tempLocalPath)) {
+                                    throw new RuntimeException('Não foi possível preparar o arquivo PDF.');
+                                }
+
+                                if (file_put_contents($tempLocalPath, $state->get()) === false) {
+                                    throw new RuntimeException('Não foi possível preparar o arquivo PDF.');
+                                }
 
                                 $extractor = app(PdfExtractorService::class);
 
@@ -239,7 +250,7 @@ class RegisterResource extends Resource
                                     ->body('Campos preenchidos com base no PDF. Por favor, revise e complete as informações.')
                                     ->send();
 
-                            } catch (Exception $e) {
+                            } catch (Throwable $e) {
                                 Notification::make()
                                     ->danger()
                                     ->title('Erro Inesperado')
@@ -247,7 +258,7 @@ class RegisterResource extends Resource
                                     ->send();
                                 Log::error('Unexpected error during PDF extraction service call: '.$e->getMessage(), ['state' => $state]);
                             } finally {
-                                if (file_exists($tempLocalPath)) {
+                                if (is_string($tempLocalPath) && file_exists($tempLocalPath)) {
                                     unlink($tempLocalPath);
                                 }
                             }
@@ -308,6 +319,27 @@ class RegisterResource extends Resource
                                 Log::error('WhatsappExtractorService Error: '.$e->getMessage(), ['text' => $state]);
                             }
                         }),
+                    FileUpload::make('consignor_letter_path')
+                        ->label('Carta do Comitente')
+                        ->disk('s3')
+                        ->directory(config('awss3.s3_bucket'))
+                        ->visibility('public')
+                        ->downloadable()
+                        ->openable()
+                        ->acceptedFileTypes(['application/pdf'])
+                        ->getUploadedFileNameForStorageUsing(function (TemporaryUploadedFile $file, Get $get): string {
+                            $plate = strtoupper(str_replace('-', '', (string) $get('vehicle_plate')));
+
+                            return "CartaDoComitente {$plate}.pdf";
+                        })
+                        ->deleteUploadedFileUsing(function (string|TemporaryUploadedFile $file): void {
+                            if ($file instanceof TemporaryUploadedFile) {
+                                return;
+                            }
+
+                            Storage::disk('s3')->delete($file);
+                        })
+                        ->visible(fn (Get $get): bool => $get('company') === 'copart'),
                 ]),
 
                 Section::make('CT-e e entrega')
@@ -323,6 +355,15 @@ class RegisterResource extends Resource
                         Placeholder::make('delivery_confirmed_at')
                             ->label('Data da entrega')
                             ->content(fn (?Register $record): string => $record?->delivery_confirmed_at?->timezone('America/Sao_Paulo')->format('d/m/Y H:i') ?? 'Não informado'),
+                    ]),
+                Section::make('Revisão de integração')
+                    ->visibleOn('view')
+                    ->schema([
+                        Placeholder::make('removal_import_attention')
+                            ->label('Situação')
+                            ->content(fn (?Register $record): string => $record?->unresolvedRemovalImports()->exists()
+                                ? 'Há uma revisão de e-mail pendente para este registro.'
+                                : 'Nenhuma revisão de e-mail pendente.'),
                     ]),
             ]);
     }
@@ -374,13 +415,26 @@ class RegisterResource extends Resource
                             ->formatStateUsing(fn (RegisterStatusEnum $state): string => $state->localizedLabel())
                             ->sortable()
                             ->searchable(),
+                        TextColumn::make('unresolved_removal_imports_exists')
+                            ->label('Integração')
+                            ->state(fn (Register $record): ?string => $record->unresolved_removal_imports_exists ? 'Revisão pendente' : null)
+                            ->icon('heroicon-o-exclamation-triangle')
+                            ->color('warning'),
                     ]),
 
                     Stack::make([
                         TextColumn::make('pdf_path')
+                            ->label('Carta de Remoção')
                             ->icon('heroicon-o-document-text')
                             ->formatStateUsing(fn () => 'Ver PDF')
                             ->url(fn ($record): ?string => $record->pdf_path ? Storage::disk('s3')->url($record->pdf_path) : null)
+                            ->openUrlInNewTab()
+                            ->hidden(fn (?Register $record) => $record?->company === CompanyEnum::MILLAN),
+                        TextColumn::make('consignor_letter_path')
+                            ->label('Carta do Comitente')
+                            ->icon('heroicon-o-document-text')
+                            ->formatStateUsing(fn (?string $state): ?string => $state ? 'Comitente' : null)
+                            ->url(fn (?Register $record): ?string => $record?->consignor_letter_path ? Storage::disk('s3')->url($record->consignor_letter_path) : null)
                             ->openUrlInNewTab()
                             ->hidden(fn (?Register $record) => $record?->company === CompanyEnum::MILLAN),
                     ]),
@@ -433,6 +487,18 @@ class RegisterResource extends Resource
                     ->options(RegisterStatusEnum::optionsWithLabels()),
             ])
             ->actions([
+                Action::make('viewRemovalImport')
+                    ->label('Revisão')
+                    ->icon('heroicon-o-exclamation-triangle')
+                    ->color('warning')
+                    ->visible(fn (Register $record): bool => self::hasUnresolvedRemovalImport($record))
+                    ->url(function (Register $record): ?string {
+                        $item = $record->getRelation('unresolvedRemovalImports')->first();
+
+                        return $item === null
+                            ? null
+                            : IntegrationInboxItemResource::getUrl('view', ['record' => $item]);
+                    }),
                 EditAction::make()->iconButton(),
                 Action::make('updateStatusSingle')
                     ->label('Atual. Situação')
@@ -506,6 +572,10 @@ class RegisterResource extends Resource
                         ->deselectRecordsAfterCompletion(),
                 ])->label('Ações em massa'),
             ])->modifyQueryUsing(function (Builder $query) {
+                $query
+                    ->withExists('unresolvedRemovalImports')
+                    ->with('unresolvedRemovalImports:id,register_id');
+
                 $query->orderByRaw("
                     CASE status
                         WHEN 'pending' THEN 1
@@ -582,5 +652,12 @@ class RegisterResource extends Resource
             'view' => ViewRegister::route('/{record}'),
             'edit' => EditRegister::route('/{record}/edit'),
         ];
+    }
+
+    private static function hasUnresolvedRemovalImport(Register $record): bool
+    {
+        return $record->relationLoaded('unresolvedRemovalImports')
+            ? $record->getRelation('unresolvedRemovalImports')->isNotEmpty()
+            : (bool) $record->unresolved_removal_imports_exists;
     }
 }

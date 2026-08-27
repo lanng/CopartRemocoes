@@ -13,6 +13,7 @@ use App\Models\Register;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Facades\Storage;
 use Tests\TestCase;
 
 class CleanupOldRegistersTest extends TestCase
@@ -39,6 +40,27 @@ class CleanupOldRegistersTest extends TestCase
         $this->assertModelMissing($register);
         $this->assertDatabaseMissing('cte_documents', ['register_id' => $register->id]);
         $this->assertModelMissing($batch);
+    }
+
+    public function test_it_deletes_both_register_pdfs_when_an_old_register_is_cleaned_up(): void
+    {
+        Storage::fake('s3');
+        $register = Register::factory()->create([
+            'status' => RegisterStatusEnum::PAID,
+            'updated_at' => now()->subDays(16),
+            'pdf_path' => 'registros/copart/123/current/CartaDeRemoção ABC1D23.pdf',
+            'consignor_letter_path' => 'registros/copart/123/current/CartaDoComitente ABC1D23.pdf',
+        ]);
+        Storage::disk('s3')->put($register->pdf_path, '%PDF-removal');
+        Storage::disk('s3')->put($register->consignor_letter_path, '%PDF-consignor');
+
+        $this->artisan('app:cleanup-old-registers')
+            ->assertSuccessful();
+
+        Storage::disk('s3')->assertMissing([
+            $register->pdf_path,
+            $register->consignor_letter_path,
+        ]);
     }
 
     public function test_it_keeps_a_cte_batch_when_it_still_has_documents(): void

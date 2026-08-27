@@ -3,12 +3,13 @@
 namespace App\Services\MicrosoftGraph;
 
 use App\Models\MicrosoftGraphConnection;
+use App\Services\MicrosoftGraph\RemovalRequests\RemovalRequestMessageRouter;
 
 class SyncChecklistEmailsService
 {
     public function __construct(
         private readonly MicrosoftGraphClient $client,
-        private readonly ProcessChecklistEmail $processor,
+        private readonly RemovalRequestMessageRouter $router,
     ) {}
 
     /** @return array{processed: int, ignored: int} */
@@ -26,7 +27,7 @@ class SyncChecklistEmailsService
             $ignored = 0;
 
             foreach ($result['messages'] as $message) {
-                if ($this->processor->handle($message)) {
+                if ($this->router->handle($message)) {
                     $processed++;
                 } else {
                     $ignored++;

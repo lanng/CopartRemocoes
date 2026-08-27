@@ -6,6 +6,7 @@ use App\Enums\CteDocumentStatusEnum;
 use App\Filament\Resources\RegisterResource\Pages\ListRegisters;
 use App\Filament\Resources\RegisterResource\Pages\ViewRegister;
 use App\Models\CteDocument;
+use App\Models\IntegrationInboxItem;
 use App\Models\Register;
 use App\Models\User;
 use Filament\Facades\Filament;
@@ -87,6 +88,7 @@ class RegisterResourceTest extends TestCase
             ->assertFormFieldIsDisabled('origin_city')
             ->assertFormFieldExists('status')
             ->assertFormFieldIsDisabled('status')
+            ->assertFormFieldExists('consignor_letter_path')
             ->assertFormFieldExists('value')
             ->assertFormFieldIsDisabled('value')
             ->assertSee('Número do CT-e')
@@ -108,5 +110,51 @@ class RegisterResourceTest extends TestCase
             ->assertSee('Emissão do CT-e')
             ->assertSee('Data da entrega')
             ->assertSee('Não informado');
+    }
+
+    public function test_register_list_and_view_show_unresolved_removal_imports(): void
+    {
+        $register = Register::factory()->create();
+        $item = IntegrationInboxItem::factory()->create([
+            'message_type' => 'removal_request',
+            'status' => 'pending',
+            'register_id' => $register->id,
+        ]);
+
+        Livewire::test(ListRegisters::class)
+            ->assertSee('Revisão pendente');
+
+        $this->assertTrue($register->unresolvedRemovalImports()->whereKey($item->id)->exists());
+    }
+
+    public function test_register_alert_uses_a_table_action_instead_of_a_nested_link(): void
+    {
+        $register = Register::factory()->create();
+        IntegrationInboxItem::factory()->create([
+            'message_type' => 'removal_request',
+            'status' => 'pending',
+            'register_id' => $register->id,
+        ]);
+        $register->load('unresolvedRemovalImports');
+
+        $table = Livewire::test(ListRegisters::class)->instance()->getTable();
+        $alertColumn = $table->getColumn('unresolved_removal_imports_exists')->record($register);
+
+        $this->assertNull($alertColumn->getUrl());
+        $this->assertTrue($table->hasAction('viewRemovalImport'));
+        $this->assertTrue($table->getAction('viewRemovalImport')->record($register)->isVisible());
+    }
+
+    public function test_register_list_shows_the_consignor_letter_when_it_exists(): void
+    {
+        $register = Register::factory()->create([
+            'consignor_letter_path' => 'registros/copart/123/CartaDoComitente ABC1D23.pdf',
+        ]);
+
+        $table = Livewire::test(ListRegisters::class)->instance()->getTable();
+        $column = $table->getColumn('consignor_letter_path')->record($register);
+
+        $this->assertSame('Comitente', $column->formatState($column->getState()));
+        $this->assertNotNull($column->getUrl());
     }
 }

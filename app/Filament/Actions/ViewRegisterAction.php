@@ -3,6 +3,7 @@
 namespace App\Filament\Actions;
 
 use App\Enums\RegisterStatusEnum;
+use App\Filament\Resources\IntegrationInboxItemResource;
 use App\Filament\Resources\RegisterResource;
 use App\Models\Register;
 use Closure;
@@ -131,6 +132,22 @@ class ViewRegisterAction
                     ->columnSpanFull()
                     ->schema([
                         TextEntry::make('notes')->placeholder('Não informado'),
+                    ]),
+                Section::make('Revisão de integração')
+                    ->columnSpanFull()
+                    ->schema([
+                        TextEntry::make('integration_attention')
+                            ->label('Situação')
+                            ->state(fn (?Register $register): ?string => $register?->unresolvedRemovalImports()->exists() ? 'Há uma revisão de e-mail pendente.' : null)
+                            ->color('warning')
+                            ->url(function (?Register $register): ?string {
+                                $item = $register?->unresolvedRemovalImports()->first();
+
+                                return $item === null
+                                    ? null
+                                    : IntegrationInboxItemResource::getUrl('view', ['record' => $item]);
+                            })
+                            ->visible(fn (?Register $register): bool => $register?->unresolvedRemovalImports()->exists() === true),
                     ]),
             ])
             ->record($register);

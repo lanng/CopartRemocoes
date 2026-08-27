@@ -4,9 +4,13 @@ namespace Tests\Feature\MicrosoftGraph;
 
 use App\Models\MicrosoftGraphConnection;
 use App\Services\MicrosoftGraph\MicrosoftGraphClient;
+use DomainException;
+use GuzzleHttp\Psr7\FnStream;
+use Illuminate\Database\Events\QueryExecuted;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\Client\Request;
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
 use Tests\TestCase;
 
@@ -28,6 +32,7 @@ class MicrosoftGraphClientTest extends TestCase
                     'sender' => ['emailAddress' => ['address' => 'remocao@copart.com.br']],
                     'receivedDateTime' => '2026-08-13T20:52:00Z',
                     'body' => ['content' => 'Veículo 1146609 - ESN4A20.', 'contentType' => 'text'],
+                    'hasAttachments' => true,
                 ]],
             ]),
         ]);
@@ -35,16 +40,193 @@ class MicrosoftGraphClientTest extends TestCase
         $result = app(MicrosoftGraphClient::class)->fetchNewMessages($connection);
 
         $this->assertSame('message-1', $result['messages'][0]['external_id']);
+        $this->assertTrue($result['messages'][0]['hasAttachments']);
         $this->assertSame('2026-08-13 20:55:00', $result['checkpoint_at']->format('Y-m-d H:i:s'));
         Http::assertSent(function (Request $request): bool {
             parse_str((string) parse_url($request->url(), PHP_URL_QUERY), $query);
 
             return str_starts_with($request->url(), 'https://graph.microsoft.com/v1.0/me/mailFolders/inbox/messages?')
+                && $request->header('Prefer') === ['IdType="ImmutableId", outlook.body-content-type="text"']
+                && $query['$select'] === 'id,subject,sender,receivedDateTime,body,hasAttachments'
                 && $query['$top'] === '50'
                 && $query['$orderby'] === 'receivedDateTime asc'
                 && $query['$filter'] === 'receivedDateTime gt 2026-08-13T20:50:00Z';
         });
         Http::assertSentCount(1);
+    }
+
+    public function test_it_lists_and_downloads_message_attachments_with_encoded_immutable_ids(): void
+    {
+        $connection = MicrosoftGraphConnection::factory()->create();
+        $messageId = 'AAMk/message+id==';
+        $attachmentId = 'attachment/id==';
+        Http::fake([
+            'https://graph.microsoft.com/v1.0/me/messages/*/attachments' => Http::response([
+                'value' => [[
+                    '@odata.type' => '#microsoft.graph.fileAttachment',
+                    'id' => $attachmentId,
+                    'name' => 'CartaDeRemoção.pdf',
+                    'contentType' => 'application/pdf',
+                    'size' => 1234,
+                    'isInline' => false,
+                ]],
+            ]),
+            'https://graph.microsoft.com/v1.0/me/messages/*/attachments/*/$value' => Http::response('%PDF-test'),
+        ]);
+
+        $client = app(MicrosoftGraphClient::class);
+        $attachments = $client->listMessageAttachments($connection, $messageId);
+        $contents = $client->downloadMessageAttachment($connection, $messageId, $attachmentId);
+
+        $this->assertSame([[
+            'id' => $attachmentId,
+            'name' => 'CartaDeRemoção.pdf',
+            'content_type' => 'application/pdf',
+            'size' => 1234,
+            'is_inline' => false,
+            'type' => '#microsoft.graph.fileAttachment',
+        ]], $attachments);
+        $this->assertSame('%PDF-test', $contents);
+        Http::assertSentCount(2);
+        Http::assertSent(function (Request $request) use ($messageId): bool {
+            $encodedMessageId = rawurlencode($messageId);
+
+            return $request->url() === 'https://graph.microsoft.com/v1.0/me/messages/'.$encodedMessageId.'/attachments'
+                && $request->header('Prefer') === ['IdType="ImmutableId", outlook.body-content-type="text"'];
+        });
+        Http::assertSent(function (Request $request) use ($messageId, $attachmentId): bool {
+            $encodedMessageId = rawurlencode($messageId);
+            $encodedAttachmentId = rawurlencode($attachmentId);
+
+            return $request->url() === 'https://graph.microsoft.com/v1.0/me/messages/'.$encodedMessageId.'/attachments/'.$encodedAttachmentId.'/$value'
+                && $request->header('Prefer') === ['IdType="ImmutableId", outlook.body-content-type="text"'];
+        });
+    }
+
+    public function test_downloading_an_attachment_throws_when_graph_returns_an_http_error(): void
+    {
+        $connection = MicrosoftGraphConnection::factory()->create();
+        Http::fake([
+            'https://graph.microsoft.com/*' => Http::response(['error' => ['message' => 'Attachment unavailable']], 404),
+        ]);
+
+        $this->expectException(\Illuminate\Http\Client\RequestException::class);
+
+        app(MicrosoftGraphClient::class)->downloadMessageAttachment($connection, 'message-id', 'attachment-id');
+    }
+
+    public function test_it_streams_an_attachment_to_a_file_without_exceeding_the_limit(): void
+    {
+        $connection = MicrosoftGraphConnection::factory()->create();
+        $bytes = '%PDF-streamed-content';
+        $destinationPath = tempnam(sys_get_temp_dir(), 'graph_attachment_');
+        $this->assertIsString($destinationPath);
+        Http::fake([
+            'https://graph.microsoft.com/v1.0/me/messages/*/attachments/*/$value' => Http::response($bytes),
+        ]);
+
+        try {
+            $copiedBytes = app(MicrosoftGraphClient::class)->downloadMessageAttachmentToPath(
+                $connection,
+                'message-id',
+                'attachment-id',
+                $destinationPath,
+                strlen($bytes),
+            );
+
+            $this->assertSame(strlen($bytes), $copiedBytes);
+            $this->assertSame(strlen($bytes), filesize($destinationPath));
+            $this->assertSame($bytes, file_get_contents($destinationPath));
+        } finally {
+            @unlink($destinationPath);
+        }
+    }
+
+    public function test_streaming_an_attachment_aborts_when_the_body_exceeds_the_limit(): void
+    {
+        $connection = MicrosoftGraphConnection::factory()->create();
+        $bytes = '%PDF-streamed-content';
+        $destinationPath = tempnam(sys_get_temp_dir(), 'graph_attachment_');
+        $this->assertIsString($destinationPath);
+        Http::fake([
+            'https://graph.microsoft.com/v1.0/me/messages/*/attachments/*/$value' => Http::response($bytes),
+        ]);
+
+        try {
+            $this->expectException(DomainException::class);
+            app(MicrosoftGraphClient::class)->downloadMessageAttachmentToPath(
+                $connection,
+                'message-id',
+                'attachment-id',
+                $destinationPath,
+                strlen($bytes) - 1,
+            );
+        } finally {
+            $this->assertTrue(unlink($destinationPath));
+        }
+    }
+
+    public function test_limited_psr_stream_copy_does_not_write_chunks_after_the_limit(): void
+    {
+        $chunks = ['%PDF-first-chunk', '-after-limit'];
+        $readChunks = 0;
+        $closed = false;
+        $source = new FnStream([
+            'read' => function () use (&$chunks, &$readChunks): string {
+                $readChunks++;
+
+                return array_shift($chunks) ?? '';
+            },
+            'eof' => function () use (&$chunks): bool {
+                return $chunks === [];
+            },
+            'close' => function () use (&$closed): void {
+                $closed = true;
+            },
+            'isReadable' => function () use (&$closed): bool {
+                return ! $closed;
+            },
+        ]);
+        $destinationPath = tempnam(sys_get_temp_dir(), 'graph_attachment_');
+        $this->assertIsString($destinationPath);
+
+        try {
+            $this->expectException(DomainException::class);
+            app(MicrosoftGraphClient::class)->copyLimitedStreamToPath(
+                $source,
+                $destinationPath,
+                strlen('%PDF-first-chunk'),
+            );
+        } finally {
+            $this->assertSame('%PDF-first-chunk', file_get_contents($destinationPath));
+            $this->assertSame([], $chunks);
+            $this->assertSame(2, $readChunks);
+            $this->assertTrue($closed);
+            @unlink($destinationPath);
+        }
+    }
+
+    public function test_streaming_an_attachment_propagates_graph_http_errors(): void
+    {
+        $destinationPath = tempnam(sys_get_temp_dir(), 'graph_attachment_');
+        $this->assertIsString($destinationPath);
+        Http::fake([
+            'https://graph.microsoft.com/*' => Http::response(['error' => ['message' => 'Attachment unavailable']], 404),
+        ]);
+
+        try {
+            $this->expectException(\Illuminate\Http\Client\RequestException::class);
+
+            app(MicrosoftGraphClient::class)->downloadMessageAttachmentToPath(
+                MicrosoftGraphConnection::factory()->create(),
+                'message-id',
+                'attachment-id',
+                $destinationPath,
+                1024,
+            );
+        } finally {
+            @unlink($destinationPath);
+        }
     }
 
     public function test_a_full_page_advances_only_to_the_last_message(): void
@@ -88,5 +270,41 @@ class MicrosoftGraphClientTest extends TestCase
 
         $this->assertSame('new-access-token', $connection->refresh()->access_token);
         $this->assertSame('new-refresh-token', $connection->refresh()->refresh_token);
+    }
+
+    public function test_it_refreshes_an_expired_token_only_once_for_stale_models(): void
+    {
+        $stored = MicrosoftGraphConnection::factory()->create([
+            'access_token' => 'old-access-token',
+            'refresh_token' => 'old-refresh-token',
+            'expires_at' => now()->subMinute(),
+        ]);
+        $firstStale = $stored->fresh();
+        $secondStale = $stored->fresh();
+
+        Http::fake([
+            'https://login.microsoftonline.com/*/oauth2/v2.0/token' => Http::response([
+                'access_token' => 'new-access-token',
+                'refresh_token' => 'new-refresh-token',
+                'expires_in' => 3600,
+            ]),
+            'https://graph.microsoft.com/*' => Http::response(['value' => []]),
+        ]);
+
+        $reloadQueries = [];
+        DB::listen(function (QueryExecuted $query) use (&$reloadQueries): void {
+            if (str_contains($query->sql, 'microsoft_graph_connections') && str_starts_with(strtolower(trim($query->sql)), 'select')) {
+                $reloadQueries[] = $query->sql;
+            }
+        });
+
+        app(MicrosoftGraphClient::class)->fetchNewMessages($firstStale);
+        app(MicrosoftGraphClient::class)->fetchNewMessages($secondStale);
+
+        Http::assertSentCount(3);
+        $this->assertCount(2, $reloadQueries);
+        $this->assertStringContainsString('where "microsoft_graph_connections"."id" = ?', strtolower($reloadQueries[0]));
+        $this->assertSame('new-access-token', $stored->refresh()->access_token);
+        $this->assertSame('new-refresh-token', $stored->refresh()->refresh_token);
     }
 }

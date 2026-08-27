@@ -10,6 +10,10 @@ return [
         'scopes' => 'openid offline_access Mail.Read User.Read',
     ],
 
+    'removal_requests' => [
+        'max_pdf_bytes' => env('REMOVAL_REQUEST_PDF_MAX_BYTES', 10 * 1024 * 1024),
+    ],
+
     /*
     |--------------------------------------------------------------------------
     | Third Party Services

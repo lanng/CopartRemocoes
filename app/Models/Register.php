@@ -22,8 +22,13 @@ class Register extends Model
         parent::boot();
 
         static::deleting(function ($register) {
-            if ($register->pdf_path) {
-                Storage::disk('s3')->delete($register->pdf_path);
+            $paths = array_values(array_filter([
+                $register->pdf_path,
+                $register->consignor_letter_path,
+            ]));
+
+            if ($paths !== []) {
+                Storage::disk('s3')->delete($paths);
             }
         });
     }
@@ -45,6 +50,9 @@ class Register extends Model
         'value',
         'status',
         'pdf_path',
+        'pdf_sha256',
+        'consignor_letter_path',
+        'consignor_letter_sha256',
         'notes',
         'insurance',
         'fipe_value',
@@ -60,6 +68,7 @@ class Register extends Model
         'payment_deferred_at' => 'datetime',
         'status' => RegisterStatusEnum::class,
         'value' => 'decimal:2',
+        'fipe_value' => 'decimal:2',
         'company' => CompanyEnum::class,
     ];
 
@@ -110,10 +119,43 @@ class Register extends Model
         return $this->hasMany(PaymentBatchItem::class);
     }
 
+    public function integrationInboxItems(): HasMany
+    {
+        return $this->hasMany(IntegrationInboxItem::class);
+    }
+
+    public function unresolvedRemovalImports(): HasMany
+    {
+        return $this->integrationInboxItems()
+            ->where('message_type', 'removal_request')
+            ->whereIn('status', ['pending', 'alert'])
+            ->whereNull('resolved_at');
+    }
+
     public function getActivitylogOptions(): LogOptions
     {
         return LogOptions::defaults()
-            ->logOnly(['vehicle_model', 'vehicle_plate', 'origin_city', 'notes', 'status', 'driver', 'collected_date'])
+            ->logOnly([
+                'vehicle_model',
+                'vehicle_plate',
+                'origin_city',
+                'destination_city',
+                'deadline_withdraw',
+                'deadline_delivery',
+                'vehicle_id',
+                'value',
+                'notes',
+                'status',
+                'driver',
+                'collected_date',
+                'insurance',
+                'fipe_value',
+                'payment_code',
+                'pdf_path',
+                'pdf_sha256',
+                'consignor_letter_path',
+                'consignor_letter_sha256',
+            ])
             ->logOnlyDirty()
             ->dontSubmitEmptyLogs()
             ->setDescriptionForEvent(fn (string $eventName) => "O registro foi {$eventName}")
