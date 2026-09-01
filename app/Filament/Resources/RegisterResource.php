@@ -10,8 +10,10 @@ use App\Filament\Resources\RegisterResource\Pages\CreateRegister;
 use App\Filament\Resources\RegisterResource\Pages\EditRegister;
 use App\Filament\Resources\RegisterResource\Pages\ListRegisters;
 use App\Filament\Resources\RegisterResource\Pages\ViewRegister;
+use App\Models\IntegrationInboxItem;
 use App\Models\Register;
 use App\Services\Cte\CreateCteEmissionBatch;
+use App\Services\MicrosoftGraph\RemovalRequests\ResolveRemovalRequestImport;
 use App\Services\PdfExtractorService;
 use App\Services\WhatsappExtractorService;
 use Exception;
@@ -361,9 +363,13 @@ class RegisterResource extends Resource
                     ->schema([
                         Placeholder::make('removal_import_attention')
                             ->label('Situação')
-                            ->content(fn (?Register $record): string => $record?->unresolvedRemovalImports()->exists()
-                                ? 'Há uma revisão de e-mail pendente para este registro.'
-                                : 'Nenhuma revisão de e-mail pendente.'),
+                            ->content(function (?Register $record): string {
+                                $summary = $record === null ? null : self::removalImportSummary($record);
+
+                                return $summary !== null
+                                    ? "Pendência de integração: {$summary}. Registre sua ciência na coluna Integração da listagem de registros."
+                                    : 'Nenhuma revisão de e-mail pendente.';
+                            }),
                     ]),
             ]);
     }
@@ -417,9 +423,39 @@ class RegisterResource extends Resource
                             ->searchable(),
                         TextColumn::make('unresolved_removal_imports_exists')
                             ->label('Integração')
-                            ->state(fn (Register $record): ?string => $record->unresolved_removal_imports_exists ? 'Revisão pendente' : null)
+                            ->state(fn (Register $record): ?string => self::removalImportSummary($record))
+                            ->badge()
                             ->icon('heroicon-o-exclamation-triangle')
-                            ->color('warning'),
+                            ->color('warning')
+                            ->action(
+                                Action::make('acknowledgeRemovalImport')
+                                    ->requiresConfirmation()
+                                    ->modalHeading('Tomar ciência das alterações')
+                                    ->modalDescription('Confirma ter ciência das alterações sinalizadas nesta importação? O aviso deixará de ser exibido.')
+                                    ->visible(fn (Register $record): bool => self::firstUnresolvedRemovalImport($record)?->status === 'alert')
+                                    ->action(function (Register $record): void {
+                                        $item = self::firstUnresolvedRemovalImport($record);
+
+                                        if ($item === null) {
+                                            return;
+                                        }
+
+                                        try {
+                                            app(ResolveRemovalRequestImport::class)->acknowledge($item, auth()->user());
+
+                                            Notification::make()
+                                                ->title('Ciência registrada com sucesso.')
+                                                ->success()
+                                                ->send();
+                                        } catch (Throwable $exception) {
+                                            Notification::make()
+                                                ->title('Não foi possível registrar a ciência.')
+                                                ->body($exception->getMessage())
+                                                ->danger()
+                                                ->send();
+                                        }
+                                    })
+                            ),
                     ]),
 
                     Stack::make([
@@ -574,7 +610,7 @@ class RegisterResource extends Resource
             ])->modifyQueryUsing(function (Builder $query) {
                 $query
                     ->withExists('unresolvedRemovalImports')
-                    ->with('unresolvedRemovalImports:id,register_id');
+                    ->with('unresolvedRemovalImports:id,register_id,status,alerts,failure_reason');
 
                 $query->orderByRaw("
                     CASE status
@@ -659,5 +695,29 @@ class RegisterResource extends Resource
         return $record->relationLoaded('unresolvedRemovalImports')
             ? $record->getRelation('unresolvedRemovalImports')->isNotEmpty()
             : (bool) $record->unresolved_removal_imports_exists;
+    }
+
+    private static function firstUnresolvedRemovalImport(Register $record): ?IntegrationInboxItem
+    {
+        $items = $record->relationLoaded('unresolvedRemovalImports')
+            ? $record->getRelation('unresolvedRemovalImports')
+            : $record->unresolvedRemovalImports()->get();
+
+        return $items->first();
+    }
+
+    private static function removalImportSummary(Register $record): ?string
+    {
+        $item = self::firstUnresolvedRemovalImport($record);
+
+        if ($item === null) {
+            return null;
+        }
+
+        if ($item->hasRemovalAlert()) {
+            return implode(', ', $item->removalAlertLabels());
+        }
+
+        return $item->failureReasonLabel() ?? 'Revisão pendente';
     }
 }

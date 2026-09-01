@@ -127,6 +127,78 @@ class RegisterResourceTest extends TestCase
         $this->assertTrue($register->unresolvedRemovalImports()->whereKey($item->id)->exists());
     }
 
+    public function test_register_integration_column_summarizes_removal_alerts(): void
+    {
+        $register = Register::factory()->create();
+        IntegrationInboxItem::factory()->create([
+            'message_type' => 'removal_request',
+            'status' => 'alert',
+            'register_id' => $register->id,
+            'alerts' => ['freight_changed', 'zero_fipe'],
+        ]);
+
+        Livewire::test(ListRegisters::class)
+            ->assertSee('Frete alterado, FIPE zerada');
+    }
+
+    public function test_register_integration_column_shows_readded_alert(): void
+    {
+        $register = Register::factory()->create(['status' => 'pending']);
+        IntegrationInboxItem::factory()->create([
+            'message_type' => 'removal_request',
+            'status' => 'alert',
+            'register_id' => $register->id,
+            'alerts' => ['register_readded'],
+        ]);
+
+        Livewire::test(ListRegisters::class)
+            ->assertSee('Registro readicionado');
+    }
+
+    public function test_acknowledging_from_the_integration_column_resolves_the_alert(): void
+    {
+        $register = Register::factory()->create();
+        $item = IntegrationInboxItem::factory()->create([
+            'message_type' => 'removal_request',
+            'status' => 'alert',
+            'register_id' => $register->id,
+            'alerts' => ['zero_fipe'],
+        ]);
+
+        Livewire::test(ListRegisters::class)
+            ->callTableAction('acknowledgeRemovalImport', $register);
+
+        $this->assertSame('processed', $item->refresh()->status);
+        $this->assertNotNull($item->resolved_at);
+        $this->assertSame(auth()->id(), $item->resolved_by);
+
+        Livewire::test(ListRegisters::class)
+            ->assertDontSee('FIPE zerada');
+    }
+
+    public function test_blocked_removal_imports_do_not_offer_acknowledgement_from_the_integration_column(): void
+    {
+        $register = Register::factory()->create();
+        $item = IntegrationInboxItem::factory()->create([
+            'message_type' => 'removal_request',
+            'status' => 'pending',
+            'register_id' => $register->id,
+            'failure_reason' => 'update_blocked_by_status',
+        ]);
+
+        $table = Livewire::test(ListRegisters::class)->instance()->getTable();
+        $acknowledgeAction = $table->getColumn('unresolved_removal_imports_exists')->getAction()
+            ->record($register);
+
+        $this->assertFalse($acknowledgeAction->isVisible());
+
+        Livewire::test(ListRegisters::class)
+            ->assertSee('Atualização bloqueada pelo status');
+
+        $this->assertSame('pending', $item->refresh()->status);
+        $this->assertNull($item->resolved_at);
+    }
+
     public function test_register_alert_uses_a_table_action_instead_of_a_nested_link(): void
     {
         $register = Register::factory()->create();
