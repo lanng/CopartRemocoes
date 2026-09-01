@@ -512,11 +512,72 @@ class RemovalRequestImporterTest extends TestCase
         return [
             'paid' => ['paid'],
             'delivered' => ['delivered'],
-            'cancelled' => ['cancelled'],
             'available' => ['available'],
             'pending daily rates' => ['pending daily rates'],
             'invoiced' => ['invoiced'],
         ];
+    }
+
+    public function test_a_cancelled_register_with_changes_is_readded_and_returns_to_pending(): void
+    {
+        Storage::fake('s3');
+        $pdf = $this->pdf();
+        $register = Register::factory()->create([
+            'vehicle_id' => '1156340',
+            'vehicle_plate' => 'ABC1D23',
+            'value' => '500.00',
+            'status' => 'cancelled',
+        ]);
+        $item = $this->item(['body' => ['value' => 'R$ 600,00']]);
+
+        try {
+            $result = app(RemovalRequestImporter::class)->handle($item, $pdf);
+
+            $this->assertSame('alert', $result->status);
+            $this->assertContains('register_readded', $result->alerts ?? []);
+            $this->assertContains('freight_changed', $result->alerts ?? []);
+            $this->assertNull($result->resolved_at);
+            $this->assertSame($register->id, $result->register_id);
+            $this->assertSame('pending', $register->refresh()->status->value);
+            $this->assertSame('600.00', $register->value);
+        } finally {
+            @unlink($pdf->temporaryPath);
+        }
+    }
+
+    public function test_a_cancelled_register_with_identical_content_is_still_readded(): void
+    {
+        Storage::fake('s3');
+        $pdf = $this->pdf();
+        $register = Register::factory()->create([
+            'vehicle_model' => 'FIAT ARGO 1.3',
+            'vehicle_id' => '1156340',
+            'vehicle_plate' => 'ABC1D23',
+            'origin_city' => 'São Paulo',
+            'destination_city' => 'Pirapora',
+            'deadline_withdraw' => '2026-08-26',
+            'deadline_delivery' => '2026-09-03',
+            'value' => '500.00',
+            'insurance' => 'ALLIANZ SEGUROS SA',
+            'fipe_value' => '43897.00',
+            'payment_code' => 'T691299',
+            'notes' => 'Telefones Origem: 11 99999 1111 / 11 98888 2222',
+            'pdf_sha256' => $pdf->sha256,
+            'status' => 'cancelled',
+        ]);
+        $item = $this->item();
+
+        try {
+            $result = app(RemovalRequestImporter::class)->handle($item, $pdf);
+
+            $this->assertSame('alert', $result->status);
+            $this->assertSame(['register_readded'], $result->alerts);
+            $this->assertNull($result->resolved_at);
+            $this->assertSame($register->id, $result->register_id);
+            $this->assertSame('pending', $register->refresh()->status->value);
+        } finally {
+            @unlink($pdf->temporaryPath);
+        }
     }
 
     public function test_blocked_same_pdf_hash_has_no_candidate(): void
