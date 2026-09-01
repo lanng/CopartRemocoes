@@ -237,6 +237,19 @@ class IntegrationInboxItemResourceTest extends TestCase
             ->assertCanNotSeeTableRecords([$alert]);
     }
 
+    public function test_it_renders_row_actions_as_compact_icon_buttons(): void
+    {
+        $table = Livewire::test(ListIntegrationInboxItems::class)->instance()->getTable();
+
+        foreach (['view', 'conciliarChecklist', 'acceptRemovalRequest', 'reviewRemovalRequest', 'retryRemovalRequest', 'rejectRemovalRequest', 'acknowledgeRemovalAlert'] as $actionName) {
+            $action = $table->getAction($actionName);
+
+            $this->assertNotNull($action);
+            $this->assertTrue($action->isIconButton(), "The [{$actionName}] action should render as an icon button.");
+            $this->assertNotNull($action->getTooltip(), "The [{$actionName}] action should have a tooltip.");
+        }
+    }
+
     public function test_it_keeps_view_action_and_resolve_visibility_by_status(): void
     {
         $pending = IntegrationInboxItem::factory()->create(['status' => 'pending']);

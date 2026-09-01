@@ -5,12 +5,11 @@ namespace App\Filament\Resources;
 use App\Enums\RegisterStatusEnum;
 use App\Filament\Resources\IntegrationInboxItemResource\Pages;
 use App\Filament\Support\ChecklistConciliationAction;
+use App\Filament\Support\ReviewRemovalRequestAction;
 use App\Models\IntegrationInboxItem;
 use App\Services\MicrosoftGraph\RemovalRequests\ResolveRemovalRequestImport;
 use App\Services\MicrosoftGraph\RemovalRequests\RetryRemovalRequestImport;
-use Filament\Forms\Components\CheckboxList;
 use Filament\Forms\Components\Textarea;
-use Filament\Forms\Components\Toggle;
 use Filament\Forms\Form;
 use Filament\Infolists\Components\RepeatableEntry;
 use Filament\Infolists\Components\TextEntry;
@@ -160,8 +159,12 @@ class IntegrationInboxItemResource extends Resource
                     ),
             ])
             ->actions([
-                Tables\Actions\ViewAction::make(),
-                ChecklistConciliationAction::make(),
+                Tables\Actions\ViewAction::make()
+                    ->iconButton()
+                    ->tooltip('Visualizar'),
+                ChecklistConciliationAction::make()
+                    ->iconButton()
+                    ->tooltip('Conciliar'),
                 Tables\Actions\Action::make('acceptRemovalRequest')
                     ->label('Aceitar importação')
                     ->icon('heroicon-o-check-circle')
@@ -178,44 +181,12 @@ class IntegrationInboxItemResource extends Resource
                             array_map('strval', array_keys($record->proposed_changes ?? [])),
                             $record->candidate_pdf_path !== null,
                         );
-                    }),
-                Tables\Actions\Action::make('reviewRemovalRequest')
-                    ->label('Revisar importação')
-                    ->icon('heroicon-o-pencil-square')
-                    ->color('warning')
-                    ->visible(fn (IntegrationInboxItem $record): bool => $record->isRemovalRequest()
-                        && $record->status === 'pending'
-                        && ($record->proposed_changes !== null || $record->candidate_pdf_path !== null))
-                    ->form(fn (IntegrationInboxItem $record): array => [
-                        CheckboxList::make('fields')
-                            ->label('Campos para aplicar')
-                            ->options(collect($record->proposed_changes ?? [])
-                                ->reject(fn (array $change, string $field): bool => $field === 'pdf_path')
-                                ->mapWithKeys(fn (array $change, string $field): array => [$field => match ($field) {
-                                    'vehicle_model' => 'Veículo',
-                                    'origin_city' => 'Cidade de origem',
-                                    'destination_city' => 'Cidade de destino',
-                                    'deadline_withdraw' => 'Data limite de retirada',
-                                    'deadline_delivery' => 'Data limite de entrega',
-                                    'value' => 'Frete',
-                                    'insurance' => 'Seguradora',
-                                    'fipe_value' => 'FIPE',
-                                    'payment_code' => 'Código de pagamento',
-                                    'notes' => 'Observações',
-                                    default => $field,
-                                }])
-                                ->all())
-                            ->columns(1),
-                        Toggle::make('replace_pdf')->label('Substituir PDF candidato')->default(false),
-                    ])
-                    ->action(function (IntegrationInboxItem $record, array $data): void {
-                        app(ResolveRemovalRequestImport::class)->apply(
-                            $record,
-                            auth()->user(),
-                            array_map('strval', $data['fields'] ?? []),
-                            (bool) ($data['replace_pdf'] ?? false),
-                        );
-                    }),
+                    })
+                    ->iconButton()
+                    ->tooltip('Aceitar importação'),
+                ReviewRemovalRequestAction::make()
+                    ->iconButton()
+                    ->tooltip('Revisar importação'),
                 Tables\Actions\Action::make('retryRemovalRequest')
                     ->label('Tentar novamente')
                     ->icon('heroicon-o-arrow-path')
@@ -237,7 +208,9 @@ class IntegrationInboxItemResource extends Resource
                             ->title('Importação reenfileirada')
                             ->success()
                             ->send();
-                    }),
+                    })
+                    ->iconButton()
+                    ->tooltip('Tentar novamente'),
                 Tables\Actions\Action::make('rejectRemovalRequest')
                     ->label('Rejeitar importação')
                     ->icon('heroicon-o-x-circle')
@@ -248,14 +221,18 @@ class IntegrationInboxItemResource extends Resource
                     ])
                     ->action(function (IntegrationInboxItem $record, array $data): void {
                         app(ResolveRemovalRequestImport::class)->reject($record, auth()->user(), $data['reason']);
-                    }),
+                    })
+                    ->iconButton()
+                    ->tooltip('Rejeitar importação'),
                 Tables\Actions\Action::make('acknowledgeRemovalAlert')
                     ->label('Reconhecer alerta')
                     ->icon('heroicon-o-check')
                     ->color('success')
                     ->visible(fn (IntegrationInboxItem $record): bool => $record->isRemovalRequest() && $record->status === 'alert')
                     ->requiresConfirmation()
-                    ->action(fn (IntegrationInboxItem $record): IntegrationInboxItem => app(ResolveRemovalRequestImport::class)->acknowledge($record, auth()->user())),
+                    ->action(fn (IntegrationInboxItem $record): IntegrationInboxItem => app(ResolveRemovalRequestImport::class)->acknowledge($record, auth()->user()))
+                    ->iconButton()
+                    ->tooltip('Reconhecer alerta'),
             ])
             ->recordClasses(fn (IntegrationInboxItem $record): ?string => match ($record->hasDeliveryAlert() ? $record->deliveryAlertColor() : $record->removalAlertColor()) {
                 'warning' => 'integration-inbox-alert-warning',
