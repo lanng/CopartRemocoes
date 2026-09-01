@@ -172,7 +172,8 @@ class RemovalRequestImporter
             return null;
         }
 
-        if ($this->canUpdateRegister($identity)) {
+        if ($this->canUpdateRegister($identity)
+            || $identity->status === RegisterStatusEnum::CANCELLED) {
             return $this->storage->store($pdf, $canonical['vehicle_id']);
         }
 
@@ -394,8 +395,9 @@ class RemovalRequestImporter
         ?string $uploadedPath,
     ): array {
         $changes = $this->changes($register, $canonical, $pdf);
+        $shouldReadd = $register->status === RegisterStatusEnum::CANCELLED;
 
-        if (! $this->canUpdateRegister($register)) {
+        if (! $this->canUpdateRegister($register) && ! $shouldReadd) {
             return $this->persistBlocked(
                 $item,
                 $pdf,
@@ -406,6 +408,30 @@ class RemovalRequestImporter
         }
 
         if ($changes === []) {
+            if ($shouldReadd) {
+                $register->forceFill([
+                    'status' => RegisterStatusEnum::PENDING,
+                ])->save();
+
+                $item->forceFill([
+                    'status' => 'alert',
+                    'register_id' => $register->id,
+                    'failure_reason' => null,
+                    'proposed_changes' => null,
+                    'alerts' => ['register_readded'],
+                    'candidate_pdf_path' => null,
+                    'candidate_pdf_sha256' => null,
+                    'resolved_at' => null,
+                ])->save();
+
+                return [
+                    'item' => $item,
+                    'old_pdf_path' => null,
+                    'old_candidate_path' => null,
+                    'discard_upload' => false,
+                ];
+            }
+
             $oldCandidatePath = $item->candidate_pdf_path;
 
             $item->forceFill([
@@ -466,9 +492,18 @@ class RemovalRequestImporter
             $updates['pdf_sha256'] = $pdf->sha256;
         }
 
+        if ($shouldReadd) {
+            $updates['status'] = RegisterStatusEnum::PENDING;
+        }
+
         $register->forceFill($updates)->save();
 
         $alerts = $this->alertsForUpdate($changes, $canonical['fipe_value']);
+
+        if ($shouldReadd) {
+            $alerts = array_values(array_unique([...$alerts, 'register_readded']));
+        }
+
         $oldCandidatePath = $item->candidate_pdf_path;
 
         $item->forceFill([

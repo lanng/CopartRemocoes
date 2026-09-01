@@ -4,15 +4,11 @@ namespace App\Filament\Resources;
 
 use App\Enums\RegisterStatusEnum;
 use App\Filament\Resources\IntegrationInboxItemResource\Pages;
-use App\Filament\Support\IntegrationInboxItemPresentation;
+use App\Filament\Support\ChecklistConciliationAction;
 use App\Models\IntegrationInboxItem;
-use App\Models\Register;
-use App\Services\MicrosoftGraph\AcknowledgeIntegrationAlert;
 use App\Services\MicrosoftGraph\RemovalRequests\ResolveRemovalRequestImport;
 use App\Services\MicrosoftGraph\RemovalRequests\RetryRemovalRequestImport;
-use App\Services\MicrosoftGraph\ResolveIntegrationInboxItem;
 use Filament\Forms\Components\CheckboxList;
-use Filament\Forms\Components\Select;
 use Filament\Forms\Components\Textarea;
 use Filament\Forms\Components\Toggle;
 use Filament\Forms\Form;
@@ -165,15 +161,7 @@ class IntegrationInboxItemResource extends Resource
             ])
             ->actions([
                 Tables\Actions\ViewAction::make(),
-                Tables\Actions\Action::make('acknowledgeDeliveryAlert')
-                    ->label('Reconhecer')
-                    ->icon('heroicon-o-check')
-                    ->color('success')
-                    ->visible(fn (IntegrationInboxItem $record): bool => ! $record->isRemovalRequest()
-                        && $record->delivery_alert !== null
-                        && $record->acknowledged_at === null)
-                    ->requiresConfirmation()
-                    ->action(fn (IntegrationInboxItem $record): IntegrationInboxItem => app(AcknowledgeIntegrationAlert::class)->handle($record, auth()->user())),
+                ChecklistConciliationAction::make(),
                 Tables\Actions\Action::make('acceptRemovalRequest')
                     ->label('Aceitar importação')
                     ->icon('heroicon-o-check-circle')
@@ -268,34 +256,6 @@ class IntegrationInboxItemResource extends Resource
                     ->visible(fn (IntegrationInboxItem $record): bool => $record->isRemovalRequest() && $record->status === 'alert')
                     ->requiresConfirmation()
                     ->action(fn (IntegrationInboxItem $record): IntegrationInboxItem => app(ResolveRemovalRequestImport::class)->acknowledge($record, auth()->user())),
-                Tables\Actions\Action::make('resolve')
-                    ->label('Conciliar')
-                    ->icon('heroicon-o-check-badge')
-                    ->color('success')
-                    ->visible(fn (IntegrationInboxItem $record): bool => ! $record->isRemovalRequest() && $record->status === 'pending')
-                    ->disabled(fn (IntegrationInboxItem $record): bool => IntegrationInboxItemPresentation::matchingRegisterOptions($record) === [])
-                    ->tooltip(fn (IntegrationInboxItem $record): ?string => IntegrationInboxItemPresentation::matchingRegisterOptions($record) === []
-                        ? 'Nenhum registro compatível encontrado para esta baixa.'
-                        : null)
-                    ->form(fn (IntegrationInboxItem $record): array => [
-                        Select::make('register_id')
-                            ->label('Registro')
-                            ->options(IntegrationInboxItemPresentation::matchingRegisterOptions($record))
-                            ->disabled(fn (IntegrationInboxItem $record): bool => IntegrationInboxItemPresentation::matchingRegisterOptions($record) === [])
-                            ->helperText(fn (IntegrationInboxItem $record): ?string => IntegrationInboxItemPresentation::matchingRegisterOptions($record) === []
-                                ? 'Nenhum registro compatível encontrado para esta baixa.'
-                                : null)
-                            ->required(),
-                        Textarea::make('reason')->label('Justificativa')->required()->maxLength(1000),
-                    ])
-                    ->action(function (IntegrationInboxItem $record, array $data): void {
-                        app(ResolveIntegrationInboxItem::class)->handle(
-                            $record,
-                            Register::query()->findOrFail($data['register_id']),
-                            auth()->user(),
-                            $data['reason'],
-                        );
-                    }),
             ])
             ->recordClasses(fn (IntegrationInboxItem $record): ?string => match ($record->hasDeliveryAlert() ? $record->deliveryAlertColor() : $record->removalAlertColor()) {
                 'warning' => 'integration-inbox-alert-warning',

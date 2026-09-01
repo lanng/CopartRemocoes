@@ -20,7 +20,7 @@ class ProcessChecklistEmailTest extends TestCase
         $register = Register::factory()->create([
             'vehicle_id' => '1146609',
             'vehicle_plate' => 'ESN4A20',
-            'status' => 'collected',
+            'status' => 'invoiced',
         ]);
 
         $result = app(ProcessChecklistEmail::class)->handle($this->message());
@@ -37,6 +37,7 @@ class ProcessChecklistEmailTest extends TestCase
         $register = Register::factory()->create([
             'vehicle_id' => '1146609',
             'vehicle_plate' => 'ESN4A20',
+            'status' => 'invoiced',
         ]);
 
         app(ProcessChecklistEmail::class)->handle($this->message());
@@ -85,7 +86,7 @@ class ProcessChecklistEmailTest extends TestCase
         $register = Register::factory()->create([
             'vehicle_id' => '1146609',
             'vehicle_plate' => 'ESN4A20',
-            'status' => 'collected',
+            'status' => 'invoiced',
         ]);
         $message = $this->message();
         $message['sender'] = ' REMOCAO@COPART.COM.BR ';
@@ -129,9 +130,8 @@ class ProcessChecklistEmailTest extends TestCase
 
         $result = app(ProcessChecklistEmail::class)->handle($this->message());
 
-        $this->assertProcessedDelivery($result, $register);
+        $this->assertPendingDeliveryDecision($result, $register, 'unexpected_status');
         $this->assertSame('collected', $result->previous_register_status);
-        $this->assertSame('unexpected_status', $result->delivery_alert);
         $this->assertSame('2670', $result->authorized_cte_number_at_delivery);
     }
 
@@ -145,9 +145,8 @@ class ProcessChecklistEmailTest extends TestCase
 
         $result = app(ProcessChecklistEmail::class)->handle($this->message());
 
-        $this->assertProcessedDelivery($result, $register);
+        $this->assertPendingDeliveryDecision($result, $register, 'missing_authorized_cte');
         $this->assertSame('collected', $result->previous_register_status);
-        $this->assertSame('missing_authorized_cte', $result->delivery_alert);
         $this->assertNull($result->authorized_cte_number_at_delivery);
     }
 
@@ -167,9 +166,8 @@ class ProcessChecklistEmailTest extends TestCase
 
         $result = app(ProcessChecklistEmail::class)->handle($this->message());
 
-        $this->assertProcessedDelivery($result, $register);
+        $this->assertPendingDeliveryDecision($result, $register, 'missing_authorized_cte');
         $this->assertSame('collected', $result->previous_register_status);
-        $this->assertSame('missing_authorized_cte', $result->delivery_alert);
         $this->assertNull($result->authorized_cte_number_at_delivery);
     }
 
@@ -188,8 +186,7 @@ class ProcessChecklistEmailTest extends TestCase
 
         $result = app(ProcessChecklistEmail::class)->handle($this->message());
 
-        $this->assertProcessedDelivery($result, $register);
-        $this->assertSame('missing_authorized_cte', $result->delivery_alert);
+        $this->assertPendingDeliveryDecision($result, $register, 'missing_authorized_cte');
         $this->assertNull($result->authorized_cte_number_at_delivery);
     }
 
@@ -208,8 +205,7 @@ class ProcessChecklistEmailTest extends TestCase
 
         $result = app(ProcessChecklistEmail::class)->handle($this->message());
 
-        $this->assertProcessedDelivery($result, $register);
-        $this->assertSame('missing_authorized_cte', $result->delivery_alert);
+        $this->assertPendingDeliveryDecision($result, $register, 'missing_authorized_cte');
         $this->assertNull($result->authorized_cte_number_at_delivery);
     }
 
@@ -241,7 +237,7 @@ class ProcessChecklistEmailTest extends TestCase
 
         $result = app(ProcessChecklistEmail::class)->handle($this->message());
 
-        $this->assertProcessedDelivery($result, $register);
+        $this->assertPendingDeliveryDecision($result, $register, 'unexpected_status');
         $this->assertSame('3000', $result->authorized_cte_number_at_delivery);
     }
 
@@ -286,7 +282,7 @@ class ProcessChecklistEmailTest extends TestCase
         ]);
 
         $result = app(ProcessChecklistEmail::class)->handle($this->message());
-        $this->assertProcessedDelivery($result, $register);
+        $this->assertPendingDeliveryDecision($result, $register, 'missing_authorized_cte');
 
         CteDocument::factory()->create([
             'register_id' => $register->id,
@@ -327,6 +323,16 @@ class ProcessChecklistEmailTest extends TestCase
         $this->assertSame($register->id, $item->register_id);
         $this->assertSame('delivered', $register->refresh()->status->value);
         $this->assertSame('2026-08-06 17:51:36', $register->delivery_confirmed_at->utc()->format('Y-m-d H:i:s'));
+    }
+
+    private function assertPendingDeliveryDecision(IntegrationInboxItem $item, Register $register, string $alert): void
+    {
+        $this->assertSame('pending', $item->status);
+        $this->assertSame($register->id, $item->register_id);
+        $this->assertSame($alert, $item->delivery_alert);
+        $this->assertNull($item->resolved_at);
+        $this->assertSame($register->status->value, $register->refresh()->status->value);
+        $this->assertNull($register->delivery_confirmed_at);
     }
 
     /** @return array<string, mixed> */

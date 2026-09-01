@@ -102,10 +102,10 @@ class IntegrationInboxItemResourceTest extends TestCase
         $user = User::query()->firstOrFail();
 
         $table = Livewire::test(ListIntegrationInboxItems::class)->instance()->getTable();
-        $this->assertTrue($table->getAction('acknowledgeDeliveryAlert')->record($checklist)->isVisible());
+        $this->assertTrue($table->getAction('conciliarChecklist')->record($checklist)->isVisible());
 
         Livewire::test(ListIntegrationInboxItems::class)
-            ->callTableAction('acknowledgeDeliveryAlert', $checklist);
+            ->callTableAction('conciliarChecklist', $checklist);
 
         $this->assertSame($user->id, $checklist->refresh()->acknowledged_by);
         $this->assertNotNull($checklist->acknowledged_at);
@@ -242,7 +242,7 @@ class IntegrationInboxItemResourceTest extends TestCase
         $pending = IntegrationInboxItem::factory()->create(['status' => 'pending']);
         $processed = IntegrationInboxItem::factory()->create(['status' => 'processed']);
         $table = Livewire::test(ListIntegrationInboxItems::class)->instance()->getTable();
-        $resolveAction = $table->getAction('resolve');
+        $resolveAction = $table->getAction('conciliarChecklist');
 
         $this->assertTrue($table->hasAction('view'));
         $this->assertNotNull($resolveAction);
@@ -267,7 +267,7 @@ class IntegrationInboxItemResourceTest extends TestCase
         $table = Livewire::test(ListIntegrationInboxItems::class)->instance()->getTable();
 
         $this->assertTrue($table->getAction('reviewRemovalRequest')->record($pending)->isVisible());
-        $this->assertFalse($table->getAction('resolve')->record($pending)->isVisible());
+        $this->assertFalse($table->getAction('conciliarChecklist')->record($pending)->isVisible());
         $this->assertTrue($table->getAction('acknowledgeRemovalAlert')->record($alert)->isVisible());
         $this->assertSame(['FIPE zerada'], $alert->removalAlertLabels());
     }
@@ -317,7 +317,7 @@ class IntegrationInboxItemResourceTest extends TestCase
             'extracted_vehicle_plate' => 'ZZZ9Z99',
         ]);
         $table = Livewire::test(ListIntegrationInboxItems::class)->instance()->getTable();
-        $resolveAction = $table->getAction('resolve')->record($checklist);
+        $resolveAction = $table->getAction('conciliarChecklist')->record($checklist);
 
         $this->assertTrue($resolveAction->isVisible());
         $this->assertTrue($resolveAction->isDisabled());
