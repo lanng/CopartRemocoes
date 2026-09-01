@@ -14,31 +14,19 @@ use Illuminate\Validation\ValidationException;
 class CteDocumentRecoveryService
 {
     /**
-     * Statuses anteriores a barreira fiscal: o documento nunca chegou a ser
-     * autorizado, logo pode voltar para a fila sem risco de CT-e duplicado.
-     *
-     * @var list<CteDocumentStatusEnum>
+     * Unico status de onde o documento nao volta para a fila: o CT-e ja foi
+     * autorizado, e reemitir geraria um documento duplicado.
      */
-    private const REQUEUEABLE_STATUSES = [
-        CteDocumentStatusEnum::CLAIMED,
-        CteDocumentStatusEnum::FILLING,
-        CteDocumentStatusEnum::VALIDATING,
-        CteDocumentStatusEnum::READY_TO_AUTHORIZE,
-        CteDocumentStatusEnum::FAILED_BEFORE_AUTHORIZATION,
-        CteDocumentStatusEnum::REJECTED,
-    ];
-
-    /** @return list<CteDocumentStatusEnum> */
-    public static function requeueableStatuses(): array
+    public static function canBeRequeued(CteDocumentStatusEnum $status): bool
     {
-        return self::REQUEUEABLE_STATUSES;
+        return $status !== CteDocumentStatusEnum::AUTHORIZED;
     }
 
     public function retry(CteDocument $document): CteDocument
     {
-        if (! in_array($document->status, self::REQUEUEABLE_STATUSES, true)) {
+        if (! self::canBeRequeued($document->status)) {
             throw ValidationException::withMessages([
-                'document' => 'Somente documentos nao autorizados podem ser reenfileirados. Documentos apos a barreira fiscal exigem conciliacao.',
+                'document' => 'Documentos autorizados nao podem ser reenfileirados.',
             ]);
         }
 
@@ -68,7 +56,7 @@ class CteDocumentRecoveryService
             foreach ($documents as $document) {
                 $document = CteDocument::query()->lockForUpdate()->findOrFail($document->id);
 
-                if (! in_array($document->status, self::REQUEUEABLE_STATUSES, true)) {
+                if (! self::canBeRequeued($document->status)) {
                     continue;
                 }
 
@@ -102,6 +90,15 @@ class CteDocumentRecoveryService
             'claim_token_hash' => null,
             'claimed_at' => null,
             'claim_expires_at' => null,
+            'authorization_started_at' => null,
+            'issued_at' => null,
+            'authorized_at' => null,
+            'cte_number' => null,
+            'access_key' => null,
+            'series' => null,
+            'protocol' => null,
+            'fiscal_status_code' => null,
+            'fiscal_status_message' => null,
             'error_stage' => null,
             'error_code' => null,
             'error_message' => null,

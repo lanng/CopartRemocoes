@@ -34,7 +34,7 @@ class CteDocumentRecoveryTest extends TestCase
         $this->assertSame(CteEmissionBatchStatusEnum::PROCESSING, $batch->refresh()->status);
     }
 
-    public function test_retrying_failed_documents_reopens_the_batch_without_touching_authorized_or_reconciliation_documents(): void
+    public function test_retrying_documents_reopens_the_batch_without_touching_authorized_documents(): void
     {
         $batch = CteEmissionBatch::factory()->create([
             'status' => CteEmissionBatchStatusEnum::COMPLETED_WITH_ERRORS,
@@ -65,8 +65,8 @@ class CteDocumentRecoveryTest extends TestCase
         $this->assertNull($failed->claim_expires_at);
         $this->assertSame(CteDocumentStatusEnum::AUTHORIZED, $authorized->refresh()->status);
         $this->assertSame('2707', $authorized->cte_number);
-        $this->assertSame(CteDocumentStatusEnum::RECONCILIATION_REQUIRED, $reconciliation->refresh()->status);
-        $this->assertSame('manual_review', $reconciliation->error_code);
+        $this->assertSame(CteDocumentStatusEnum::QUEUED, $reconciliation->refresh()->status);
+        $this->assertNull($reconciliation->error_code);
         $this->assertSame(CteEmissionBatchStatusEnum::PROCESSING, $batch->refresh()->status);
     }
 
@@ -112,11 +112,19 @@ class CteDocumentRecoveryTest extends TestCase
         $this->assertSame(CteEmissionBatchStatusEnum::PROCESSING, $batch->refresh()->status);
     }
 
-    public function test_every_status_before_the_fiscal_barrier_can_be_requeued(): void
+    public function test_every_status_except_authorized_can_be_requeued(): void
     {
-        foreach (CteDocumentRecoveryService::requeueableStatuses() as $status) {
+        foreach (CteDocumentStatusEnum::cases() as $status) {
+            if ($status === CteDocumentStatusEnum::AUTHORIZED) {
+                continue;
+            }
+
             $document = CteDocument::factory()->create([
                 'status' => $status,
+                'cte_number' => '2701',
+                'access_key' => '35260812563112000130570010000027011338262343',
+                'protocol' => '135263860830097',
+                'authorized_at' => now(),
                 'error_code' => 'SOME_ERROR',
             ]);
 
@@ -124,24 +132,18 @@ class CteDocumentRecoveryTest extends TestCase
 
             $this->assertSame(CteDocumentStatusEnum::QUEUED, $document->refresh()->status, "Status {$status->value} should be requeueable.");
             $this->assertNull($document->error_code);
+            $this->assertNull($document->cte_number);
+            $this->assertNull($document->access_key);
+            $this->assertNull($document->protocol);
+            $this->assertNull($document->authorized_at);
         }
     }
 
-    public function test_a_document_waiting_for_xml_cannot_be_retried(): void
+    public function test_an_authorized_document_cannot_be_retried(): void
     {
         $document = CteDocument::factory()->create([
-            'status' => CteDocumentStatusEnum::WAITING_FOR_XML,
-        ]);
-
-        $this->expectException(ValidationException::class);
-
-        app(CteDocumentRecoveryService::class)->retry($document);
-    }
-
-    public function test_a_document_after_the_fiscal_barrier_cannot_be_retried(): void
-    {
-        $document = CteDocument::factory()->create([
-            'status' => CteDocumentStatusEnum::AUTHORIZING,
+            'status' => CteDocumentStatusEnum::AUTHORIZED,
+            'cte_number' => '2707',
         ]);
 
         $this->expectException(ValidationException::class);

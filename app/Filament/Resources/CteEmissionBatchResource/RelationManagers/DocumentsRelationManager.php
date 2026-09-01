@@ -48,7 +48,7 @@ class DocumentsRelationManager extends RelationManager
                     ->label('Tentar novamente')
                     ->icon('heroicon-o-arrow-path')
                     ->color('warning')
-                    ->visible(fn (CteDocument $record): bool => in_array($record->status, CteDocumentRecoveryService::requeueableStatuses(), true))
+                    ->visible(fn (CteDocument $record): bool => CteDocumentRecoveryService::canBeRequeued($record->status))
                     ->requiresConfirmation()
                     ->modalDescription('O documento voltará para a fila de emissão e será preenchido e emitido novamente pela máquina host.')
                     ->action(function (CteDocument $record): void {
