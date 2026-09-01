@@ -5,6 +5,7 @@ namespace Tests\Feature\Filament;
 use App\Filament\Widgets\ActionableIntegrations;
 use App\Jobs\ProcessRemovalRequestEmail;
 use App\Models\IntegrationInboxItem;
+use App\Models\Register;
 use App\Models\User;
 use Filament\Facades\Filament;
 use Filament\Widgets\AccountWidget;
@@ -111,7 +112,7 @@ class ActionableIntegrationsTest extends TestCase
         $component = Livewire::test(ActionableIntegrations::class);
         $table = $component->instance()->getTable();
 
-        $this->assertTrue($table->getAction('acknowledgeDeliveryAlert')->record($deliveryAlert)->isVisible());
+        $this->assertTrue($table->getAction('conciliarChecklist')->record($deliveryAlert)->isVisible());
         $this->assertTrue($table->getAction('retryRemovalRequest')->record($removalError)->isVisible());
         $this->assertTrue($table->getAction('acknowledgeRemovalAlert')->record($removalAlert)->isVisible());
 
@@ -122,13 +123,70 @@ class ActionableIntegrationsTest extends TestCase
         ]);
         $this->assertTrue($table->getAction('retryRemovalRequest')->record($consignorLetterFailure)->isVisible());
 
-        $component->callTableAction('acknowledgeDeliveryAlert', $deliveryAlert);
+        $component->callTableAction('conciliarChecklist', $deliveryAlert);
         Queue::fake();
         $component->callTableAction('retryRemovalRequest', $removalError);
 
         $this->assertNotNull($deliveryAlert->refresh()->acknowledged_at);
         $this->assertSame('queued', $removalError->refresh()->status);
         Queue::assertPushed(ProcessRemovalRequestEmail::class);
+    }
+
+    public function test_it_keeps_the_register_status_when_conciliating_a_pending_checklist_alert(): void
+    {
+        $register = Register::factory()->create([
+            'company' => 'copart',
+            'status' => 'collected',
+        ]);
+        $pendingAlert = IntegrationInboxItem::factory()->create([
+            'message_type' => 'checklist',
+            'status' => 'pending',
+            'delivery_alert' => 'unexpected_status',
+            'register_id' => $register->id,
+            'received_at' => '2026-08-19 12:00:00',
+        ]);
+
+        $component = Livewire::test(ActionableIntegrations::class);
+        $table = $component->instance()->getTable();
+
+        $this->assertTrue($table->getAction('conciliarChecklist')->record($pendingAlert)->isVisible());
+
+        $component->callTableAction('conciliarChecklist', $pendingAlert, ['decisao' => 'keep']);
+
+        $this->assertSame('processed', $pendingAlert->refresh()->status);
+        $this->assertSame('status_kept_by_user', $pendingAlert->failure_reason);
+        $this->assertNotNull($pendingAlert->acknowledged_at);
+        $this->assertNotNull($pendingAlert->resolved_at);
+        $this->assertSame('collected', $register->refresh()->status->value);
+        $this->assertSame('2026-08-19 12:00:00', $register->delivery_confirmed_at->toDateTimeString());
+    }
+
+    public function test_it_delivers_the_register_when_conciliating_with_the_delivery_choice(): void
+    {
+        $register = Register::factory()->create([
+            'company' => 'copart',
+            'vehicle_id' => '1146609',
+            'vehicle_plate' => 'ESN4A20',
+            'status' => 'collected',
+        ]);
+        $pendingAlert = IntegrationInboxItem::factory()->create([
+            'message_type' => 'checklist',
+            'status' => 'pending',
+            'delivery_alert' => 'missing_authorized_cte',
+            'register_id' => $register->id,
+            'extracted_vehicle_id' => '1146609',
+            'extracted_vehicle_plate' => 'ESN4A20',
+            'received_at' => '2026-08-19 12:00:00',
+        ]);
+
+        Livewire::test(ActionableIntegrations::class)
+            ->callTableAction('conciliarChecklist', $pendingAlert, ['decisao' => 'deliver']);
+
+        $this->assertSame('processed', $pendingAlert->refresh()->status);
+        $this->assertSame('Baixa conciliada manualmente', $pendingAlert->failure_reason);
+        $this->assertNotNull($pendingAlert->resolved_by);
+        $this->assertSame('delivered', $register->refresh()->status->value);
+        $this->assertSame('2026-08-19 12:00:00', $register->delivery_confirmed_at->toDateTimeString());
     }
 
     public function test_it_renders_a_positive_empty_state(): void

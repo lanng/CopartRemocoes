@@ -2,15 +2,11 @@
 
 namespace App\Filament\Widgets;
 
+use App\Filament\Support\ChecklistConciliationAction;
 use App\Filament\Support\IntegrationInboxItemPresentation;
 use App\Models\IntegrationInboxItem;
-use App\Models\Register;
-use App\Services\MicrosoftGraph\AcknowledgeIntegrationAlert;
 use App\Services\MicrosoftGraph\RemovalRequests\ResolveRemovalRequestImport;
 use App\Services\MicrosoftGraph\RemovalRequests\RetryRemovalRequestImport;
-use App\Services\MicrosoftGraph\ResolveIntegrationInboxItem;
-use Filament\Forms\Components\Select;
-use Filament\Forms\Components\Textarea;
 use Filament\Tables;
 use Filament\Tables\Table;
 use Filament\Widgets\TableWidget as BaseWidget;
@@ -50,7 +46,7 @@ class ActionableIntegrations extends BaseWidget
                     }),
                 Tables\Columns\TextColumn::make('subject')
                     ->label('Assunto')
-                    ->limit(55)
+                    ->limit(45)
                     ->tooltip(fn (IntegrationInboxItem $record): ?string => $record->subject),
                 Tables\Columns\TextColumn::make('received_at')
                     ->label('Recebido em')
@@ -64,40 +60,17 @@ class ActionableIntegrations extends BaseWidget
                 Tables\Actions\Action::make('view')
                     ->label('Visualizar')
                     ->icon('heroicon-o-eye')
+                    ->color('gray')
+                    ->iconButton()
+                    ->tooltip('Visualizar')
                     ->url(fn (IntegrationInboxItem $record): string => route('filament.admin.resources.integration-inbox-items.view', ['record' => $record])),
-                Tables\Actions\Action::make('acknowledgeDeliveryAlert')
-                    ->label('Reconhecer')
-                    ->icon('heroicon-o-check')
-                    ->color('success')
-                    ->visible(fn (IntegrationInboxItem $record): bool => ! $record->isRemovalRequest()
-                        && $record->delivery_alert !== null
-                        && $record->acknowledged_at === null)
-                    ->requiresConfirmation()
-                    ->action(fn (IntegrationInboxItem $record): IntegrationInboxItem => app(AcknowledgeIntegrationAlert::class)->handle($record, auth()->user())),
-                Tables\Actions\Action::make('resolve')
-                    ->label('Conciliar')
-                    ->icon('heroicon-o-check-badge')
-                    ->color('success')
-                    ->visible(fn (IntegrationInboxItem $record): bool => ! $record->isRemovalRequest() && $record->status === 'pending')
-                    ->disabled(fn (IntegrationInboxItem $record): bool => IntegrationInboxItemPresentation::matchingRegisterOptions($record) === [])
-                    ->form(fn (IntegrationInboxItem $record): array => [
-                        Select::make('register_id')
-                            ->label('Registro')
-                            ->options(IntegrationInboxItemPresentation::matchingRegisterOptions($record))
-                            ->required(),
-                        Textarea::make('reason')
-                            ->label('Justificativa')
-                            ->required()
-                            ->maxLength(1000),
-                    ])
-                    ->action(function (IntegrationInboxItem $record, array $data): void {
-                        app(ResolveIntegrationInboxItem::class)->handle(
-                            $record,
-                            Register::query()->findOrFail($data['register_id']),
-                            auth()->user(),
-                            $data['reason'],
-                        );
-                    }),
+                ChecklistConciliationAction::make()
+                    ->iconButton()
+                    ->tooltip(fn (IntegrationInboxItem $record): string => $record->status === 'pending'
+                        && $record->delivery_alert === null
+                        && IntegrationInboxItemPresentation::matchingRegisterOptions($record) === []
+                        ? 'Nenhum registro compatível encontrado para esta baixa.'
+                        : 'Conciliar'),
                 Tables\Actions\Action::make('reviewRemovalRequest')
                     ->label('Revisar')
                     ->icon('heroicon-o-pencil-square')
