@@ -48,8 +48,9 @@ class DocumentsRelationManager extends RelationManager
                     ->label('Tentar novamente')
                     ->icon('heroicon-o-arrow-path')
                     ->color('warning')
-                    ->visible(fn (CteDocument $record): bool => $record->status === CteDocumentStatusEnum::FAILED_BEFORE_AUTHORIZATION)
+                    ->visible(fn (CteDocument $record): bool => in_array($record->status, CteDocumentRecoveryService::requeueableStatuses(), true))
                     ->requiresConfirmation()
+                    ->modalDescription('O documento voltará para a fila de emissão e será preenchido e emitido novamente pela máquina host.')
                     ->action(function (CteDocument $record): void {
                         app(CteDocumentRecoveryService::class)->retry($record);
                     }),

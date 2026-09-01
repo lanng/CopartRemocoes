@@ -273,6 +273,36 @@ class CteEmissionBatchResourceTest extends TestCase
         $this->assertSame(CteEmissionBatchStatusEnum::PROCESSING, $batch->refresh()->status);
     }
 
+    public function test_a_document_stuck_before_authorization_can_be_retried_from_the_documents_table(): void
+    {
+        $batch = CteEmissionBatch::factory()->create([
+            'status' => CteEmissionBatchStatusEnum::COMPLETED_WITH_ERRORS,
+        ]);
+        $stuck = CteDocument::factory()->create([
+            'cte_emission_batch_id' => $batch->id,
+            'status' => CteDocumentStatusEnum::FILLING,
+            'claimed_at' => now(),
+            'claim_expires_at' => now()->addMinutes(10),
+        ]);
+        $pastBarrier = CteDocument::factory()->create([
+            'cte_emission_batch_id' => $batch->id,
+            'status' => CteDocumentStatusEnum::AUTHORIZING,
+        ]);
+
+        Livewire::test(DocumentsRelationManager::class, [
+            'ownerRecord' => $batch,
+            'pageClass' => ViewCteEmissionBatch::class,
+        ])
+            ->assertTableActionVisible('retry', $stuck)
+            ->assertTableActionHidden('retry', $pastBarrier)
+            ->callTableAction('retry', $stuck);
+
+        $this->assertSame(CteDocumentStatusEnum::QUEUED, $stuck->refresh()->status);
+        $this->assertNull($stuck->claim_expires_at);
+        $this->assertSame(CteDocumentStatusEnum::AUTHORIZING, $pastBarrier->refresh()->status);
+        $this->assertSame(CteEmissionBatchStatusEnum::PROCESSING, $batch->refresh()->status);
+    }
+
     public function test_the_register_action_links_to_the_complete_register(): void
     {
         $this->app->setLocale('pt_BR');

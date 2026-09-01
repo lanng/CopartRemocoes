@@ -13,11 +13,32 @@ use Illuminate\Validation\ValidationException;
 
 class CteDocumentRecoveryService
 {
+    /**
+     * Statuses anteriores a barreira fiscal: o documento nunca chegou a ser
+     * autorizado, logo pode voltar para a fila sem risco de CT-e duplicado.
+     *
+     * @var list<CteDocumentStatusEnum>
+     */
+    private const REQUEUEABLE_STATUSES = [
+        CteDocumentStatusEnum::CLAIMED,
+        CteDocumentStatusEnum::FILLING,
+        CteDocumentStatusEnum::VALIDATING,
+        CteDocumentStatusEnum::READY_TO_AUTHORIZE,
+        CteDocumentStatusEnum::FAILED_BEFORE_AUTHORIZATION,
+        CteDocumentStatusEnum::REJECTED,
+    ];
+
+    /** @return list<CteDocumentStatusEnum> */
+    public static function requeueableStatuses(): array
+    {
+        return self::REQUEUEABLE_STATUSES;
+    }
+
     public function retry(CteDocument $document): CteDocument
     {
-        if ($document->status !== CteDocumentStatusEnum::FAILED_BEFORE_AUTHORIZATION) {
+        if (! in_array($document->status, self::REQUEUEABLE_STATUSES, true)) {
             throw ValidationException::withMessages([
-                'document' => 'Somente falhas anteriores a autorizacao podem ser reenfileiradas.',
+                'document' => 'Somente documentos nao autorizados podem ser reenfileirados. Documentos apos a barreira fiscal exigem conciliacao.',
             ]);
         }
 
@@ -47,7 +68,7 @@ class CteDocumentRecoveryService
             foreach ($documents as $document) {
                 $document = CteDocument::query()->lockForUpdate()->findOrFail($document->id);
 
-                if ($document->status !== CteDocumentStatusEnum::FAILED_BEFORE_AUTHORIZATION) {
+                if (! in_array($document->status, self::REQUEUEABLE_STATUSES, true)) {
                     continue;
                 }
 
