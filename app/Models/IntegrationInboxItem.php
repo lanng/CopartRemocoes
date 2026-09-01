@@ -132,6 +132,7 @@ class IntegrationInboxItem extends Model
             ->map(fn (string $alert): string => match ($alert) {
                 'freight_changed' => 'Frete alterado',
                 'zero_fipe' => 'FIPE zerada',
+                'register_readded' => 'Registro readicionado',
                 'consignor_letter_failed' => 'Falha ao salvar Carta do Comitente',
                 default => $alert,
             })
@@ -221,6 +222,7 @@ class IntegrationInboxItem extends Model
             'processing_failed' => 'Falha no processamento',
             'graph_connection_missing' => 'Conexão com o Graph ausente',
             'delivery_already_confirmed' => 'Entrega já confirmada',
+            'status_kept_by_user' => 'Status inicial mantido',
             default => $this->failure_reason,
         };
     }

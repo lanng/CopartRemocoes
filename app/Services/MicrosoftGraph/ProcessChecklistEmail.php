@@ -99,6 +99,20 @@ class ProcessChecklistEmail
                 ? null
                 : ($authorizedCteNumber !== null ? 'unexpected_status' : 'missing_authorized_cte');
 
+            if ($deliveryAlert !== null) {
+                $item->update([
+                    'register_id' => $register->id,
+                    'status' => 'pending',
+                    'failure_reason' => null,
+                    'previous_register_status' => $previousRegisterStatus,
+                    'delivery_alert' => $deliveryAlert,
+                    'authorized_cte_number_at_delivery' => $authorizedCteNumber,
+                    'resolved_at' => null,
+                ]);
+
+                return $item->refresh();
+            }
+
             $register->forceFill([
                 'delivery_confirmed_at' => $receivedAt,
                 'status' => RegisterStatusEnum::DELIVERED,
@@ -109,7 +123,7 @@ class ProcessChecklistEmail
                 'status' => 'processed',
                 'failure_reason' => null,
                 'previous_register_status' => $previousRegisterStatus,
-                'delivery_alert' => $deliveryAlert,
+                'delivery_alert' => null,
                 'authorized_cte_number_at_delivery' => $authorizedCteNumber,
                 'resolved_at' => now(),
             ]);

@@ -30,7 +30,7 @@ class SyncChecklistEmailsTest extends TestCase
         $register = Register::factory()->create([
             'vehicle_id' => '1146609',
             'vehicle_plate' => 'ESN4A20',
-            'status' => RegisterStatusEnum::COLLECTED,
+            'status' => RegisterStatusEnum::INVOICED,
         ]);
         $connection = MicrosoftGraphConnection::factory()->create();
 
@@ -78,7 +78,7 @@ class SyncChecklistEmailsTest extends TestCase
         $register = Register::factory()->create([
             'vehicle_id' => '1146609',
             'vehicle_plate' => 'ESN4A20',
-            'status' => RegisterStatusEnum::COLLECTED,
+            'status' => RegisterStatusEnum::INVOICED,
         ]);
         $connection = MicrosoftGraphConnection::factory()->create();
         Queue::fake();
@@ -124,7 +124,7 @@ class SyncChecklistEmailsTest extends TestCase
         $checklistRegister = Register::factory()->create([
             'vehicle_id' => '1146609',
             'vehicle_plate' => 'ESN4A20',
-            'status' => RegisterStatusEnum::COLLECTED,
+            'status' => RegisterStatusEnum::INVOICED,
         ]);
         $connection = MicrosoftGraphConnection::factory()->create();
 

@@ -20,6 +20,12 @@ class AcknowledgeIntegrationAlert
                 throw new DomainException('Somente alertas de baixa ainda não reconhecidos podem ser reconhecidos.');
             }
 
+            if ($lockedItem->status === 'pending') {
+                $this->keepRegisterStatus($lockedItem, $user);
+
+                return $lockedItem->refresh();
+            }
+
             $lockedItem->forceFill([
                 'acknowledged_by' => $user->id,
                 'acknowledged_at' => now(),
@@ -27,5 +33,27 @@ class AcknowledgeIntegrationAlert
 
             return $lockedItem->refresh();
         });
+    }
+
+    /**
+     * Mantém o status atual do registro e grava a data da entrega,
+     * deixando a baixa manual (status Entregue) a cargo do escritório.
+     */
+    private function keepRegisterStatus(IntegrationInboxItem $item, User $user): void
+    {
+        $register = $item->register()->lockForUpdate()->firstOrFail();
+
+        $register->forceFill([
+            'delivery_confirmed_at' => $register->delivery_confirmed_at ?? $item->received_at,
+        ])->save();
+
+        $item->forceFill([
+            'status' => 'processed',
+            'failure_reason' => 'status_kept_by_user',
+            'acknowledged_by' => $user->id,
+            'acknowledged_at' => now(),
+            'resolved_by' => $user->id,
+            'resolved_at' => now(),
+        ])->save();
     }
 }
