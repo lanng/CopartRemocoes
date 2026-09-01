@@ -4,6 +4,7 @@ namespace App\Filament\Widgets;
 
 use App\Filament\Support\ChecklistConciliationAction;
 use App\Filament\Support\IntegrationInboxItemPresentation;
+use App\Filament\Support\ReviewRemovalRequestAction;
 use App\Models\IntegrationInboxItem;
 use App\Services\MicrosoftGraph\RemovalRequests\ResolveRemovalRequestImport;
 use App\Services\MicrosoftGraph\RemovalRequests\RetryRemovalRequestImport;
@@ -71,14 +72,9 @@ class ActionableIntegrations extends BaseWidget
                         && IntegrationInboxItemPresentation::matchingRegisterOptions($record) === []
                         ? 'Nenhum registro compatível encontrado para esta baixa.'
                         : 'Conciliar'),
-                Tables\Actions\Action::make('reviewRemovalRequest')
-                    ->label('Revisar')
-                    ->icon('heroicon-o-pencil-square')
-                    ->color('warning')
-                    ->visible(fn (IntegrationInboxItem $record): bool => $record->isRemovalRequest()
-                        && $record->status === 'pending'
-                        && ($record->proposed_changes !== null || $record->candidate_pdf_path !== null))
-                    ->url(fn (IntegrationInboxItem $record): string => route('filament.admin.resources.integration-inbox-items.view', ['record' => $record])),
+                ReviewRemovalRequestAction::make()
+                    ->iconButton()
+                    ->tooltip('Revisar'),
                 Tables\Actions\Action::make('retryRemovalRequest')
                     ->label('Tentar novamente')
                     ->icon('heroicon-o-arrow-path')

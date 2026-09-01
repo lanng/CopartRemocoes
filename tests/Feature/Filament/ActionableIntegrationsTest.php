@@ -132,6 +132,41 @@ class ActionableIntegrationsTest extends TestCase
         Queue::assertPushed(ProcessRemovalRequestEmail::class);
     }
 
+    public function test_it_reviews_a_status_blocked_import_directly_from_the_widget(): void
+    {
+        $register = Register::factory()->create([
+            'company' => 'copart',
+            'status' => 'available',
+            'destination_city' => 'Pirapora',
+        ]);
+        $blocked = IntegrationInboxItem::factory()->create([
+            'message_type' => 'removal_request',
+            'status' => 'pending',
+            'failure_reason' => 'update_blocked_by_status',
+            'register_id' => $register->id,
+            'proposed_changes' => [
+                'destination_city' => ['current' => 'Pirapora', 'proposed' => 'Caçapava'],
+            ],
+            'received_at' => '2026-09-01 14:36:00',
+        ]);
+
+        $component = Livewire::test(ActionableIntegrations::class);
+        $table = $component->instance()->getTable();
+        $reviewAction = $table->getAction('reviewRemovalRequest')->record($blocked);
+
+        $this->assertTrue($reviewAction->isVisible());
+        $this->assertNull($reviewAction->getUrl());
+
+        $component->callTableAction('reviewRemovalRequest', $blocked, [
+            'fields' => ['destination_city'],
+            'replace_pdf' => false,
+        ]);
+
+        $this->assertSame('Caçapava', $register->refresh()->destination_city);
+        $this->assertSame('processed', $blocked->refresh()->status);
+        $this->assertNull($blocked->failure_reason);
+    }
+
     public function test_it_keeps_the_register_status_when_conciliating_a_pending_checklist_alert(): void
     {
         $register = Register::factory()->create([

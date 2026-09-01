@@ -155,25 +155,30 @@ class IntegrationInboxItem extends Model
     {
         return collect($this->proposed_changes ?? [])
             ->map(fn (array $change, string $field): array => [
-                'field' => match ($field) {
-                    'vehicle_model' => 'Veículo',
-                    'origin_city' => 'Cidade de origem',
-                    'destination_city' => 'Cidade de destino',
-                    'deadline_withdraw' => 'Data limite de retirada',
-                    'deadline_delivery' => 'Data limite de entrega',
-                    'value' => 'Frete',
-                    'insurance' => 'Seguradora',
-                    'fipe_value' => 'FIPE',
-                    'payment_code' => 'Código de pagamento',
-                    'notes' => 'Observações',
-                    'pdf_path' => 'PDF',
-                    default => $field,
-                },
+                'field' => self::proposedFieldLabel($field),
                 'current' => $change['current'] ?? null,
                 'proposed' => $change['proposed'] ?? null,
             ])
             ->values()
             ->all();
+    }
+
+    public static function proposedFieldLabel(string $field): string
+    {
+        return match ($field) {
+            'vehicle_model' => 'Veículo',
+            'origin_city' => 'Cidade de origem',
+            'destination_city' => 'Cidade de destino',
+            'deadline_withdraw' => 'Data limite de retirada',
+            'deadline_delivery' => 'Data limite de entrega',
+            'value' => 'Frete',
+            'insurance' => 'Seguradora',
+            'fipe_value' => 'FIPE',
+            'payment_code' => 'Código de pagamento',
+            'notes' => 'Observações',
+            'pdf_path' => 'PDF',
+            default => $field,
+        };
     }
 
     public function register(): BelongsTo
