@@ -237,6 +237,28 @@ class IntegrationInboxItemResourceTest extends TestCase
             ->assertCanNotSeeTableRecords([$alert]);
     }
 
+    public function test_it_enables_checklist_reconciliation_for_plate_mismatches_with_an_associated_register(): void
+    {
+        $register = \App\Models\Register::factory()->create([
+            'company' => 'copart',
+            'vehicle_id' => '1158012',
+            'vehicle_plate' => 'ABC1D23',
+        ]);
+        $mismatch = IntegrationInboxItem::factory()->create([
+            'message_type' => 'checklist',
+            'status' => 'pending',
+            'failure_reason' => 'vehicle_plate_mismatch',
+            'register_id' => $register->id,
+            'extracted_vehicle_id' => '1158012',
+            'extracted_vehicle_plate' => 'DNP6098',
+        ]);
+        $table = Livewire::test(ListIntegrationInboxItems::class)->instance()->getTable();
+        $resolveAction = $table->getAction('conciliarChecklist')->record($mismatch);
+
+        $this->assertTrue($resolveAction->isVisible());
+        $this->assertFalse($resolveAction->isDisabled());
+    }
+
     public function test_it_renders_row_actions_as_compact_icon_buttons(): void
     {
         $table = Livewire::test(ListIntegrationInboxItems::class)->instance()->getTable();

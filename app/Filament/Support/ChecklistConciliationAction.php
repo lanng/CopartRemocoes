@@ -52,6 +52,9 @@ class ChecklistConciliationAction
                     Select::make('register_id')
                         ->label('Registro')
                         ->options(IntegrationInboxItemPresentation::matchingRegisterOptions($record))
+                        ->default(fn (IntegrationInboxItem $record): int|string|null => in_array($record->register_id, array_keys(IntegrationInboxItemPresentation::matchingRegisterOptions($record)))
+                            ? $record->register_id
+                            : null)
                         ->disabled(fn (IntegrationInboxItem $record): bool => IntegrationInboxItemPresentation::matchingRegisterOptions($record) === [])
                         ->helperText(fn (IntegrationInboxItem $record): ?string => IntegrationInboxItemPresentation::matchingRegisterOptions($record) === []
                             ? 'Nenhum registro compatível encontrado para esta baixa.'

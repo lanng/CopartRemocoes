@@ -2,6 +2,7 @@
 
 namespace Tests\Feature\Filament;
 
+use App\Filament\Support\IntegrationInboxItemPresentation;
 use App\Filament\Widgets\ActionableIntegrations;
 use App\Jobs\ProcessRemovalRequestEmail;
 use App\Models\IntegrationInboxItem;
@@ -222,6 +223,38 @@ class ActionableIntegrationsTest extends TestCase
         $this->assertNotNull($pendingAlert->resolved_by);
         $this->assertSame('delivered', $register->refresh()->status->value);
         $this->assertSame('2026-08-19 12:00:00', $register->delivery_confirmed_at->toDateTimeString());
+    }
+
+    public function test_it_enables_reconciliation_when_a_plate_mismatch_has_an_associated_register(): void
+    {
+        $register = Register::factory()->create([
+            'company' => 'copart',
+            'vehicle_id' => '1158012',
+            'vehicle_plate' => 'ABC1D23',
+            'status' => 'collected',
+        ]);
+        $mismatch = IntegrationInboxItem::factory()->create([
+            'message_type' => 'checklist',
+            'status' => 'pending',
+            'failure_reason' => 'vehicle_plate_mismatch',
+            'register_id' => $register->id,
+            'extracted_vehicle_id' => '1158012',
+            'extracted_vehicle_plate' => 'DNP6098',
+            'received_at' => '2026-09-04 15:59:00',
+        ]);
+
+        $component = Livewire::test(ActionableIntegrations::class);
+        $action = $component->instance()->getTable()->getAction('conciliarChecklist')->record($mismatch);
+
+        $this->assertTrue($action->isVisible());
+        $this->assertFalse($action->isDisabled());
+        $this->assertSame([$register->id => '1158012 - ABC1D23'], IntegrationInboxItemPresentation::matchingRegisterOptions($mismatch));
+
+        $component->callTableAction('conciliarChecklist', $mismatch, ['register_id' => (string) $register->id]);
+
+        $this->assertSame('processed', $mismatch->refresh()->status);
+        $this->assertSame('delivered', $register->refresh()->status->value);
+        $this->assertSame('2026-09-04 15:59:00', $register->delivery_confirmed_at->toDateTimeString());
     }
 
     public function test_it_renders_a_positive_empty_state(): void

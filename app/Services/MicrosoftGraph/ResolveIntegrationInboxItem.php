@@ -20,10 +20,11 @@ class ResolveIntegrationInboxItem
 
             $register = Register::query()->lockForUpdate()->findOrFail($register->id);
             $plate = strtoupper(str_replace('-', '', $register->vehicle_plate));
+            $isAssociatedRegister = (int) $register->id === (int) $item->register_id;
 
             if ($register->company?->value !== 'copart'
                 || (string) $register->vehicle_id !== (string) $item->extracted_vehicle_id
-                || $plate !== strtoupper((string) $item->extracted_vehicle_plate)) {
+                || ($plate !== strtoupper((string) $item->extracted_vehicle_plate) && ! $isAssociatedRegister)) {
                 throw new DomainException('O registro selecionado nao corresponde aos dados extraidos.');
             }
 
