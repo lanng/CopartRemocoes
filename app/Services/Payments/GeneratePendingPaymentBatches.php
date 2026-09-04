@@ -4,6 +4,7 @@ namespace App\Services\Payments;
 
 use App\Services\MicrosoftGraph\SyncChecklistEmailsService;
 use Carbon\CarbonImmutable;
+use Illuminate\Support\Facades\Log;
 
 class GeneratePendingPaymentBatches
 {
@@ -23,6 +24,9 @@ class GeneratePendingPaymentBatches
         } catch (\Throwable $exception) {
             $syncFailed = true;
             $syncError = $exception->getMessage();
+            Log::warning('payments:generate-pending-batches: falha ao sincronizar e-mails do Outlook antes de gerar lotes.', [
+                'exception' => (string) $exception,
+            ]);
         }
 
         $throughDate = $through
