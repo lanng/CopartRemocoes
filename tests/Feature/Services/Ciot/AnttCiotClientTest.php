@@ -77,6 +77,28 @@ class AnttCiotClientTest extends TestCase
         }
     }
 
+    public function test_declare_parses_the_homologacao_success_envelope(): void
+    {
+        Http::fake([
+            'https://antt-hml.test/pefServices/token' => Http::response(['token' => 'tok'], 200),
+            'https://antt-hml.test/pefServices/gerar' => Http::response([
+                'Sucesso' => true,
+                'Mensagem' => 'CIOT gerado com sucesso',
+                'Dados' => ['CIOT' => '560000563230', 'CpfCnpj' => '12.563.112/0001-30', 'DataGeracao' => '2026-09-21T19:15:20'],
+                'Erros' => null,
+            ], 200),
+        ]);
+
+        $response = app(AnttCiotClient::class)->declare(['cpfCnpj' => '12563112000130']);
+
+        $this->assertTrue($response->isSuccess());
+        $this->assertTrue($response->sucesso());
+        $this->assertSame('CIOT gerado com sucesso', $response->mensagem());
+        $this->assertSame('560000563230', $response->ciotNumber());
+        $this->assertSame('560000563230', $response->identificacaoOperacao());
+        $this->assertNull($response->protocolo());
+    }
+
     public function test_declare_sends_bearer_token_and_parses_response(): void
     {
         Http::fake([

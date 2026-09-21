@@ -23,6 +23,8 @@ class BuildCiotDeclarationPayload
         $this->assertBusinessRules($ciot);
 
         return [
+            // Propriedade raiz exigida pelo binder do /gerar (validada em homologação).
+            'cpfCnpj' => (string) config('ciot.company.cnpj'),
             'IdOperacaoTransporte' => $ciot->id_operacao_transporte ?? now()->format('ymdHis'),
             'TipoOperacao' => $ciot->operation_type->code(),
             'CpfCnpjContratado' => (string) config('ciot.company.cnpj'),

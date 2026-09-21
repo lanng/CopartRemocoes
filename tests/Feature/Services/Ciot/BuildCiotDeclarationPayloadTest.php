@@ -62,6 +62,7 @@ class BuildCiotDeclarationPayloadTest extends TestCase
 
         $payload = app(BuildCiotDeclarationPayload::class)->handle($ciot);
 
+        $this->assertSame('12563112000130', $payload['cpfCnpj']);
         $this->assertMatchesRegularExpression('/^\d{12}$/', $payload['IdOperacaoTransporte']);
         $this->assertSame(1, $payload['TipoOperacao']);
         $this->assertSame('12563112000130', $payload['CpfCnpjContratado']);

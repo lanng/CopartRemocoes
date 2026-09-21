@@ -21,9 +21,19 @@ class AnttCiotResponse
 
     public function mensagem(): ?string
     {
-        $mensagem = $this->body['Mensagem'] ?? $this->body['mensagem'] ?? null;
+        $mensagem = $this->body['Mensagem'] ?? $this->body['mensagem'] ?? $this->body['Message'] ?? null;
 
         return $mensagem === null ? null : (string) $mensagem;
+    }
+
+    /**
+     * Envelope atual do /gerar em homologação: {"Sucesso": true, "Mensagem": ..., "Dados": ..., "Erros": ...}.
+     */
+    public function sucesso(): ?bool
+    {
+        $sucesso = $this->body['Sucesso'] ?? $this->body['sucesso'] ?? null;
+
+        return $sucesso === null ? null : (bool) $sucesso;
     }
 
     public function avisoTransportador(): ?string
@@ -35,6 +45,10 @@ class AnttCiotResponse
 
     public function isSuccess(): bool
     {
+        if ($this->sucesso() === true) {
+            return true;
+        }
+
         return in_array($this->codigo(), ['110', '111'], true);
     }
 

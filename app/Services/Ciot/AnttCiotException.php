@@ -28,4 +28,9 @@ class AnttCiotException extends RuntimeException
     {
         return $this->httpStatus === null || $this->httpStatus === 0 || $this->httpStatus >= 500;
     }
+
+    public function isNotFound(): bool
+    {
+        return $this->httpStatus === 404;
+    }
 }

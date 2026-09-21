@@ -71,6 +71,9 @@ class CiotSmokeCommand extends Command
             }
 
             $this->generateAndClose($client);
+
+            usleep(1_100_000); // id_operacao_transporte tem resolução de 1s; evita colisão de chave única
+
             $this->generateAndCancel($client);
         } catch (AnttCiotException $exception) {
             $this->error('[ANTT] '.$exception->getMessage());
@@ -99,7 +102,7 @@ class CiotSmokeCommand extends Command
             app(CloseCiot::class)->handle($ciot);
             $this->info('Encerrado. Resposta: '.json_encode($ciot->response, JSON_UNESCAPED_UNICODE));
         } catch (AnttCiotException $exception) {
-            $this->warn('Encerramento falhou (path provavelmente a confirmar): '.$exception->getMessage());
+            $this->warn($this->describeAnttFailure('Encerramento', $exception));
         }
     }
 
@@ -117,8 +120,20 @@ class CiotSmokeCommand extends Command
             app(CancelCiot::class)->handle($ciot, 'CIOT de teste - smoke');
             $this->info('Cancelado. Resposta: '.json_encode($ciot->response, JSON_UNESCAPED_UNICODE));
         } catch (AnttCiotException $exception) {
-            $this->warn('Cancelamento falhou (path provavelmente a confirmar): '.$exception->getMessage());
+            $this->warn($this->describeAnttFailure('Cancelamento', $exception));
         }
+    }
+
+    protected function describeAnttFailure(string $operation, AnttCiotException $exception): string
+    {
+        if ($exception->isNotFound()) {
+            return sprintf(
+                '%s: rota não exposta na homologação (config: ciot.paths). Ajuste o path quando a ANTT publicar.',
+                $operation,
+            );
+        }
+
+        return $operation.' falhou: '.$exception->getMessage();
     }
 
     protected function generateOnly(AnttCiotClient $client): void
@@ -217,7 +232,8 @@ class CiotSmokeCommand extends Command
             'response' => $response->body,
         ])->save();
 
-        $this->info("CIOT gerado: {$response->ciotNumber()} (protocolo {$response->protocolo()})");
+        $protocolo = filled($response->protocolo()) ? " (protocolo {$response->protocolo()})" : '';
+        $this->info("CIOT gerado: {$response->ciotNumber()}{$protocolo}");
 
         return $ciot;
     }
