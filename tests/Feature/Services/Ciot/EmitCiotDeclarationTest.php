@@ -41,7 +41,7 @@ class EmitCiotDeclarationTest extends TestCase
         $ciot = app(EmitCiotDeclaration::class)->handle($ciot);
 
         $this->assertSame(CiotStatusEnum::PENDING, $ciot->status);
-        $this->assertMatchesRegularExpression('/^\d{12}$/', $ciot->id_operacao_transporte);
+        $this->assertMatchesRegularExpression('/^[A-Z0-9]{12}$/', $ciot->id_operacao_transporte);
         $this->assertArrayHasKey('IdOperacaoTransporte', $ciot->payload);
 
         Queue::assertPushed(EmitCiotJob::class, fn (EmitCiotJob $job): bool => $job->ciotId === $ciot->id);
@@ -66,7 +66,7 @@ class EmitCiotDeclarationTest extends TestCase
 
         Http::fake([
             'https://antt-hml.test/pefServices/token' => Http::response(['token' => 'tok'], 200),
-            'https://antt-hml.test/pefServices/gerar' => Http::response([
+            'https://antt-hml.test/pefServices/api/DeclaracaoOperacaoTransporte' => Http::response([
                 'Codigo' => '110',
                 'Mensagem' => 'Dados inseridos com sucesso',
                 'dados' => ['ciot' => '520031583158'],
@@ -97,7 +97,7 @@ class EmitCiotDeclarationTest extends TestCase
 
         Http::fake([
             'https://antt-hml.test/pefServices/token' => Http::response(['token' => 'tok'], 200),
-            'https://antt-hml.test/pefServices/gerar' => Http::response([
+            'https://antt-hml.test/pefServices/api/DeclaracaoOperacaoTransporte' => Http::response([
                 'Codigo' => '110',
                 'Dados' => ['CIOT' => '5200315831581234'],
             ], 200),
@@ -123,7 +123,7 @@ class EmitCiotDeclarationTest extends TestCase
 
         Http::fake([
             'https://antt-hml.test/pefServices/token' => Http::response(['token' => 'tok'], 200),
-            'https://antt-hml.test/pefServices/gerar' => Http::response([
+            'https://antt-hml.test/pefServices/api/DeclaracaoOperacaoTransporte' => Http::response([
                 'Codigo' => '999',
                 'Mensagem' => 'Contratante bloqueado',
             ], 200),
@@ -148,7 +148,7 @@ class EmitCiotDeclarationTest extends TestCase
 
         Http::fake([
             'https://antt-hml.test/pefServices/token' => Http::response(['token' => 'tok'], 200),
-            'https://antt-hml.test/pefServices/gerar' => Http::response('boom', 500),
+            'https://antt-hml.test/pefServices/api/DeclaracaoOperacaoTransporte' => Http::response('boom', 500),
         ]);
 
         try {

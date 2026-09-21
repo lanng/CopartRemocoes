@@ -23,7 +23,18 @@ class AnttCiotResponse
     {
         $mensagem = $this->body['Mensagem'] ?? $this->body['mensagem'] ?? $this->body['Message'] ?? null;
 
-        return $mensagem === null ? null : (string) $mensagem;
+        if ($mensagem === null) {
+            return null;
+        }
+
+        if (is_array($mensagem)) {
+            $mensagem = implode('; ', array_map(
+                fn ($part): string => is_scalar($part) ? (string) $part : json_encode($part, JSON_UNESCAPED_UNICODE),
+                $mensagem,
+            ));
+        }
+
+        return (string) $mensagem;
     }
 
     /**

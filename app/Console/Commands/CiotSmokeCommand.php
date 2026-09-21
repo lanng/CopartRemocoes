@@ -153,7 +153,7 @@ class CiotSmokeCommand extends Command
     {
         $ciotNumber = $this->ask('Número do CIOT (16 dígitos)');
 
-        $response = $client->encerrar(['CIOT' => (string) $ciotNumber]);
+        $response = $client->encerrar((string) $ciotNumber);
         $this->line(json_encode($response->body, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE));
     }
 
@@ -190,7 +190,7 @@ class CiotSmokeCommand extends Command
             'origin' => self::ORIGEM,
             'destination' => self::DESTINO,
             'distance_km' => self::DISTANCIA_KM,
-            'freight_value_cents' => 100000,
+            'freight_value_cents' => 2000000,
             'cargo_weight_kg' => '20000',
             'vehicles' => [$tractor->snapshot(), $trailer->snapshot()],
             'travel_start_at' => now()->addDay()->startOfDay(),

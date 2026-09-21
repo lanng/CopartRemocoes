@@ -30,10 +30,14 @@ return [
     ],
 
     'paths' => [
+        // Camada simplificada (wrapper oficial da DLL), mantida como fallback de diagnóstico.
         'token' => env('CIOT_PATH_TOKEN', '/token'),
-        'declare' => env('CIOT_PATH_DECLARE', '/gerar'),
-        'cancel' => env('CIOT_PATH_CANCEL', '/CancelamentoOperacaoTransporte'),
-        'close' => env('CIOT_PATH_CLOSE', '/EncerramentoOperacaoTransporte'),
+        'simplified_generate' => env('CIOT_PATH_SIMPLIFIED_GENERATE', '/gerar'),
+        // Serviços canônicos do DCS (rotas confirmadas em homologação sob /api/).
+        'declare' => env('CIOT_PATH_DECLARE', '/api/DeclaracaoOperacaoTransporte'),
+        'cancel' => env('CIOT_PATH_CANCEL', '/api/CancelamentoOperacaoTransporte'),
+        'close' => env('CIOT_PATH_CLOSE', '/api/EncerramentoOperacaoTransporte'),
+        'query' => env('CIOT_PATH_QUERY', '/api/consultarCIOT'),
     ],
 
     'lines' => [

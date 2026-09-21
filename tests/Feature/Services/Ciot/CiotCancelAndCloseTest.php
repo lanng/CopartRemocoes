@@ -32,7 +32,7 @@ class CiotCancelAndCloseTest extends TestCase
 
         Http::fake([
             'https://antt-hml.test/pefServices/token' => Http::response(['token' => 'tok'], 200),
-            'https://antt-hml.test/pefServices/CancelamentoOperacaoTransporte' => Http::response([
+            'https://antt-hml.test/pefServices/api/CancelamentoOperacaoTransporte' => Http::response([
                 'Codigo' => '110',
                 'Mensagem' => 'Cancelado com sucesso',
             ], 200),
@@ -45,8 +45,8 @@ class CiotCancelAndCloseTest extends TestCase
         $this->assertNotNull($ciot->canceled_at);
 
         Http::assertSent(function ($request) use ($ciot): bool {
-            return str_contains($request->url(), '/CancelamentoOperacaoTransporte')
-                && $request->data()['CIOT'] === $ciot->fullNumber();
+            return str_contains($request->url(), '/api/CancelamentoOperacaoTransporte')
+                && $request->data()['CodigoIdentificacaoOperacao'] === $ciot->fullNumber();
         });
     }
 
@@ -75,7 +75,7 @@ class CiotCancelAndCloseTest extends TestCase
 
         Http::fake([
             'https://antt-hml.test/pefServices/token' => Http::response(['token' => 'tok'], 200),
-            'https://antt-hml.test/pefServices/CancelamentoOperacaoTransporte' => Http::response([
+            'https://antt-hml.test/pefServices/api/CancelamentoOperacaoTransporte' => Http::response([
                 'Mensagem' => 'CIOT inexistente',
             ], 400),
         ]);
@@ -97,7 +97,7 @@ class CiotCancelAndCloseTest extends TestCase
 
         Http::fake([
             'https://antt-hml.test/pefServices/token' => Http::response(['token' => 'tok'], 200),
-            'https://antt-hml.test/pefServices/EncerramentoOperacaoTransporte' => Http::response([
+            'https://antt-hml.test/pefServices/api/EncerramentoOperacaoTransporte' => Http::response([
                 'Codigo' => '110',
                 'Mensagem' => 'Encerrado com sucesso',
             ], 200),
@@ -109,9 +109,8 @@ class CiotCancelAndCloseTest extends TestCase
         $this->assertNotNull($ciot->closed_at);
 
         Http::assertSent(function ($request) use ($ciot): bool {
-            return str_contains($request->url(), '/EncerramentoOperacaoTransporte')
-                && $request->data()['CIOT'] === $ciot->fullNumber()
-                && $request->data()['IdOperacaoTransporte'] === $ciot->id_operacao_transporte;
+            return str_contains($request->url(), '/api/EncerramentoOperacaoTransporte')
+                && $request->data() === ['CodigoIdentificacaoOperacao' => $ciot->fullNumber()];
         });
     }
 

@@ -94,17 +94,27 @@ class AnttCiotClient
     public function cancel(string $ciot, string $motivo): AnttCiotResponse
     {
         return $this->authenticatedPost($this->path('cancel'), [
-            'CIOT' => $ciot,
-            'Motivo' => $motivo,
+            'CodigoIdentificacaoOperacao' => $ciot,
+            'MotivoCancelamento' => $motivo,
+        ]);
+    }
+
+    public function encerrar(string $ciot): AnttCiotResponse
+    {
+        return $this->authenticatedPost($this->path('close'), [
+            'CodigoIdentificacaoOperacao' => $ciot,
         ]);
     }
 
     /**
-     * @param  array<string, mixed>  $payload
+     * Geração simplificada (wrapper oficial da DLL, `/gerar`) — uso diagnóstico;
+     * a emissão canônica vai por declare().
      */
-    public function encerrar(array $payload): AnttCiotResponse
+    public function simplifiedGenerate(string $cpfCnpj): AnttCiotResponse
     {
-        return $this->authenticatedPost($this->path('close'), $payload);
+        return $this->authenticatedPost($this->path('simplified_generate'), [
+            'cpfCnpj' => $cpfCnpj,
+        ]);
     }
 
     /**

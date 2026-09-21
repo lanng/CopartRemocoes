@@ -81,7 +81,7 @@ class AnttCiotClientTest extends TestCase
     {
         Http::fake([
             'https://antt-hml.test/pefServices/token' => Http::response(['token' => 'tok'], 200),
-            'https://antt-hml.test/pefServices/gerar' => Http::response([
+            'https://antt-hml.test/pefServices/api/DeclaracaoOperacaoTransporte' => Http::response([
                 'Sucesso' => true,
                 'Mensagem' => 'CIOT gerado com sucesso',
                 'Dados' => ['CIOT' => '560000563230', 'CpfCnpj' => '12.563.112/0001-30', 'DataGeracao' => '2026-09-21T19:15:20'],
@@ -103,7 +103,7 @@ class AnttCiotClientTest extends TestCase
     {
         Http::fake([
             'https://antt-hml.test/pefServices/token' => Http::response(['token' => 'tok'], 200),
-            'https://antt-hml.test/pefServices/gerar' => Http::response([
+            'https://antt-hml.test/pefServices/api/DeclaracaoOperacaoTransporte' => Http::response([
                 'dados' => ['ciot' => '520031583158'],
             ], 200),
         ]);
@@ -114,7 +114,7 @@ class AnttCiotClientTest extends TestCase
         $this->assertSame('520031583158', $response->identificacaoOperacao());
 
         Http::assertSent(function ($request): bool {
-            return $request->url() === 'https://antt-hml.test/pefServices/gerar'
+            return $request->url() === 'https://antt-hml.test/pefServices/api/DeclaracaoOperacaoTransporte'
                 && $request->hasHeader('Authorization', 'Bearer tok')
                 && $request->data()['IdOperacaoTransporte'] === '260921123456';
         });
@@ -126,7 +126,7 @@ class AnttCiotClientTest extends TestCase
             'https://antt-hml.test/pefServices/token' => Http::sequence()
                 ->push(['token' => 'expired'], 200)
                 ->push(['token' => 'fresh'], 200),
-            'https://antt-hml.test/pefServices/gerar' => Http::sequence()
+            'https://antt-hml.test/pefServices/api/DeclaracaoOperacaoTransporte' => Http::sequence()
                 ->push(['Message' => 'Acesso Negado'], 401)
                 ->push(['Codigo' => '110', 'Mensagem' => 'Dados inseridos'], 200),
         ]);
@@ -140,7 +140,7 @@ class AnttCiotClientTest extends TestCase
         $this->assertSame('110', $response->codigo());
 
         Http::assertSent(function ($request): bool {
-            if (str_contains($request->url(), '/gerar')) {
+            if (str_contains($request->url(), '/api/DeclaracaoOperacaoTransporte')) {
                 return $request->hasHeader('Authorization', 'Bearer fresh');
             }
 
@@ -152,7 +152,7 @@ class AnttCiotClientTest extends TestCase
     {
         Http::fake([
             'https://antt-hml.test/pefServices/token' => Http::response(['token' => 'tok'], 200),
-            'https://antt-hml.test/pefServices/gerar' => Http::response('boom', 503),
+            'https://antt-hml.test/pefServices/api/DeclaracaoOperacaoTransporte' => Http::response('boom', 503),
         ]);
 
         try {
@@ -168,7 +168,7 @@ class AnttCiotClientTest extends TestCase
     {
         Http::fake([
             'https://antt-hml.test/pefServices/token' => Http::response(['token' => 'tok'], 200),
-            'https://antt-hml.test/pefServices/CancelamentoOperacaoTransporte' => Http::response([
+            'https://antt-hml.test/pefServices/api/CancelamentoOperacaoTransporte' => Http::response([
                 'Codigo' => '110',
                 'Mensagem' => 'Cancelado',
             ], 200),
@@ -179,10 +179,44 @@ class AnttCiotClientTest extends TestCase
         $this->assertTrue($response->isSuccess());
 
         Http::assertSent(function ($request): bool {
-            return str_contains($request->url(), '/CancelamentoOperacaoTransporte')
-                && $request->data()['CIOT'] === '520031583158ABCD'
-                && $request->data()['Motivo'] === 'teste';
+            return str_contains($request->url(), '/api/CancelamentoOperacaoTransporte')
+                && $request->data()['CodigoIdentificacaoOperacao'] === '520031583158ABCD'
+                && $request->data()['MotivoCancelamento'] === 'teste';
         });
+    }
+
+    public function test_encerrar_posts_only_the_ciot_code(): void
+    {
+        Http::fake([
+            'https://antt-hml.test/pefServices/token' => Http::response(['token' => 'tok'], 200),
+            'https://antt-hml.test/pefServices/api/EncerramentoOperacaoTransporte' => Http::response([
+                'Codigo' => '110',
+            ], 200),
+        ]);
+
+        app(AnttCiotClient::class)->encerrar('520031583158ABCD');
+
+        Http::assertSent(function ($request): bool {
+            return str_contains($request->url(), '/api/EncerramentoOperacaoTransporte')
+                && $request->data() === ['CodigoIdentificacaoOperacao' => '520031583158ABCD'];
+        });
+    }
+
+    public function test_simplified_generate_posts_the_cnpj_root_property(): void
+    {
+        Http::fake([
+            'https://antt-hml.test/pefServices/token' => Http::response(['token' => 'tok'], 200),
+            'https://antt-hml.test/pefServices/gerar' => Http::response([
+                'Sucesso' => true,
+                'Dados' => ['CIOT' => '560000563230'],
+            ], 200),
+        ]);
+
+        $response = app(AnttCiotClient::class)->simplifiedGenerate('12563112000130');
+
+        $this->assertTrue($response->isSuccess());
+
+        Http::assertSent(fn ($request): bool => $request->data() === ['cpfCnpj' => '12563112000130']);
     }
 
     public function test_http_options_include_the_certificate_for_pfx_files(): void

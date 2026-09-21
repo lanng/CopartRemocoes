@@ -7,6 +7,7 @@ use App\Enums\CiotOperationTypeEnum;
 use App\Enums\CiotStatusEnum;
 use App\Models\Ciot;
 use DomainException;
+use Illuminate\Support\Str;
 
 /**
  * Monta o JSON de `DeclaracaoOperacaoTransporte` (DCS) a partir do CIOT.
@@ -25,16 +26,18 @@ class BuildCiotDeclarationPayload
         return [
             // Propriedade raiz exigida pelo binder do /gerar (validada em homologação).
             'cpfCnpj' => (string) config('ciot.company.cnpj'),
-            'IdOperacaoTransporte' => $ciot->id_operacao_transporte ?? now()->format('ymdHis'),
+            'IdOperacaoTransporte' => $ciot->id_operacao_transporte ?? substr(Str::upper(str_replace('-', '', (string) Str::uuid())), 0, 12),
             'TipoOperacao' => $ciot->operation_type->code(),
             'CpfCnpjContratado' => (string) config('ciot.company.cnpj'),
             'RNTRCContratado' => (string) config('ciot.company.rntrc'),
             'CpfCnpjContratante' => $ciot->payer_cnpj,
             'RNTRCContratante' => '',
             'CpfCnpjDestinatario' => $ciot->delivery_payer_cnpj ?? $ciot->payer_cnpj,
-            'DataDeclaracao' => now()->format('Y-m-d\TH:i:s'),
-            'DataInicioViagem' => $ciot->travel_start_at?->format('Y-m-d\TH:i:s'),
-            'DataFimViagem' => $ciot->travel_end_at?->format('Y-m-d\TH:i:s'),
+            'ValorFrete' => round($ciot->freight_value_cents / 100, 2),
+            'DataDeclaracao' => now()->format('Y-m-d\TH:i:sP'),
+            'IndContingencia' => false,
+            'DataInicioViagem' => $ciot->travel_start_at?->format('Y-m-d'),
+            'DataFimViagem' => $ciot->travel_end_at?->format('Y-m-d'),
             'Veiculos' => $this->buildVehicles($ciot),
             'OrigemDestino' => [$this->buildRoute($ciot)],
             'DadosCarga' => $this->buildCargo($ciot),
@@ -106,6 +109,7 @@ class BuildCiotDeclarationPayload
             'Placa' => (string) $vehicle['placa'],
             'RNTRCVeiculo' => (string) ($vehicle['rntrc'] ?? config('ciot.company.rntrc')),
             'NumeroEixos' => (int) $vehicle['eixos'],
+            'TipoVeiculo' => ($vehicle['tipo'] ?? 'automotor') === 'automotor' ? 1 : 2,
         ], $ciot->vehicles ?? []));
     }
 
@@ -128,7 +132,7 @@ class BuildCiotDeclarationPayload
     protected function buildLocation(array $location): array
     {
         return [
-            'CodigoMunicipio' => filled($location['ibge'] ?? null) ? (string) $location['ibge'] : null,
+            'CodigoMunicipio' => filled($location['ibge'] ?? null) ? (int) $location['ibge'] : null,
             'Cep' => filled($location['cep'] ?? null) ? (string) $location['cep'] : null,
         ];
     }
@@ -144,7 +148,7 @@ class BuildCiotDeclarationPayload
         );
 
         return [
-            'CodigoNaturezaCarga' => $ciot->line->naturezaCarga(),
+            'CodigoNaturezaCarga' => (int) $ciot->line->naturezaCarga(),
             'PesoCarga' => $ciot->cargo_weight_kg !== null ? (float) $ciot->cargo_weight_kg : null,
             'CodigoTipoCarga' => $ciot->line->tipoCarga(),
             'ContratantesCargaFrac' => $ciot->operation_type === CiotOperationTypeEnum::Fractioned

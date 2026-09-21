@@ -17,10 +17,7 @@ class CloseCiot
             throw new DomainException('Somente CIOTs emitidos podem ser encerrados.');
         }
 
-        $response = app(AnttCiotClient::class)->encerrar([
-            'CIOT' => $fullNumber,
-            'IdOperacaoTransporte' => $ciot->id_operacao_transporte,
-        ]);
+        $response = app(AnttCiotClient::class)->encerrar($fullNumber);
 
         if (! $response->isAccepted()) {
             throw new AnttCiotException(
