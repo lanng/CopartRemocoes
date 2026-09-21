@@ -1,0 +1,48 @@
+<?php
+
+namespace App\Models;
+
+use Illuminate\Database\Eloquent\Factories\HasFactory;
+use Illuminate\Database\Eloquent\Model;
+
+class CiotVehicle extends Model
+{
+    /** @use HasFactory<\Database\Factories\CiotVehicleFactory> */
+    use HasFactory;
+
+    public const TYPE_AUTOMOTOR = 'automotor';
+
+    public const TYPE_TRAILER = 'reboque';
+
+    protected $fillable = [
+        'plate', 'rntrc', 'axles', 'type', 'description', 'is_active',
+    ];
+
+    protected function casts(): array
+    {
+        return [
+            'is_active' => 'boolean',
+            'axles' => 'integer',
+        ];
+    }
+
+    public function isAutomotor(): bool
+    {
+        return $this->type === self::TYPE_AUTOMOTOR;
+    }
+
+    /**
+     * Snapshot no formato enviado no payload `Veiculos[]` do CIOT.
+     *
+     * @return array{placa: string, rntrc: ?string, eixos: int, tipo: string}
+     */
+    public function snapshot(): array
+    {
+        return [
+            'placa' => $this->plate,
+            'rntrc' => $this->rntrc,
+            'eixos' => $this->axles,
+            'tipo' => $this->type,
+        ];
+    }
+}
