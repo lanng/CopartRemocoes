@@ -191,8 +191,12 @@ class CiotResource extends Resource
                     ->columns(4)
                     ->visible(fn (Ciot $record): bool => in_array($record->status, [CiotStatusEnum::ISSUED, CiotStatusEnum::CANCELED, CiotStatusEnum::CLOSED], true))
                     ->schema([
+                        TextEntry::make('ciot_number')
+                            ->label('CIOT')
+                            ->copyable()
+                            ->fontFamily('mono'),
                         TextEntry::make('full_number')
-                            ->label('CIOT (16 dígitos)')
+                            ->label('CIOT + verificador')
                             ->state(fn (Ciot $record): ?string => $record->fullNumber())
                             ->copyable()
                             ->fontFamily('mono'),
@@ -290,7 +294,6 @@ class CiotResource extends Resource
             ->columns([
                 Tables\Columns\TextColumn::make('ciot_number')
                     ->label('CIOT')
-                    ->state(fn (Ciot $record): ?string => $record->fullNumber())
                     ->fontFamily('mono')
                     ->copyable()
                     ->placeholder('—'),

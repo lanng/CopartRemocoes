@@ -148,6 +148,7 @@ class CiotResourceTest extends TestCase
         ]);
 
         Livewire::test(ViewCiot::class, ['record' => $ciot->id])
+            ->assertSee($ciot->ciot_number)
             ->assertSee($ciot->fullNumber())
             ->assertSee('Aviso importante ao transportador');
     }
