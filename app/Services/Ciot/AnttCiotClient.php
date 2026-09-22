@@ -149,9 +149,10 @@ class AnttCiotClient
     {
         $payload = ['CodigoIdentificacaoOperacao' => $ciot];
 
-        // A produção exige PesoCarga no encerramento de operações de lotação.
+        // O encerramento de lotação exige o peso aninhado em
+        // DadosCarga.PesoTotalCarga (na raiz o campo não liga — spec §2.2).
         if ($pesoCarga !== null) {
-            $payload['PesoCarga'] = $pesoCarga;
+            $payload['DadosCarga'] = ['PesoTotalCarga' => $pesoCarga];
         }
 
         return $this->businessPost($this->path('close'), $payload);

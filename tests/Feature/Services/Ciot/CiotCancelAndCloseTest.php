@@ -142,7 +142,7 @@ class CiotCancelAndCloseTest extends TestCase
             return str_contains($request->url(), '/api/EncerramentoOperacaoTransporte')
                 && $request->data() === [
                     'CodigoIdentificacaoOperacao' => $ciot->fullNumber(),
-                    'PesoCarga' => 20000.0,
+                    'DadosCarga' => ['PesoTotalCarga' => 20000.0],
                 ];
         });
     }
@@ -169,6 +169,26 @@ class CiotCancelAndCloseTest extends TestCase
         }
 
         $this->assertSame(CiotStatusEnum::ISSUED, $ciot->refresh()->status);
+    }
+
+    public function test_closes_with_the_real_production_envelope(): void
+    {
+        $ciot = Ciot::factory()->issued()->create(['cargo_weight_kg' => '17729.00']);
+
+        Http::fake([
+            'https://antt-hml.test/pefServices/api/EncerramentoOperacaoTransporte' => Http::response([
+                'CodigoIdentificacaoOperacao' => $ciot->fullNumber(),
+                'DataEncerramento' => '2026-09-22T17:20:02',
+                'Codigo' => '110',
+                'Protocolo' => 'T98000002282767',
+            ], 200),
+        ]);
+
+        $ciot = app(CloseCiot::class)->handle($ciot);
+
+        $this->assertSame(CiotStatusEnum::CLOSED, $ciot->status);
+        $this->assertSame('110', $ciot->response['encerramento']['Codigo']);
+        $this->assertSame('T98000002282767', $ciot->response['encerramento']['Protocolo']);
     }
 
     public function test_refuses_to_close_a_ciot_that_is_not_issued(): void
