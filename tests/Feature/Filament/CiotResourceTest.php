@@ -78,8 +78,8 @@ class CiotResourceTest extends TestCase
                 'freight_value' => '1000.00',
                 'cargo_weight_kg' => '20000',
                 'vehicle_ids' => [$tractor->id, $trailer->id],
-                'travel_start_at' => now()->addDay()->format('Y-m-d H:i:s'),
-                'travel_end_at' => now()->addDays(2)->format('Y-m-d H:i:s'),
+                'travel_start_at' => now()->addDay()->format('Y-m-d'),
+                'travel_end_at' => now()->addDays(2)->format('Y-m-d'),
             ])
             ->call('create')
             ->assertHasNoFormErrors();
@@ -148,6 +148,28 @@ class CiotResourceTest extends TestCase
         Livewire::test(ViewCiot::class, ['record' => $ciot->id])
             ->assertSee($ciot->fullNumber())
             ->assertSee('Aviso importante ao transportador');
+    }
+
+    public function test_the_cep_field_autocompletes_city_state_and_ibge(): void
+    {
+        Http::fake([
+            'https://brasilapi.com.br/api/cep/v2/12286140' => Http::response([
+                'state' => 'SP',
+                'city' => 'Caçapava',
+                'ibge_code' => '3508504',
+                'location' => [
+                    'coordinates' => ['latitude' => '-23.1006', 'longitude' => '-45.6911'],
+                ],
+            ], 200),
+        ]);
+
+        Livewire::test(CreateCiot::class)
+            ->fillForm(['origin.cep' => '12286140'])
+            ->assertFormSet([
+                'origin.cidade' => 'Caçapava',
+                'origin.uf' => 'SP',
+                'origin.ibge' => '3508504',
+            ]);
     }
 
     public function test_the_navigation_badge_counts_open_ciots(): void

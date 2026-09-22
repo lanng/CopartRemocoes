@@ -63,4 +63,18 @@ return [
     // Ative apenas em homologação; em produção deve ser false (13 remoção / 8 tanque).
     'natureza_fallback' => (bool) env('CIOT_NATUREZA_FALLBACK', false),
 
+    // Consulta de CEP para preencher cidade/UF/IBGE no formulário.
+    'lookup' => [
+        'brasilapi_url' => env('CIOT_BRASILAPI_URL', 'https://brasilapi.com.br/api/cep/v2'),
+        'viacep_url' => env('CIOT_VIACEP_URL', 'https://viacep.com.br/ws'),
+        'timeout' => (int) env('CIOT_LOOKUP_TIMEOUT', 10),
+    ],
+
+    // Distância rodoviária (OpenRouteService; free tier 2.000 rotas/dia).
+    'distance' => [
+        'openrouteservice_url' => env('CIOT_ORS_URL', 'https://api.openrouteservice.org/v2/directions/driving-car'),
+        'api_key' => env('CIOT_DISTANCE_API_KEY'),
+        'timeout' => (int) env('CIOT_DISTANCE_TIMEOUT', 15),
+    ],
+
 ];

@@ -255,6 +255,19 @@ class BuildCiotDeclarationPayloadTest extends TestCase
         app(BuildCiotDeclarationPayload::class)->handle($ciot);
     }
 
+    public function test_rejects_travel_start_in_the_past(): void
+    {
+        $ciot = Ciot::factory()->create([
+            'travel_start_at' => now()->subDay(),
+            'travel_end_at' => now()->addDay(),
+        ]);
+
+        $this->expectException(DomainException::class);
+        $this->expectExceptionMessage('passado');
+
+        app(BuildCiotDeclarationPayload::class)->handle($ciot);
+    }
+
     public function test_rejects_travel_longer_than_ninety_days(): void
     {
         $ciot = Ciot::factory()->create([

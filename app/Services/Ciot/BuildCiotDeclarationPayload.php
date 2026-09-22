@@ -93,6 +93,10 @@ class BuildCiotDeclarationPayload
             throw new DomainException('Informe as datas de início e fim da viagem.');
         }
 
+        if ($viagemInicio->startOfDay()->lt(today()->startOfDay())) {
+            throw new DomainException('A data de início da viagem não pode estar no passado.');
+        }
+
         if ($viagemInicio->gt($viagemFim) || $viagemInicio->diffInDays($viagemFim) > 90) {
             throw new DomainException('A viagem não pode exceder 90 dias.');
         }

@@ -9,7 +9,10 @@ use App\Filament\Resources\CiotResource\Pages;
 use App\Models\Ciot;
 use App\Models\CiotPayer;
 use App\Models\CiotVehicle;
+use App\Models\City;
 use App\Services\Ciot\CancelCiot;
+use App\Services\Ciot\CepLookup;
+use App\Services\Ciot\CityDistanceCalculator;
 use App\Services\Ciot\CloseCiot;
 use App\Services\Ciot\EmitCiotDeclaration;
 use Filament\Forms;
@@ -18,6 +21,7 @@ use Filament\Infolists\Components\Section;
 use Filament\Infolists\Components\TextEntry;
 use Filament\Infolists\Infolist;
 use Filament\Resources\Resource;
+use Filament\Support\Notifications\Notification;
 use Filament\Tables;
 use Filament\Tables\Table;
 use Illuminate\Database\Eloquent\Builder;
@@ -90,7 +94,16 @@ class CiotResource extends Resource
                             ->label('Distância (km)')
                             ->numeric()
                             ->minValue(0.01)
-                            ->required(),
+                            ->required()
+                            ->suffixAction(
+                                Forms\Components\Actions\Action::make('calcularDistancia')
+                                    ->icon('heroicon-m-calculator')
+                                    ->label('Calcular distância')
+                                    ->color('gray')
+                                    ->action(function (Forms\Set $set, Forms\Get $get): void {
+                                        self::calculateDistance($set, $get);
+                                    }),
+                            ),
                     ]),
                 Forms\Components\Section::make('Carga e veículos')
                     ->columns(2)
@@ -115,11 +128,14 @@ class CiotResource extends Resource
                 Forms\Components\Section::make('Viagem')
                     ->columns(2)
                     ->schema([
-                        Forms\Components\DateTimePicker::make('travel_start_at')
+                        Forms\Components\DatePicker::make('travel_start_at')
                             ->label('Início da viagem')
+                            ->default(today())
+                            ->minDate(today())
                             ->required(),
-                        Forms\Components\DateTimePicker::make('travel_end_at')
+                        Forms\Components\DatePicker::make('travel_end_at')
                             ->label('Fim da viagem')
+                            ->minDate(fn (Forms\Get $get) => $get('travel_start_at') ?? today())
                             ->required(),
                     ]),
                 Forms\Components\Section::make('Indicadores operacionais')
@@ -448,11 +464,61 @@ class CiotResource extends Resource
     }
 
     /**
+     * Campos de localização com preenchimento assistido: CEP completa
+     * cidade/UF/IBGE (BrasilAPI → ViaCEP) e o picker busca a cidade da
+     * tabela local do IBGE por nome.
+     *
      * @return list<Forms\Components\Component>
      */
     protected static function locationFields(string $prefix): array
     {
         return [
+            Forms\Components\TextInput::make("{$prefix}cep")
+                ->label('CEP')
+                ->mask('99999-999')
+                ->maxLength(9)
+                ->required()
+                ->live(onBlur: true)
+                ->afterStateUpdated(fn (Forms\Set $set, ?string $state) => self::fillFromCep($set, $prefix, $state))
+                ->suffixAction(
+                    Forms\Components\Actions\Action::make('buscarCep')
+                        ->icon('heroicon-m-magnifying-glass')
+                        ->label('Buscar CEP')
+                        ->color('gray')
+                        ->action(function (Forms\Set $set, Forms\Get $get) use ($prefix): void {
+                            self::fillFromCep($set, $prefix, $get("{$prefix}cep"));
+                        }),
+                ),
+            Forms\Components\Select::make("{$prefix}city_picker")
+                ->label('Autocompletar cidade')
+                ->placeholder('Buscar pelo nome...')
+                ->searchable()
+                ->dehydrated(false)
+                ->live()
+                ->options(function (?string $search = null): array {
+                    return City::query()
+                        ->when(filled($search), fn ($query) => $query
+                            ->where('name', 'like', "%{$search}%")
+                            ->orWhere('ibge_code', 'like', "%{$search}%"))
+                        ->orderBy('name')
+                        ->limit(50)
+                        ->get()
+                        ->mapWithKeys(fn (City $city): array => [$city->ibge_code => "{$city->name} - {$city->state}"])
+                        ->all();
+                })
+                ->afterStateUpdated(function (Forms\Set $set, ?string $state) use ($prefix): void {
+                    if (blank($state)) {
+                        return;
+                    }
+
+                    $city = City::query()->where('ibge_code', $state)->first();
+
+                    if ($city !== null) {
+                        $set("{$prefix}cidade", $city->name);
+                        $set("{$prefix}uf", $city->state);
+                        $set("{$prefix}ibge", $city->ibge_code);
+                    }
+                }),
             Forms\Components\TextInput::make("{$prefix}cidade")
                 ->label('Cidade')
                 ->required()
@@ -461,17 +527,68 @@ class CiotResource extends Resource
                 ->label('UF')
                 ->length(2)
                 ->required(),
-            Forms\Components\TextInput::make("{$prefix}cep")
-                ->label('CEP (8 dígitos)')
-                ->numeric()
-                ->length(8)
-                ->required(),
             Forms\Components\TextInput::make("{$prefix}ibge")
                 ->label('Código IBGE (7 dígitos)')
                 ->numeric()
                 ->length(7)
                 ->required(),
         ];
+    }
+
+    /**
+     * Preenche cidade/UF/IBGE a partir do CEP. Falha é silenciosa: o campo
+     * segue manual para o operador.
+     */
+    protected static function fillFromCep(Forms\Set $set, string $prefix, ?string $cep): void
+    {
+        $location = app(CepLookup::class)->lookup((string) $cep);
+
+        if ($location === null) {
+            return;
+        }
+
+        $set("{$prefix}cidade", $location['cidade']);
+        $set("{$prefix}uf", $location['uf']);
+
+        if (filled($location['ibge'])) {
+            $set("{$prefix}ibge", $location['ibge']);
+        }
+    }
+
+    protected static function calculateDistance(Forms\Set $set, Forms\Get $get): void
+    {
+        $origin = City::query()->where('ibge_code', $get('origin.ibge'))->first();
+        $destination = City::query()->where('ibge_code', $get('destination.ibge'))->first();
+
+        if ($origin === null || $destination === null
+            || ! $origin->hasCoordinates() || ! $destination->hasCoordinates()) {
+            Notification::make()
+                ->title('Coordenadas indisponíveis')
+                ->body('Informe os CEPs de origem e destino para buscar as coordenadas das cidades.')
+                ->warning()
+                ->send();
+
+            return;
+        }
+
+        $km = app(CityDistanceCalculator::class)->calculate($origin, $destination);
+
+        if ($km === null) {
+            Notification::make()
+                ->title('Não foi possível calcular a distância')
+                ->body('Serviço de roteamento indisponível ou sem chave configurada (CIOT_DISTANCE_API_KEY).')
+                ->warning()
+                ->send();
+
+            return;
+        }
+
+        $set('distance_km', $km);
+
+        Notification::make()
+            ->title("Distância sugerida: {$km} km")
+            ->success()
+            ->send();
     }
 
     /**
