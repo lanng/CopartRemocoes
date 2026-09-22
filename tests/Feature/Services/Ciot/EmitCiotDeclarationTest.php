@@ -88,8 +88,8 @@ class EmitCiotDeclarationTest extends TestCase
 
         $this->assertSame(CiotStatusEnum::ISSUED, $ciot->status);
         $this->assertSame('520031583158', $ciot->ciot_number);
-        $this->assertNull($ciot->verifier_code);
-        $this->assertSame('5200315831589999', $ciot->protocol);
+        $this->assertSame('9999', $ciot->verifier_code);
+        $this->assertSame('5200315831589999', $ciot->fullNumber());
         $this->assertSame('Exija o comprovante', $ciot->carrier_notice);
         $this->assertNotNull($ciot->issued_at);
     }
@@ -166,6 +166,36 @@ class EmitCiotDeclarationTest extends TestCase
         }
 
         $this->assertSame(CiotStatusEnum::PENDING, $ciot->refresh()->status);
+    }
+
+    public function test_job_parses_the_production_success_envelope(): void
+    {
+        $ciot = Ciot::factory()->create([
+            'status' => CiotStatusEnum::PENDING,
+            'payload' => ['IdOperacaoTransporte' => '520032956638'],
+            'id_operacao_transporte' => '520032956638',
+        ]);
+
+        Http::fake([
+            'https://antt-hml.test/pefServices/api/DeclaracaoOperacaoTransporte' => Http::response([
+                'Codigo' => '110',
+                'Mensagem' => 'Advertência: Dados cadastrados com sucesso com ressalvas para a distância percorrida informada ser inferior ao calculado.',
+                'Protocolo' => '5200329566385921',
+                'CodigoVerificador' => '5921',
+                'AvisoTransportador' => null,
+                'IdOperacaoTransporte' => '520032956638',
+            ], 200),
+        ]);
+
+        (new EmitCiotJob($ciot->id))->handle(app(\App\Services\Ciot\AnttCiotClient::class));
+
+        $ciot = $ciot->refresh();
+
+        $this->assertSame(CiotStatusEnum::ISSUED, $ciot->status);
+        $this->assertSame('520032956638', $ciot->ciot_number);
+        $this->assertSame('5921', $ciot->verifier_code);
+        $this->assertSame('5200329566385921', $ciot->fullNumber());
+        $this->assertStringContainsString('Advertência', $ciot->response['Mensagem']);
     }
 
     public function test_failed_hook_marks_pending_ciot_as_failed(): void

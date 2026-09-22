@@ -130,27 +130,82 @@ class AnttCiotResponse
     }
 
     /**
-     * CIOT de 12 dígitos (sem o código verificador).
+     * CIOT de 12 dígitos (sem o código verificador). Na produção o número vem
+     * no campo `IdOperacaoTransporte` (o ID emitido pelo servidor se torna o
+     * CIOT); no DCS canônico é `CodigoIdentificacaoOperacao`; na camada
+     * simplificada, `dados.ciot`.
      */
     public function identificacaoOperacao(): ?string
     {
-        $ciot = $this->ciotNumber();
+        $idOperacao = $this->body['IdOperacaoTransporte']
+            ?? $this->body['idOperacaoTransporte']
+            ?? $this->body['CodigoIdentificacaoOperacao']
+            ?? $this->body['codigoIdentificacaoOperacao']
+            ?? null;
 
-        if ($ciot === null) {
-            return null;
+        if (filled($idOperacao)) {
+            $idOperacao = (string) $idOperacao;
+
+            return strlen($idOperacao) === 16 ? substr($idOperacao, 0, 12) : $idOperacao;
         }
 
-        return strlen($ciot) === 16 ? substr($ciot, 0, 12) : $ciot;
+        foreach ([$this->body['dados'] ?? [], $this->body['Dados'] ?? []] as $dados) {
+            if (is_array($dados)) {
+                foreach (['ciot', 'CIOT'] as $ciotKey) {
+                    if (! empty($dados[$ciotKey])) {
+                        $ciot = (string) $dados[$ciotKey];
+
+                        return strlen($ciot) === 16 ? substr($ciot, 0, 12) : $ciot;
+                    }
+                }
+            }
+        }
+
+        $protocolo = $this->protocolo();
+
+        if ($protocolo !== null && strlen($protocolo) === 16) {
+            return substr($protocolo, 0, 12);
+        }
+
+        return null;
     }
 
     public function codigoVerificador(): ?string
     {
+        $verificador = $this->body['CodigoVerificador'] ?? $this->body['codigoVerificador'] ?? null;
+
+        if (filled($verificador)) {
+            return (string) $verificador;
+        }
+
         $ciot = $this->ciotNumber();
 
-        if ($ciot === null || strlen($ciot) !== 16) {
+        if ($ciot !== null && strlen($ciot) === 16) {
+            return substr($ciot, 12, 4);
+        }
+
+        $protocolo = $this->protocolo();
+
+        if ($protocolo !== null && strlen($protocolo) === 16) {
+            return substr($protocolo, 12, 4);
+        }
+
+        return null;
+    }
+
+    /**
+     * CIOT completo de 16 dígitos: o `Protocolo` de produção é o CIOT (12) +
+     * verificador (4).
+     */
+    public function fullCiot(): ?string
+    {
+        $identificacao = $this->identificacaoOperacao();
+        $verificador = $this->codigoVerificador();
+
+        if ($identificacao === null || $verificador === null) {
             return null;
         }
 
-        return substr($ciot, 12, 4);
+        return $identificacao.$verificador;
     }
 }
