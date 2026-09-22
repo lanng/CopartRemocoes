@@ -40,6 +40,14 @@ return [
         'query' => env('CIOT_PATH_QUERY', '/api/consultarCIOT'),
     ],
 
+    // Gerador de IdOperacaoTransporte (spec §2.2): em produção fica em um AWS API
+    // Gateway próprio (token + Bearer, JSON minúsculo); a declaração segue no
+    // appservices. Em homologação null = usa a base_url (appservices-hml) direto.
+    'gerar_base_url' => env('CIOT_GERAR_BASE_URL', match (env('CIOT_ENV', 'homologacao')) {
+        'producao' => 'https://mtcuybq605.execute-api.sa-east-1.amazonaws.com/api-ciot-prd/GeradorCIOT',
+        default => null,
+    }),
+
     'lines' => [
         'vehicle_removal' => [
             'bank_code' => env('CIOT_REMOVAL_BANK_CODE'),

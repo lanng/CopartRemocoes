@@ -28,23 +28,39 @@ class AnttCiotClient
 
     /**
      * Emite o IdOperacaoTransporte da próxima declaração. O ID NÃO é inventado
-     * pelo cliente: o servidor ANTT controla a sequência global (spec §2.1).
-     * Rota `/gerar`, apenas mTLS — sem Bearer/token.
+     * pelo cliente: o servidor ANTT controla a sequência global (spec §2.2).
+     * Produção: gateway AWS próprio (POST /token com `chave`, depois /gerar com
+     * Bearer — resposta em JSON minúsculo). Homologação: /gerar do appservices-hml
+     * direto, apenas mTLS.
      *
      * @throws AnttCiotException
      */
     public function generateIdOperacaoTransporte(): string
     {
-        $cnpj = (string) config('ciot.company.cnpj');
+        $body = [
+            'cpfCnpj' => (string) config('ciot.company.cnpj'),
+            'cnpj' => (string) config('ciot.company.cnpj'),
+        ];
 
         try {
-            $response = Http::withOptions($this->httpOptions())
-                ->withHeaders(['Accept' => 'application/json'])
-                ->timeout((int) config('ciot.timeout'))
-                ->post($this->url($this->path('simplified_generate')), [
-                    'cpfCnpj' => $cnpj,
-                    'cnpj' => $cnpj,
-                ]);
+            $generatorBase = config('ciot.gerar_base_url');
+
+            if (filled($generatorBase)) {
+                $token = $this->generatorToken((string) $generatorBase, $body);
+
+                $response = Http::withOptions($this->httpOptions())
+                    ->withHeaders([
+                        'Accept' => 'application/json',
+                        'Authorization' => 'Bearer '.$token,
+                    ])
+                    ->timeout((int) config('ciot.timeout'))
+                    ->post($generatorBase.'/gerar', $body);
+            } else {
+                $response = Http::withOptions($this->httpOptions())
+                    ->withHeaders(['Accept' => 'application/json'])
+                    ->timeout((int) config('ciot.timeout'))
+                    ->post($this->url($this->path('simplified_generate')), $body);
+            }
         } catch (ConnectionException $exception) {
             $this->log('error', 'Falha de conexão ao gerar IdOperacaoTransporte na ANTT.', ['error' => $exception->getMessage()]);
 
@@ -63,15 +79,54 @@ class AnttCiotClient
             );
         }
 
-        $idOperacao = (string) ($response->json('Dados.CIOT') ?? $response->json('dados.ciot') ?? '');
+        $idOperacao = (string) ($response->json('dados.ciot') ?? $response->json('Dados.CIOT') ?? '');
 
         if ($idOperacao === '') {
-            throw new AnttCiotException('Resposta do /gerar sem Dados.CIOT.', body: (array) $response->json());
+            throw new AnttCiotException('Resposta do gerador sem o campo "ciot".', body: (array) $response->json());
         }
 
         $this->log('info', 'IdOperacaoTransporte emitido pela ANTT.', ['tamanho' => strlen($idOperacao)]);
 
         return $idOperacao;
+    }
+
+    /**
+     * Token do gerador de produção (gateway AWS): POST /token com o header
+     * `chave` e o corpo cpfCnpj/cnpj (spec §2.2).
+     *
+     * @param  array<string, string>  $body
+     *
+     * @throws AnttCiotException
+     */
+    protected function generatorToken(string $generatorBase, array $body): string
+    {
+        $response = Http::withOptions($this->httpOptions())
+            ->withHeaders([
+                'Accept' => 'application/json',
+                'chave' => (string) config('ciot.api_key'),
+            ])
+            ->timeout((int) config('ciot.timeout'))
+            ->post($generatorBase.'/token', $body);
+
+        if ($response->failed()) {
+            $this->log('error', 'Token do gerador de produção rejeitado.', [
+                'status' => $response->status(),
+                'body' => $response->body(),
+            ]);
+
+            throw new AnttCiotException(
+                sprintf('Token do gerador de ID falhou (HTTP %d): %s', $response->status(), $response->body()),
+                httpStatus: $response->status(),
+            );
+        }
+
+        $token = (string) ($response->json('token') ?? '');
+
+        if ($token === '') {
+            throw new AnttCiotException('Resposta de token do gerador sem campo "token".', body: (array) $response->json());
+        }
+
+        return $token;
     }
 
     /**
@@ -240,7 +295,13 @@ class AnttCiotClient
      */
     protected function httpOptions(): array
     {
-        $options = [];
+        // O gateway de produção exige o certificado cliente em renegociação TLS —
+        // impossível em TLS 1.3 (negociado por padrão), o que faz o cURL nunca
+        // entregá-lo (401 CERTIFICADO_NAO_FORNECIDO). TLS 1.2 é obrigatório (spec §2.2).
+        $options = [
+            CURLOPT_SSLVERSION => CURL_SSLVERSION_TLSv1_2,
+            CURLOPT_HTTP_VERSION => CURL_HTTP_VERSION_1_1,
+        ];
 
         $certPath = config('ciot.cert_path');
 
@@ -251,6 +312,7 @@ class AnttCiotClient
                 $options['curl'] = [
                     CURLOPT_SSLCERT => $certPath,
                     CURLOPT_SSLCERTTYPE => 'P12',
+                    CURLOPT_SSLCERTPASSWD => (string) config('ciot.cert_password'),
                     CURLOPT_SSLKEYPASSWD => (string) config('ciot.cert_password'),
                 ];
             } else {

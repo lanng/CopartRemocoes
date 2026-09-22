@@ -119,6 +119,36 @@ class AnttCiotClientTest extends TestCase
         });
     }
 
+    public function test_generate_id_operacao_transporte_uses_the_aws_gateway_in_production(): void
+    {
+        config([
+            'ciot.company.cnpj' => '12563112000130',
+            'ciot.gerar_base_url' => 'https://gateway.test/api-ciot-prd/GeradorCIOT',
+        ]);
+
+        Http::fake([
+            'https://gateway.test/api-ciot-prd/GeradorCIOT/token' => Http::response(['token' => 'jwt-token'], 200),
+            'https://gateway.test/api-ciot-prd/GeradorCIOT/gerar' => Http::response([
+                'sucesso' => true,
+                'dados' => ['ciot' => '520032942169', 'cnpj' => '12.563.112/0001-30'],
+            ], 200),
+        ]);
+
+        $idOperacao = app(AnttCiotClient::class)->generateIdOperacaoTransporte();
+
+        $this->assertSame('520032942169', $idOperacao);
+
+        Http::assertSent(function ($request): bool {
+            if (str_contains($request->url(), '/token')) {
+                return $request->hasHeader('chave', 'test-api-key')
+                    && $request->data() === ['cpfCnpj' => '12563112000130', 'cnpj' => '12563112000130'];
+            }
+
+            return str_contains($request->url(), '/gerar')
+                && $request->hasHeader('Authorization', 'Bearer jwt-token');
+        });
+    }
+
     public function test_generate_id_operacao_transporte_posts_both_keys_and_returns_dados_ciot(): void
     {
         config(['ciot.company.cnpj' => '12563112000130']);
@@ -235,7 +265,7 @@ class AnttCiotClientTest extends TestCase
         Http::assertSent(fn ($request): bool => $request->data() === ['cpfCnpj' => '12563112000130']);
     }
 
-    public function test_http_options_include_the_certificate_for_pfx_files(): void
+    public function test_http_options_force_tls_1_2_and_include_the_certificate(): void
     {
         config([
             'ciot.cert_path' => '/tmp/cert.pfx',
@@ -246,6 +276,8 @@ class AnttCiotClientTest extends TestCase
 
         $options = $this->invokeHttpOptions($client);
 
+        $this->assertSame(CURL_SSLVERSION_TLSv1_2, $options[CURLOPT_SSLVERSION]);
+        $this->assertSame(CURL_HTTP_VERSION_1_1, $options[CURLOPT_HTTP_VERSION]);
         $this->assertSame('/tmp/cert.pfx', $options['curl'][CURLOPT_SSLCERT]);
         $this->assertSame('P12', $options['curl'][CURLOPT_SSLCERTTYPE]);
         $this->assertSame('secret', $options['curl'][CURLOPT_SSLKEYPASSWD]);
@@ -259,7 +291,10 @@ class AnttCiotClientTest extends TestCase
 
         config(['ciot.cert_path' => null]);
 
-        $this->assertSame([], $this->invokeHttpOptions($client));
+        $options = $this->invokeHttpOptions($client);
+
+        $this->assertSame(CURL_SSLVERSION_TLSv1_2, $options[CURLOPT_SSLVERSION]);
+        $this->assertArrayNotHasKey('curl', $options);
     }
 
     /**
