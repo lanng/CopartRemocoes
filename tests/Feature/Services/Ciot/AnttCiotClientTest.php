@@ -119,6 +119,23 @@ class AnttCiotClientTest extends TestCase
         });
     }
 
+    public function test_mensagem_decodes_json_list_messages_into_lines(): void
+    {
+        Http::fake([
+            'https://antt-hml.test/pefServices/api/DeclaracaoOperacaoTransporte' => Http::response([
+                'Codigo' => '211',
+                'Mensagem' => '["Rejeição: A placa PUC8E55 não pertence ao transportador de RNTRC 045963122, ou o mesmo não está ativo."]',
+            ], 200),
+        ]);
+
+        $response = app(AnttCiotClient::class)->declare([]);
+
+        $this->assertSame(
+            'Rejeição: A placa PUC8E55 não pertence ao transportador de RNTRC 045963122, ou o mesmo não está ativo.',
+            $response->mensagem(),
+        );
+    }
+
     public function test_generate_id_operacao_transporte_uses_the_aws_gateway_in_production(): void
     {
         config([

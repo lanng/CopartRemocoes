@@ -10,11 +10,13 @@ use App\Models\Ciot;
 use App\Models\CiotPayer;
 use App\Models\CiotVehicle;
 use App\Models\City;
+use App\Services\Ciot\AnttCiotException;
 use App\Services\Ciot\CancelCiot;
 use App\Services\Ciot\CepLookup;
 use App\Services\Ciot\CityDistanceCalculator;
 use App\Services\Ciot\CloseCiot;
 use App\Services\Ciot\EmitCiotDeclaration;
+use DomainException;
 use Filament\Forms;
 use Filament\Forms\Form;
 use Filament\Infolists\Components\Section;
@@ -25,6 +27,7 @@ use Filament\Resources\Resource;
 use Filament\Tables;
 use Filament\Tables\Table;
 use Illuminate\Database\Eloquent\Builder;
+use Throwable;
 
 class CiotResource extends Resource
 {
@@ -280,7 +283,9 @@ class CiotResource extends Resource
                             ->columnSpanFull(),
                         TextEntry::make('response')
                             ->label('Resposta bruta')
-                            ->formatStateUsing(fn ($state): string => json_encode($state, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE))
+                            ->state(fn (Ciot $record): ?string => filled($record->response)
+                                ? json_encode($record->response, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE)
+                                : null)
                             ->fontFamily('mono')
                             ->columnSpanFull(),
                     ]),
@@ -351,9 +356,30 @@ class CiotResource extends Resource
                     ->modalHeading('Emitir CIOT na ANTT')
                     ->modalDescription('O CIOT será enviado para a ANTT em segundo plano com retry automático.')
                     ->action(function (Ciot $record): void {
-                        app(EmitCiotDeclaration::class)->handle($record);
-                    })
-                    ->successNotificationTitle('Emissão enfileirada.'),
+                        try {
+                            app(EmitCiotDeclaration::class)->handle($record);
+                        } catch (AnttCiotException|DomainException $exception) {
+                            Notification::make()
+                                ->title('Falha ao emitir o CIOT')
+                                ->body($exception->getMessage())
+                                ->danger()
+                                ->send();
+
+                            return;
+                        } catch (Throwable $exception) {
+                            report($exception);
+
+                            Notification::make()
+                                ->title('Erro inesperado ao emitir o CIOT')
+                                ->body('Tente novamente; se persistir, contate o suporte.')
+                                ->danger()
+                                ->send();
+
+                            return;
+                        }
+
+                        Notification::make()->title('Emissão enfileirada.')->success()->send();
+                    }),
                 Tables\Actions\Action::make('cancel')
                     ->label('Cancelar')
                     ->icon('heroicon-o-x-circle')
@@ -367,9 +393,30 @@ class CiotResource extends Resource
                     ])
                     ->modalHeading('Cancelar CIOT')
                     ->action(function (Ciot $record, array $data): void {
-                        app(CancelCiot::class)->handle($record, (string) $data['motivo']);
-                    })
-                    ->failureNotificationTitle('Falha ao cancelar.'),
+                        try {
+                            app(CancelCiot::class)->handle($record, (string) $data['motivo']);
+                        } catch (AnttCiotException|DomainException $exception) {
+                            Notification::make()
+                                ->title('Falha ao cancelar o CIOT')
+                                ->body($exception->getMessage())
+                                ->danger()
+                                ->send();
+
+                            return;
+                        } catch (Throwable $exception) {
+                            report($exception);
+
+                            Notification::make()
+                                ->title('Erro inesperado ao cancelar o CIOT')
+                                ->body('Tente novamente; se persistir, contate o suporte.')
+                                ->danger()
+                                ->send();
+
+                            return;
+                        }
+
+                        Notification::make()->title('CIOT cancelado.')->success()->send();
+                    }),
                 Tables\Actions\Action::make('close')
                     ->label('Encerrar')
                     ->icon('heroicon-o-check-circle')
@@ -379,10 +426,30 @@ class CiotResource extends Resource
                     ->modalHeading('Encerrar CIOT')
                     ->modalDescription('O encerramento marca a operação como concluída na ANTT. É a rotina feita 1-2 dias após a emissão.')
                     ->action(function (Ciot $record): void {
-                        app(CloseCiot::class)->handle($record);
-                    })
-                    ->successNotificationTitle('CIOT encerrado.')
-                    ->failureNotificationTitle('Falha ao encerrar.'),
+                        try {
+                            app(CloseCiot::class)->handle($record);
+                        } catch (AnttCiotException|DomainException $exception) {
+                            Notification::make()
+                                ->title('Falha ao encerrar o CIOT')
+                                ->body($exception->getMessage())
+                                ->danger()
+                                ->send();
+
+                            return;
+                        } catch (Throwable $exception) {
+                            report($exception);
+
+                            Notification::make()
+                                ->title('Erro inesperado ao encerrar o CIOT')
+                                ->body('Tente novamente; se persistir, contate o suporte.')
+                                ->danger()
+                                ->send();
+
+                            return;
+                        }
+
+                        Notification::make()->title('CIOT encerrado.')->success()->send();
+                    }),
                 Tables\Actions\DeleteAction::make()
                     ->label('Excluir')
                     ->visible(fn (Ciot $record): bool => in_array($record->status, [CiotStatusEnum::DRAFT, CiotStatusEnum::FAILED, CiotStatusEnum::CANCELED], true)),

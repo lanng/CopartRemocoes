@@ -232,6 +232,52 @@ class CiotResourceTest extends TestCase
             ->assertFormComponentActionExists('distance_km', 'calcularDistancia');
     }
 
+    public function test_the_view_page_renders_a_record_with_nested_responses(): void
+    {
+        $ciot = Ciot::factory()->issued()->create([
+            'status' => CiotStatusEnum::CLOSED,
+            'closed_at' => now(),
+            'response' => [
+                'Codigo' => '110',
+                'Mensagem' => 'Advertência: distância inferior ao calculado.',
+                'Protocolo' => '5200329566385921',
+                'CodigoVerificador' => '5921',
+                'AvisoTransportador' => null,
+                'IdOperacaoTransporte' => '520032956638',
+                'encerramento' => [
+                    'CodigoIdentificacaoOperacao' => '5200329566385921',
+                    'DataEncerramento' => '2026-09-22T17:20:02',
+                    'Codigo' => '110',
+                    'Protocolo' => 'T98000002282767',
+                ],
+            ],
+        ]);
+
+        Livewire::test(ViewCiot::class, ['record' => $ciot->id])
+            ->assertSuccessful()
+            ->assertSee('T98000002282767');
+    }
+
+    public function test_the_cancel_action_shows_a_formal_notification_on_antt_rejection(): void
+    {
+        $ciot = Ciot::factory()->issued()->create();
+
+        Http::fake([
+            'https://antt-hml.test/pefServices/api/CancelamentoOperacaoTransporte' => Http::response([
+                'CodigoIdentificacaoOperacao' => $ciot->fullNumber(),
+                'DataCancelamento' => null,
+                'Codigo' => '220',
+                'Mensagem' => '["Rejeição: Nao foi encontrada nenhuma Operaçao de Transporte com os dados informados."]',
+            ], 200),
+        ]);
+
+        Livewire::test(ListCiots::class)
+            ->callTableAction('cancel', $ciot, data: ['motivo' => 'motivo de teste'])
+            ->assertNotified('Falha ao cancelar o CIOT');
+
+        $this->assertSame(CiotStatusEnum::ISSUED, $ciot->refresh()->status);
+    }
+
     public function test_the_navigation_badge_counts_open_ciots(): void
     {
         Ciot::factory()->issued()->create();

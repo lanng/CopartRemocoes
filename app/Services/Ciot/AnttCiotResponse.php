@@ -27,9 +27,19 @@ class AnttCiotResponse
             return null;
         }
 
+        // A ANTT devolve as validações como lista JSON (às vezes stringificada);
+        // quebramos em linhas para exibição formal ao operador.
+        if (is_string($mensagem) && str_starts_with($mensagem, '[')) {
+            $decodificada = json_decode($mensagem, true);
+
+            if (is_array($decodificada)) {
+                $mensagem = $decodificada;
+            }
+        }
+
         if (is_array($mensagem)) {
-            $mensagem = implode('; ', array_map(
-                fn ($part): string => is_scalar($part) ? (string) $part : json_encode($part, JSON_UNESCAPED_UNICODE),
+            $mensagem = implode("\n", array_map(
+                fn ($part): string => is_scalar($part) ? trim((string) $part) : json_encode($part, JSON_UNESCAPED_UNICODE),
                 $mensagem,
             ));
         }
