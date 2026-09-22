@@ -11,6 +11,8 @@ use App\Jobs\EmitCiotJob;
 use App\Models\Ciot;
 use App\Models\CiotPayer;
 use App\Models\CiotVehicle;
+use App\Models\City;
+use App\Models\CityDistance;
 use App\Models\User;
 use Filament\Facades\Filament;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -170,6 +172,63 @@ class CiotResourceTest extends TestCase
                 'origin.uf' => 'SP',
                 'origin.ibge' => '3508504',
             ]);
+    }
+
+    public function test_the_distance_action_fills_the_km_from_openrouteservice(): void
+    {
+        config(['ciot.distance.api_key' => 'test-key']);
+
+        $origin = City::factory()->create([
+            'ibge_code' => '3534609',
+            'name' => 'Osvaldo Cruz',
+            'state' => 'SP',
+            'latitude' => -21.7972,
+            'longitude' => -50.9736,
+        ]);
+        $destination = City::factory()->create([
+            'ibge_code' => '3508504',
+            'name' => 'Caçapava',
+            'state' => 'SP',
+            'latitude' => -23.1006,
+            'longitude' => -45.6911,
+        ]);
+
+        Http::fake([
+            'https://api.openrouteservice.org/v2/directions/driving-car' => Http::response([
+                'routes' => [
+                    ['summary' => ['distance' => 716254.8, 'duration' => 32100.0]],
+                ],
+            ], 200),
+        ]);
+
+        Livewire::test(CreateCiot::class)
+            ->fillForm([
+                'origin.ibge' => $origin->ibge_code,
+                'destination.ibge' => $destination->ibge_code,
+            ])
+            ->callFormComponentAction('distance_km', 'calcularDistancia')
+            ->assertHasNoFormComponentActionErrors()
+            ->assertFormSet(['distance_km' => 716.3]);
+
+        $this->assertDatabaseHas(CityDistance::class, [
+            'origin_ibge' => $origin->ibge_code,
+            'destination_ibge' => $destination->ibge_code,
+            'km' => 716.3,
+        ]);
+    }
+
+    public function test_the_distance_action_warns_when_coordinates_are_missing(): void
+    {
+        $origin = City::factory()->withoutCoordinates()->create();
+        $destination = City::factory()->create();
+
+        Livewire::test(CreateCiot::class)
+            ->fillForm([
+                'origin.ibge' => $origin->ibge_code,
+                'destination.ibge' => $destination->ibge_code,
+            ])
+            ->callFormComponentAction('distance_km', 'calcularDistancia')
+            ->assertFormComponentActionExists('distance_km', 'calcularDistancia');
     }
 
     public function test_the_navigation_badge_counts_open_ciots(): void
