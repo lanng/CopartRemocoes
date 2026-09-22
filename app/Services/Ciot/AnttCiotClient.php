@@ -145,11 +145,16 @@ class AnttCiotClient
         ]);
     }
 
-    public function encerrar(string $ciot): AnttCiotResponse
+    public function encerrar(string $ciot, ?float $pesoCarga = null): AnttCiotResponse
     {
-        return $this->businessPost($this->path('close'), [
-            'CodigoIdentificacaoOperacao' => $ciot,
-        ]);
+        $payload = ['CodigoIdentificacaoOperacao' => $ciot];
+
+        // A produção exige PesoCarga no encerramento de operações de lotação.
+        if ($pesoCarga !== null) {
+            $payload['PesoCarga'] = $pesoCarga;
+        }
+
+        return $this->businessPost($this->path('close'), $payload);
     }
 
     /**

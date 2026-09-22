@@ -140,7 +140,10 @@ class CiotCancelAndCloseTest extends TestCase
 
         Http::assertSent(function ($request) use ($ciot): bool {
             return str_contains($request->url(), '/api/EncerramentoOperacaoTransporte')
-                && $request->data() === ['CodigoIdentificacaoOperacao' => $ciot->fullNumber()];
+                && $request->data() === [
+                    'CodigoIdentificacaoOperacao' => $ciot->fullNumber(),
+                    'PesoCarga' => 20000.0,
+                ];
         });
     }
 

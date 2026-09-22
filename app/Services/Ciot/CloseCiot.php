@@ -17,7 +17,13 @@ class CloseCiot
             throw new DomainException('Somente CIOTs emitidos podem ser encerrados.');
         }
 
-        $response = app(AnttCiotClient::class)->encerrar($fullNumber);
+        $pesoCarga = $ciot->cargo_weight_kg !== null ? (float) $ciot->cargo_weight_kg : null;
+
+        if ($pesoCarga === null) {
+            throw new DomainException('O encerramento exige o peso da carga: preencha o peso no CIOT antes de encerrar.');
+        }
+
+        $response = app(AnttCiotClient::class)->encerrar($fullNumber, $pesoCarga);
 
         if (! $response->isSuccess() || blank($response->dataEncerramento())) {
             throw new AnttCiotException(
