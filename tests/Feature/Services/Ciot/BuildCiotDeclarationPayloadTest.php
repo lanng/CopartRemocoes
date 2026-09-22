@@ -87,7 +87,7 @@ class BuildCiotDeclarationPayloadTest extends TestCase
         $this->assertSame(['CodigoMunicipioDestino' => 3508504, 'CepDestino' => '12286140'], $route['Destino']);
         $this->assertSame(716.0, $route['DistanciaPercorrida']);
 
-        $this->assertSame(13, $payload['DadosCarga']['CodigoNaturezaCarga']);
+        $this->assertSame(1, $payload['DadosCarga']['CodigoNaturezaCarga']);
         $this->assertSame(5, $payload['DadosCarga']['CodigoTipoCarga']);
         $this->assertSame(20000.0, $payload['DadosCarga']['PesoCarga']);
         $this->assertSame([], $payload['DadosCarga']['ContratantesCargaFrac']);
@@ -119,8 +119,8 @@ class BuildCiotDeclarationPayloadTest extends TestCase
 
         $payload = app(BuildCiotDeclarationPayload::class)->handle($ciot);
 
-        $this->assertSame(8, $payload['DadosCarga']['CodigoNaturezaCarga']);
-        $this->assertSame(8, $payload['DadosCarga']['CodigoTipoCarga']);
+        $this->assertSame(3, $payload['DadosCarga']['CodigoNaturezaCarga']);
+        $this->assertSame(2, $payload['DadosCarga']['CodigoTipoCarga']);
         $this->assertSame('0002', $payload['InfPagamento'][0]['NumeroAgencia']);
         $this->assertSame('222', $payload['InfPagamento'][0]['NumeroConta']);
     }

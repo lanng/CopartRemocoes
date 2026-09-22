@@ -16,24 +16,27 @@ enum CiotLineEnum: string
     }
 
     /**
-     * Natureza da carga (tabela oficial do DCS, 4 dígitos).
+     * Natureza da carga (spec §2.1): a API de produção só tem os códigos 1–3
+     * carregados hoje. Remoção = Carga Geral (histórico de produção); tanque =
+     * Granel Líquido, a categoria fisicamente correta disponível. Migrar para
+     * 0013/0008 quando a ANTT publicar os códigos.
      */
     public function naturezaCarga(): string
     {
         return match ($this) {
-            self::VehicleRemoval => '0013',
-            self::TankAlcohol => '0008',
+            self::VehicleRemoval => '0001',
+            self::TankAlcohol => '0003',
         };
     }
 
     /**
-     * Tipo de carga: 5 = carga geral, 8 = perigosa granel líquido.
+     * Tipo de carga pareado à natureza: 5 = carga geral, 2 = granel líquido.
      */
     public function tipoCarga(): int
     {
         return match ($this) {
             self::VehicleRemoval => 5,
-            self::TankAlcohol => 8,
+            self::TankAlcohol => 2,
         };
     }
 
