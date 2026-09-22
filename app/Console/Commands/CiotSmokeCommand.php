@@ -2,6 +2,7 @@
 
 namespace App\Console\Commands;
 
+use App\Enums\CiotStatusEnum;
 use App\Models\Ciot;
 use App\Models\CiotPayer;
 use App\Models\CiotVehicle;
@@ -30,7 +31,7 @@ class CiotSmokeCommand extends Command
         {--line=vehicle_removal : Linha usada no payload (vehicle_removal ou tank_alcohol)}
         {--force : Permite rodar mesmo com CIOT_ENV=producao}';
 
-    protected $description = 'Testa o ciclo completo de CIOT na ANTT (token, gerar, cancelar, encerrar) em homologação';
+    protected $description = 'Testa o ciclo completo de CIOT na ANTT (ID, declarar, cancelar, encerrar) em homologação';
 
     public function handle(AnttCiotClient $client): int
     {
@@ -53,9 +54,7 @@ class CiotSmokeCommand extends Command
             }
 
             if ($only === 'generate') {
-                $this->generateOnly($client);
-
-                return self::SUCCESS;
+                return $this->declareTestCiot($client) !== null ? self::SUCCESS : self::FAILURE;
             }
 
             if ($only === 'cancel') {
@@ -70,11 +69,7 @@ class CiotSmokeCommand extends Command
                 return self::SUCCESS;
             }
 
-            $this->generateAndClose($client);
-
-            usleep(1_100_000); // id_operacao_transporte tem resolução de 1s; evita colisão de chave única
-
-            $this->generateAndCancel($client);
+            return $this->fullCycle($client);
         } catch (AnttCiotException $exception) {
             $this->error('[ANTT] '.$exception->getMessage());
 
@@ -84,66 +79,63 @@ class CiotSmokeCommand extends Command
 
             return self::FAILURE;
         }
+    }
+
+    /**
+     * Ciclo completo: declaração + (se autorizada) encerramento e cancelamento.
+     * Em homologação, receber exatamente a rejeição B15/B83 ("automotor") é o
+     * fim de linha esperado: prova que todo o resto do payload passou (spec §2.1).
+     */
+    protected function fullCycle(AnttCiotClient $client): int
+    {
+        $this->info('=== Declaração de teste ===');
+
+        $ciot = $this->declareTestCiot($client);
+
+        if ($ciot === null) {
+            return self::FAILURE;
+        }
+
+        if ($ciot->status === CiotStatusEnum::ISSUED) {
+            $this->info('=== Encerramento ===');
+
+            try {
+                app(CloseCiot::class)->handle($ciot);
+                $this->info('Encerrado. Resposta: '.json_encode($ciot->response['encerramento'] ?? [], JSON_UNESCAPED_UNICODE));
+            } catch (AnttCiotException $exception) {
+                $this->warn($this->describeAnttFailure('Encerramento', $exception));
+            }
+
+            $this->info('=== Cancelamento ===');
+
+            try {
+                app(CancelCiot::class)->handle($ciot, 'CIOT de teste - smoke');
+                $this->info('Cancelado.');
+            } catch (AnttCiotException $exception) {
+                $this->warn($this->describeAnttFailure('Cancelamento', $exception));
+            }
+
+            return self::SUCCESS;
+        }
+
+        // Fim de linha da homologação (B15/B83): exercita cancelar/encerrar com o
+        // IdOperacaoTransporte gerado, só como diagnóstico das rotas.
+        $idOperacao = (string) $ciot->id_operacao_transporte;
+
+        $this->info("=== Diagnóstico: cancelar/encerrar com o ID gerado ({$idOperacao}) ===");
+
+        $cancelResponse = $client->cancel($idOperacao, 'CIOT de teste - smoke');
+        $this->line('Cancelamento: '.json_encode($cancelResponse->body, JSON_UNESCAPED_UNICODE));
+
+        $closeResponse = $client->encerrar($idOperacao);
+        $this->line('Encerramento: '.json_encode($closeResponse->body, JSON_UNESCAPED_UNICODE));
 
         return self::SUCCESS;
     }
 
-    protected function generateAndClose(AnttCiotClient $client): void
-    {
-        $this->info('=== Ciclo 1: gerar + encerrar ===');
-
-        $ciot = $this->declareTestCiot($client);
-
-        if ($ciot === null) {
-            return;
-        }
-
-        try {
-            app(CloseCiot::class)->handle($ciot);
-            $this->info('Encerrado. Resposta: '.json_encode($ciot->response, JSON_UNESCAPED_UNICODE));
-        } catch (AnttCiotException $exception) {
-            $this->warn($this->describeAnttFailure('Encerramento', $exception));
-        }
-    }
-
-    protected function generateAndCancel(AnttCiotClient $client): void
-    {
-        $this->info('=== Ciclo 2: gerar + cancelar ===');
-
-        $ciot = $this->declareTestCiot($client);
-
-        if ($ciot === null) {
-            return;
-        }
-
-        try {
-            app(CancelCiot::class)->handle($ciot, 'CIOT de teste - smoke');
-            $this->info('Cancelado. Resposta: '.json_encode($ciot->response, JSON_UNESCAPED_UNICODE));
-        } catch (AnttCiotException $exception) {
-            $this->warn($this->describeAnttFailure('Cancelamento', $exception));
-        }
-    }
-
-    protected function describeAnttFailure(string $operation, AnttCiotException $exception): string
-    {
-        if ($exception->isNotFound()) {
-            return sprintf(
-                '%s: rota não exposta na homologação (config: ciot.paths). Ajuste o path quando a ANTT publicar.',
-                $operation,
-            );
-        }
-
-        return $operation.' falhou: '.$exception->getMessage();
-    }
-
-    protected function generateOnly(AnttCiotClient $client): void
-    {
-        $this->declareTestCiot($client);
-    }
-
     protected function cancelOnly(AnttCiotClient $client): void
     {
-        $ciotNumber = $this->ask('Número do CIOT (16 dígitos)');
+        $ciotNumber = $this->ask('CodigoIdentificacaoOperacao do CIOT');
 
         $response = $client->cancel((string) $ciotNumber, 'CIOT de teste - smoke');
         $this->line(json_encode($response->body, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE));
@@ -151,7 +143,7 @@ class CiotSmokeCommand extends Command
 
     protected function closeOnly(AnttCiotClient $client): void
     {
-        $ciotNumber = $this->ask('Número do CIOT (16 dígitos)');
+        $ciotNumber = $this->ask('CodigoIdentificacaoOperacao do CIOT');
 
         $response = $client->encerrar((string) $ciotNumber);
         $this->line(json_encode($response->body, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE));
@@ -159,6 +151,7 @@ class CiotSmokeCommand extends Command
 
     /**
      * Emite um CIOT de teste na homologação com os dados fixos da rota validada.
+     * Retorna null apenas quando faltar pré-requisito local (pátio/veículo).
      */
     protected function declareTestCiot(AnttCiotClient $client): ?Ciot
     {
@@ -197,11 +190,22 @@ class CiotSmokeCommand extends Command
             'travel_end_at' => now()->addDays(2)->endOfDay(),
         ]);
 
+        try {
+            $idOperacaoTransporte = $client->generateIdOperacaoTransporte();
+            $this->info("IdOperacaoTransporte emitido pela ANTT: {$idOperacaoTransporte}");
+        } catch (AnttCiotException $exception) {
+            $this->error('Falha ao obter o IdOperacaoTransporte: '.$exception->getMessage());
+            $ciot->forceFill(['status' => 'failed', 'error_message' => $exception->getMessage()])->save();
+
+            return $ciot;
+        }
+
         $payload = app(BuildCiotDeclarationPayload::class)->handle($ciot);
+        $payload['IdOperacaoTransporte'] = $idOperacaoTransporte;
 
         $ciot->forceFill([
             'payload' => $payload,
-            'id_operacao_transporte' => $payload['IdOperacaoTransporte'],
+            'id_operacao_transporte' => $idOperacaoTransporte,
             'status' => 'pending',
         ])->save();
 
@@ -209,31 +213,37 @@ class CiotSmokeCommand extends Command
 
         $this->line('Resposta bruta: '.json_encode($response->body, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE));
 
-        if (! $response->isSuccess()) {
+        if ($response->isSuccess()) {
             $ciot->forceFill([
-                'status' => 'failed',
-                'error_code' => $response->codigo(),
-                'error_message' => $response->mensagem(),
+                'status' => 'issued',
+                'ciot_number' => $response->identificacaoOperacao(),
+                'verifier_code' => $response->codigoVerificador(),
+                'protocol' => $response->protocolo(),
+                'carrier_notice' => $response->avisoTransportador(),
+                'issued_at' => now(),
                 'response' => $response->body,
             ])->save();
 
-            $this->error('Geração rejeitada pela ANTT (código '.$response->codigo().').');
+            $protocolo = filled($response->protocolo()) ? " (protocolo {$response->protocolo()})" : '';
+            $this->info("CIOT gerado: {$response->ciotNumber()}{$protocolo}");
 
-            return null;
+            return $ciot;
         }
 
+        $mensagem = (string) $response->mensagem();
+
         $ciot->forceFill([
-            'status' => 'issued',
-            'ciot_number' => $response->identificacaoOperacao(),
-            'verifier_code' => $response->codigoVerificador(),
-            'protocol' => $response->protocolo(),
-            'carrier_notice' => $response->avisoTransportador(),
-            'issued_at' => now(),
+            'status' => 'failed',
+            'error_code' => $response->codigo(),
+            'error_message' => $mensagem,
             'response' => $response->body,
         ])->save();
 
-        $protocolo = filled($response->protocolo()) ? " (protocolo {$response->protocolo()})" : '';
-        $this->info("CIOT gerado: {$response->ciotNumber()}{$protocolo}");
+        if (str_contains($mensagem, 'automotor') || str_contains($mensagem, 'não pertence ao transportador')) {
+            $this->info('✔ Rejeição B15/B83 recebida — fim de linha esperado em homologação: todo o restante do payload passou.');
+        } else {
+            $this->error('Declaração rejeitada pela ANTT (código '.$response->codigo().').');
+        }
 
         return $ciot;
     }
@@ -258,5 +268,17 @@ class CiotSmokeCommand extends Command
         }
 
         return $vehicle;
+    }
+
+    protected function describeAnttFailure(string $operation, AnttCiotException $exception): string
+    {
+        if ($exception->isNotFound()) {
+            return sprintf(
+                '%s: rota não exposta na homologação (config: ciot.paths). Ajuste o path quando a ANTT publicar.',
+                $operation,
+            );
+        }
+
+        return $operation.' falhou: '.$exception->getMessage();
     }
 }

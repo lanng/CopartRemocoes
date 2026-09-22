@@ -19,6 +19,7 @@ class BuildCiotDeclarationPayloadTest extends TestCase
         parent::setUp();
 
         config([
+            'ciot.natureza_fallback' => false,
             'ciot.company' => [
                 'cnpj' => '12563112000130',
                 'rntrc' => '045963122',
@@ -63,14 +64,12 @@ class BuildCiotDeclarationPayloadTest extends TestCase
         $payload = app(BuildCiotDeclarationPayload::class)->handle($ciot);
 
         $this->assertSame('12563112000130', $payload['cpfCnpj']);
-        $this->assertMatchesRegularExpression('/^[A-Z0-9]{12}$/', $payload['IdOperacaoTransporte']);
+        $this->assertArrayNotHasKey('IdOperacaoTransporte', $payload);
         $this->assertSame(1000.0, $payload['ValorFrete']);
         $this->assertFalse($payload['IndContingencia']);
         $this->assertSame($ciot->travel_start_at->format('Y-m-d'), $payload['DataInicioViagem']);
         $this->assertSame($ciot->travel_end_at->format('Y-m-d'), $payload['DataFimViagem']);
-        $this->assertSame(1, $payload['Veiculos'][0]['TipoVeiculo']);
-        $this->assertSame(2, $payload['Veiculos'][1]['TipoVeiculo']);
-        $this->assertSame(3534609, $payload['OrigemDestino'][0]['Origem']['CodigoMunicipio']);
+        $this->assertSame(3534609, $payload['OrigemDestino'][0]['Origem']['CodigoMunicipioOrigem']);
         $this->assertSame(1, $payload['TipoOperacao']);
         $this->assertSame('12563112000130', $payload['CpfCnpjContratado']);
         $this->assertSame('045963122', $payload['RNTRCContratado']);
@@ -79,13 +78,13 @@ class BuildCiotDeclarationPayloadTest extends TestCase
         $this->assertSame('14517191000410', $payload['CpfCnpjDestinatario']);
 
         $this->assertSame([
-            ['Placa' => 'PUC8E55', 'RNTRCVeiculo' => '045963122', 'NumeroEixos' => 3, 'TipoVeiculo' => 1],
-            ['Placa' => 'TIX7D32', 'RNTRCVeiculo' => '045963122', 'NumeroEixos' => 2, 'TipoVeiculo' => 2],
+            ['Placa' => 'PUC8E55', 'rntrc' => '045963122', 'numeroEixos' => 3],
+            ['Placa' => 'TIX7D32', 'rntrc' => '045963122', 'numeroEixos' => 2],
         ], $payload['Veiculos']);
 
         $route = $payload['OrigemDestino'][0];
-        $this->assertSame(['CodigoMunicipio' => 3534609, 'Cep' => '17700000'], $route['Origem']);
-        $this->assertSame(['CodigoMunicipio' => 3508504, 'Cep' => '12286140'], $route['Destino']);
+        $this->assertSame(['CodigoMunicipioOrigem' => 3534609, 'CepOrigem' => '17700000'], $route['Origem']);
+        $this->assertSame(['CodigoMunicipioDestino' => 3508504, 'CepDestino' => '12286140'], $route['Destino']);
         $this->assertSame(716.0, $route['DistanciaPercorrida']);
 
         $this->assertSame(13, $payload['DadosCarga']['CodigoNaturezaCarga']);
@@ -124,6 +123,18 @@ class BuildCiotDeclarationPayloadTest extends TestCase
         $this->assertSame(8, $payload['DadosCarga']['CodigoTipoCarga']);
         $this->assertSame('0002', $payload['InfPagamento'][0]['NumeroAgencia']);
         $this->assertSame('222', $payload['InfPagamento'][0]['NumeroConta']);
+    }
+
+    public function test_natureza_fallback_switches_to_code_one(): void
+    {
+        config(['ciot.natureza_fallback' => true]);
+
+        $ciot = Ciot::factory()->create();
+
+        $payload = app(BuildCiotDeclarationPayload::class)->handle($ciot);
+
+        $this->assertSame(1, $payload['DadosCarga']['CodigoNaturezaCarga']);
+        $this->assertSame(1, $payload['DadosCarga']['CodigoTipoCarga']);
     }
 
     public function test_fractioned_operation_includes_additional_payers(): void

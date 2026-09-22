@@ -59,4 +59,8 @@ return [
         'composicao_veicular' => (bool) env('CIOT_COMPOSICAO_VEICULAR', true),
     ],
 
+    // A base de naturezas da homologação só tem o código 1 (base defasada).
+    // Ative apenas em homologação; em produção deve ser false (13 remoção / 8 tanque).
+    'natureza_fallback' => (bool) env('CIOT_NATUREZA_FALLBACK', false),
+
 ];

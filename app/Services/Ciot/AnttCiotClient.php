@@ -26,6 +26,136 @@ class AnttCiotClient
      */
     protected const SENSITIVE_KEYS = ['numeroconta', 'numeroagencia', 'agencia', 'conta'];
 
+    /**
+     * Emite o IdOperacaoTransporte da próxima declaração. O ID NÃO é inventado
+     * pelo cliente: o servidor ANTT controla a sequência global (spec §2.1).
+     * Rota `/gerar`, apenas mTLS — sem Bearer/token.
+     *
+     * @throws AnttCiotException
+     */
+    public function generateIdOperacaoTransporte(): string
+    {
+        $cnpj = (string) config('ciot.company.cnpj');
+
+        try {
+            $response = Http::withOptions($this->httpOptions())
+                ->withHeaders(['Accept' => 'application/json'])
+                ->timeout((int) config('ciot.timeout'))
+                ->post($this->url($this->path('simplified_generate')), [
+                    'cpfCnpj' => $cnpj,
+                    'cnpj' => $cnpj,
+                ]);
+        } catch (ConnectionException $exception) {
+            $this->log('error', 'Falha de conexão ao gerar IdOperacaoTransporte na ANTT.', ['error' => $exception->getMessage()]);
+
+            throw new AnttCiotException('Falha de conexão com a ANTT: '.$exception->getMessage(), httpStatus: 0);
+        }
+
+        if ($response->failed()) {
+            $this->log('error', 'Geração de IdOperacaoTransporte rejeitada.', [
+                'status' => $response->status(),
+                'body' => $response->body(),
+            ]);
+
+            throw new AnttCiotException(
+                sprintf('Geração de IdOperacaoTransporte falhou (HTTP %d): %s', $response->status(), $response->body()),
+                httpStatus: $response->status(),
+            );
+        }
+
+        $idOperacao = (string) ($response->json('Dados.CIOT') ?? $response->json('dados.ciot') ?? '');
+
+        if ($idOperacao === '') {
+            throw new AnttCiotException('Resposta do /gerar sem Dados.CIOT.', body: (array) $response->json());
+        }
+
+        $this->log('info', 'IdOperacaoTransporte emitido pela ANTT.', ['tamanho' => strlen($idOperacao)]);
+
+        return $idOperacao;
+    }
+
+    /**
+     * @param  array<string, mixed>  $payload
+     */
+    public function declare(array $payload): AnttCiotResponse
+    {
+        return $this->businessPost($this->path('declare'), $payload);
+    }
+
+    public function cancel(string $ciot, string $motivo): AnttCiotResponse
+    {
+        return $this->businessPost($this->path('cancel'), [
+            'CodigoIdentificacaoOperacao' => $ciot,
+            'MotivoCancelamento' => $motivo,
+        ]);
+    }
+
+    public function encerrar(string $ciot): AnttCiotResponse
+    {
+        return $this->businessPost($this->path('close'), [
+            'CodigoIdentificacaoOperacao' => $ciot,
+        ]);
+    }
+
+    /**
+     * Geração simplificada (wrapper oficial da DLL) — uso diagnóstico.
+     */
+    public function simplifiedGenerate(string $cpfCnpj): AnttCiotResponse
+    {
+        try {
+            $response = Http::withOptions($this->httpOptions())
+                ->withHeaders(['Accept' => 'application/json'])
+                ->timeout((int) config('ciot.timeout'))
+                ->post($this->url($this->path('simplified_generate')), ['cpfCnpj' => $cpfCnpj]);
+        } catch (ConnectionException $exception) {
+            throw new AnttCiotException('Falha de conexão com a ANTT: '.$exception->getMessage(), httpStatus: 0);
+        }
+
+        if ($response->serverError()) {
+            throw new AnttCiotException(
+                sprintf('Erro de servidor ANTT (HTTP %d): %s', $response->status(), $response->body()),
+                httpStatus: $response->status(),
+                body: (array) $response->json(),
+            );
+        }
+
+        return new AnttCiotResponse($response->status(), (array) $response->json());
+    }
+
+    /**
+     * Rotas canônicas `/api/*`: mTLS basta (spec §2.1); se a ANTT devolver 401,
+     * refaz com Bearer (camada de token usada por Instituições de Pagamento).
+     *
+     * @param  array<string, mixed>  $payload
+     */
+    protected function businessPost(string $path, array $payload): AnttCiotResponse
+    {
+        try {
+            $response = $this->post($path, $payload, null);
+
+            if ($response->status() === 401) {
+                $response = $this->post($path, $payload, $this->authenticate());
+            }
+        } catch (ConnectionException $exception) {
+            $this->log('error', 'Falha de conexão com a ANTT.', [
+                'path' => $path,
+                'error' => $exception->getMessage(),
+            ]);
+
+            throw new AnttCiotException('Falha de conexão com a ANTT: '.$exception->getMessage(), httpStatus: 0);
+        }
+
+        if ($response->serverError()) {
+            throw new AnttCiotException(
+                sprintf('Erro de servidor ANTT (HTTP %d): %s', $response->status(), $response->body()),
+                httpStatus: $response->status(),
+                body: (array) $response->json(),
+            );
+        }
+
+        return new AnttCiotResponse($response->status(), (array) $response->json());
+    }
+
     public function authenticate(bool $force = false): string
     {
         $cacheKey = $this->tokenCacheKey();
@@ -86,83 +216,21 @@ class AnttCiotClient
     /**
      * @param  array<string, mixed>  $payload
      */
-    public function declare(array $payload): AnttCiotResponse
+    protected function post(string $path, array $payload, ?string $token): Response
     {
-        return $this->authenticatedPost($this->path('declare'), $payload);
-    }
+        $headers = ['Accept' => 'application/json'];
 
-    public function cancel(string $ciot, string $motivo): AnttCiotResponse
-    {
-        return $this->authenticatedPost($this->path('cancel'), [
-            'CodigoIdentificacaoOperacao' => $ciot,
-            'MotivoCancelamento' => $motivo,
-        ]);
-    }
-
-    public function encerrar(string $ciot): AnttCiotResponse
-    {
-        return $this->authenticatedPost($this->path('close'), [
-            'CodigoIdentificacaoOperacao' => $ciot,
-        ]);
-    }
-
-    /**
-     * Geração simplificada (wrapper oficial da DLL, `/gerar`) — uso diagnóstico;
-     * a emissão canônica vai por declare().
-     */
-    public function simplifiedGenerate(string $cpfCnpj): AnttCiotResponse
-    {
-        return $this->authenticatedPost($this->path('simplified_generate'), [
-            'cpfCnpj' => $cpfCnpj,
-        ]);
-    }
-
-    /**
-     * @param  array<string, mixed>  $payload
-     */
-    protected function authenticatedPost(string $path, array $payload): AnttCiotResponse
-    {
-        try {
-            $response = $this->postWithToken($path, $payload, $this->authenticate());
-
-            if (in_array($response->status(), [401, 403], true)) {
-                $response = $this->postWithToken($path, $payload, $this->authenticate(force: true));
-            }
-        } catch (ConnectionException $exception) {
-            $this->log('error', 'Falha de conexão com a ANTT.', [
-                'path' => $path,
-                'error' => $exception->getMessage(),
-            ]);
-
-            throw new AnttCiotException('Falha de conexão com a ANTT: '.$exception->getMessage(), httpStatus: 0);
+        if ($token !== null) {
+            $headers['Authorization'] = 'Bearer '.$token;
         }
 
-        if ($response->serverError()) {
-            throw new AnttCiotException(
-                sprintf('Erro de servidor ANTT (HTTP %d): %s', $response->status(), $response->body()),
-                httpStatus: $response->status(),
-                body: (array) $response->json(),
-            );
-        }
-
-        return new AnttCiotResponse($response->status(), (array) $response->json());
-    }
-
-    /**
-     * @param  array<string, mixed>  $payload
-     */
-    protected function postWithToken(string $path, array $payload, string $token): Response
-    {
         $this->log('info', 'Enviando requisição à ANTT.', [
             'path' => $path,
             'payload' => $this->maskPayload($payload),
         ]);
 
         return Http::withOptions($this->httpOptions())
-            ->withHeaders([
-                'Accept' => 'application/json',
-                'Authorization' => 'Bearer '.$token,
-            ])
+            ->withHeaders($headers)
             ->timeout((int) config('ciot.timeout'))
             ->post($this->url($path), $payload);
     }

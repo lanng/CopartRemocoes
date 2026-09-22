@@ -99,10 +99,9 @@ class AnttCiotClientTest extends TestCase
         $this->assertNull($response->protocolo());
     }
 
-    public function test_declare_sends_bearer_token_and_parses_response(): void
+    public function test_declare_posts_without_bearer_and_parses_response(): void
     {
         Http::fake([
-            'https://antt-hml.test/pefServices/token' => Http::response(['token' => 'tok'], 200),
             'https://antt-hml.test/pefServices/api/DeclaracaoOperacaoTransporte' => Http::response([
                 'dados' => ['ciot' => '520031583158'],
             ], 200),
@@ -115,37 +114,54 @@ class AnttCiotClientTest extends TestCase
 
         Http::assertSent(function ($request): bool {
             return $request->url() === 'https://antt-hml.test/pefServices/api/DeclaracaoOperacaoTransporte'
-                && $request->hasHeader('Authorization', 'Bearer tok')
+                && ! $request->hasHeader('Authorization')
                 && $request->data()['IdOperacaoTransporte'] === '260921123456';
         });
     }
 
-    public function test_declare_retries_with_fresh_token_after_401(): void
+    public function test_generate_id_operacao_transporte_posts_both_keys_and_returns_dados_ciot(): void
+    {
+        config(['ciot.company.cnpj' => '12563112000130']);
+
+        Http::fake([
+            'https://antt-hml.test/pefServices/gerar' => Http::response([
+                'Sucesso' => true,
+                'Dados' => ['CIOT' => '560000563274', 'CpfCnpj' => '12.563.112/0001-30'],
+            ], 200),
+        ]);
+
+        $idOperacao = app(AnttCiotClient::class)->generateIdOperacaoTransporte();
+
+        $this->assertSame('560000563274', $idOperacao);
+
+        Http::assertSent(function ($request): bool {
+            return $request->url() === 'https://antt-hml.test/pefServices/gerar'
+                && ! $request->hasHeader('Authorization')
+                && $request->data() === ['cpfCnpj' => '12563112000130', 'cnpj' => '12563112000130'];
+        });
+    }
+
+    public function test_declare_retries_with_token_after_401(): void
     {
         Http::fake([
-            'https://antt-hml.test/pefServices/token' => Http::sequence()
-                ->push(['token' => 'expired'], 200)
-                ->push(['token' => 'fresh'], 200),
+            'https://antt-hml.test/pefServices/token' => Http::response(['token' => 'fresh'], 200),
             'https://antt-hml.test/pefServices/api/DeclaracaoOperacaoTransporte' => Http::sequence()
                 ->push(['Message' => 'Acesso Negado'], 401)
                 ->push(['Codigo' => '110', 'Mensagem' => 'Dados inseridos'], 200),
         ]);
 
-        $client = app(AnttCiotClient::class);
-        $client->authenticate();
-
-        $response = $client->declare(['IdOperacaoTransporte' => '260921123456']);
+        $response = app(AnttCiotClient::class)->declare(['IdOperacaoTransporte' => '260921123456']);
 
         $this->assertTrue($response->isSuccess());
         $this->assertSame('110', $response->codigo());
 
-        Http::assertSent(function ($request): bool {
-            if (str_contains($request->url(), '/api/DeclaracaoOperacaoTransporte')) {
-                return $request->hasHeader('Authorization', 'Bearer fresh');
-            }
+        $declaracoes = Http::recorded(
+            fn ($request, $response): bool => str_contains($request->url(), '/api/DeclaracaoOperacaoTransporte'),
+        )->pluck(0);
 
-            return true;
-        });
+        $this->assertCount(2, $declaracoes);
+        $this->assertFalse($declaracoes->first()->hasHeader('Authorization'));
+        $this->assertTrue($declaracoes->last()->hasHeader('Authorization', 'Bearer fresh'));
     }
 
     public function test_declare_throws_retryable_exception_on_server_error(): void

@@ -7,7 +7,6 @@ use App\Enums\CiotOperationTypeEnum;
 use App\Enums\CiotStatusEnum;
 use App\Models\Ciot;
 use DomainException;
-use Illuminate\Support\Str;
 
 /**
  * Monta o JSON de `DeclaracaoOperacaoTransporte` (DCS) a partir do CIOT.
@@ -26,7 +25,6 @@ class BuildCiotDeclarationPayload
         return [
             // Propriedade raiz exigida pelo binder do /gerar (validada em homologação).
             'cpfCnpj' => (string) config('ciot.company.cnpj'),
-            'IdOperacaoTransporte' => $ciot->id_operacao_transporte ?? substr(Str::upper(str_replace('-', '', (string) Str::uuid())), 0, 12),
             'TipoOperacao' => $ciot->operation_type->code(),
             'CpfCnpjContratado' => (string) config('ciot.company.cnpj'),
             'RNTRCContratado' => (string) config('ciot.company.rntrc'),
@@ -101,15 +99,18 @@ class BuildCiotDeclarationPayload
     }
 
     /**
+     * Nomes reais no wire (spec §2.1): `Placa` PascalCase, `rntrc`/`numeroEixos`
+     * camelCase. Não existe campo de tipo — a classificação automotor/implemento
+     * vem da base RNTRC pela placa.
+     *
      * @return list<array<string, mixed>>
      */
     protected function buildVehicles(Ciot $ciot): array
     {
         return array_values(array_map(fn (array $vehicle): array => [
             'Placa' => (string) $vehicle['placa'],
-            'RNTRCVeiculo' => (string) ($vehicle['rntrc'] ?? config('ciot.company.rntrc')),
-            'NumeroEixos' => (int) $vehicle['eixos'],
-            'TipoVeiculo' => ($vehicle['tipo'] ?? 'automotor') === 'automotor' ? 1 : 2,
+            'rntrc' => (string) ($vehicle['rntrc'] ?? config('ciot.company.rntrc')),
+            'numeroEixos' => (int) $vehicle['eixos'],
         ], $ciot->vehicles ?? []));
     }
 
@@ -119,21 +120,23 @@ class BuildCiotDeclarationPayload
     protected function buildRoute(Ciot $ciot): array
     {
         return [
-            'Origem' => $this->buildLocation($ciot->origin ?? []),
-            'Destino' => $this->buildLocation($ciot->destination ?? []),
+            'Origem' => $this->buildLocation($ciot->origin ?? [], 'Origem'),
+            'Destino' => $this->buildLocation($ciot->destination ?? [], 'Destino'),
             'DistanciaPercorrida' => (float) $ciot->distance_km,
         ];
     }
 
     /**
+     * Campos com sufixo (`CodigoMunicipioOrigem`/`CepOrigem` etc. — spec §2.1).
+     *
      * @param  array<string, mixed>  $location
      * @return array<string, mixed>
      */
-    protected function buildLocation(array $location): array
+    protected function buildLocation(array $location, string $suffix): array
     {
         return [
-            'CodigoMunicipio' => filled($location['ibge'] ?? null) ? (int) $location['ibge'] : null,
-            'Cep' => filled($location['cep'] ?? null) ? (string) $location['cep'] : null,
+            "CodigoMunicipio{$suffix}" => filled($location['ibge'] ?? null) ? (int) $location['ibge'] : null,
+            "Cep{$suffix}" => filled($location['cep'] ?? null) ? (string) $location['cep'] : null,
         ];
     }
 
@@ -147,10 +150,14 @@ class BuildCiotDeclarationPayload
             $ciot->additional_payers ?? [],
         );
 
+        // A base de naturezas da homologação só conhece o código 1 (spec §2.1);
+        // em produção vale a tabela oficial por linha (13 remoção / 8 tanque).
+        $fallback = (bool) config('ciot.natureza_fallback');
+
         return [
-            'CodigoNaturezaCarga' => (int) $ciot->line->naturezaCarga(),
+            'CodigoNaturezaCarga' => $fallback ? 1 : (int) $ciot->line->naturezaCarga(),
             'PesoCarga' => $ciot->cargo_weight_kg !== null ? (float) $ciot->cargo_weight_kg : null,
-            'CodigoTipoCarga' => $ciot->line->tipoCarga(),
+            'CodigoTipoCarga' => $fallback ? 1 : $ciot->line->tipoCarga(),
             'ContratantesCargaFrac' => $ciot->operation_type === CiotOperationTypeEnum::Fractioned
                 ? array_values($additional)
                 : [],

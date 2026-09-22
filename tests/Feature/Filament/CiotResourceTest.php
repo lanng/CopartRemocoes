@@ -100,6 +100,13 @@ class CiotResourceTest extends TestCase
     {
         Queue::fake();
 
+        Http::fake([
+            'https://antt-hml.test/pefServices/gerar' => Http::response([
+                'Sucesso' => true,
+                'Dados' => ['CIOT' => '560000569998'],
+            ], 200),
+        ]);
+
         $ciot = Ciot::factory()->create();
 
         Livewire::test(ListCiots::class)

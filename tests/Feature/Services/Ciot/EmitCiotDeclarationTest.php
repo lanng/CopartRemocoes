@@ -36,13 +36,20 @@ class EmitCiotDeclarationTest extends TestCase
     {
         Queue::fake();
 
+        Http::fake([
+            'https://antt-hml.test/pefServices/gerar' => Http::response([
+                'Sucesso' => true,
+                'Dados' => ['CIOT' => '560000569999'],
+            ], 200),
+        ]);
+
         $ciot = Ciot::factory()->create();
 
         $ciot = app(EmitCiotDeclaration::class)->handle($ciot);
 
         $this->assertSame(CiotStatusEnum::PENDING, $ciot->status);
-        $this->assertMatchesRegularExpression('/^[A-Z0-9]{12}$/', $ciot->id_operacao_transporte);
-        $this->assertArrayHasKey('IdOperacaoTransporte', $ciot->payload);
+        $this->assertSame('560000569999', $ciot->id_operacao_transporte);
+        $this->assertSame('560000569999', $ciot->payload['IdOperacaoTransporte']);
 
         Queue::assertPushed(EmitCiotJob::class, fn (EmitCiotJob $job): bool => $job->ciotId === $ciot->id);
     }

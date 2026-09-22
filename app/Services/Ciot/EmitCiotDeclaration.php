@@ -11,11 +11,18 @@ use Illuminate\Support\Facades\DB;
 class EmitCiotDeclaration
 {
     /**
-     * Prepara o payload, persiste a chave de idempotência e enfileira a emissão.
+     * Valida as regras, obtém o IdOperacaoTransporte do servidor ANTT
+     * (nunca inventado pelo cliente — spec §2.1), persiste e enfileira.
      */
     public function handle(Ciot $ciot): Ciot
     {
-        return DB::transaction(function () use ($ciot): Ciot {
+        $payload = app(BuildCiotDeclarationPayload::class)->handle($ciot);
+
+        $idOperacaoTransporte = app(AnttCiotClient::class)->generateIdOperacaoTransporte();
+
+        $payload['IdOperacaoTransporte'] = $idOperacaoTransporte;
+
+        return DB::transaction(function () use ($ciot, $payload, $idOperacaoTransporte): Ciot {
             $ciot = Ciot::query()
                 ->whereKey($ciot->id)
                 ->lockForUpdate()
@@ -25,10 +32,8 @@ class EmitCiotDeclaration
                 throw new DomainException('Somente CIOTs em rascunho ou com falha podem ser emitidos.');
             }
 
-            $payload = app(BuildCiotDeclarationPayload::class)->handle($ciot);
-
             $ciot->forceFill([
-                'id_operacao_transporte' => $payload['IdOperacaoTransporte'],
+                'id_operacao_transporte' => $idOperacaoTransporte,
                 'payload' => $payload,
                 'status' => CiotStatusEnum::PENDING,
                 'error_code' => null,
