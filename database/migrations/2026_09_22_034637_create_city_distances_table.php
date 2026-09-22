@@ -15,7 +15,7 @@ return new class extends Migration
             $table->id();
             $table->string('origin_ibge', 7);
             $table->string('destination_ibge', 7);
-            $table->decimal('km', 8, 1);
+            $table->unsignedInteger('km');
             $table->timestamp('fetched_at');
             $table->timestamps();
             $table->unique(['origin_ibge', 'destination_ibge']);

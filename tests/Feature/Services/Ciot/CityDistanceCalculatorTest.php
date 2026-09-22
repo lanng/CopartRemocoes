@@ -17,7 +17,7 @@ class CityDistanceCalculatorTest extends TestCase
     {
         $city = City::factory()->create();
 
-        $this->assertSame(0.0, app(CityDistanceCalculator::class)->calculate($city, $city));
+        $this->assertSame(0, app(CityDistanceCalculator::class)->calculate($city, $city));
 
         Http::assertNothingSent();
     }
@@ -36,7 +36,7 @@ class CityDistanceCalculatorTest extends TestCase
 
         $km = app(CityDistanceCalculator::class)->calculate($origin, $destination);
 
-        $this->assertSame(716.0, $km);
+        $this->assertSame(716, $km);
 
         Http::assertNothingSent();
     }
@@ -78,12 +78,12 @@ class CityDistanceCalculatorTest extends TestCase
 
         $km = app(CityDistanceCalculator::class)->calculate($origin, $destination);
 
-        $this->assertSame(716.3, $km);
+        $this->assertSame(716, $km);
 
         $this->assertDatabaseHas(CityDistance::class, [
             'origin_ibge' => $origin->ibge_code,
             'destination_ibge' => $destination->ibge_code,
-            'km' => 716.3,
+            'km' => 716,
         ]);
 
         Http::assertSent(function ($request) use ($origin, $destination): bool {

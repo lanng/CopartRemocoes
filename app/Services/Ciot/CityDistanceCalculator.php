@@ -14,10 +14,10 @@ use Throwable;
  */
 class CityDistanceCalculator
 {
-    public function calculate(City $origin, City $destination): ?float
+    public function calculate(City $origin, City $destination): ?int
     {
         if ($origin->ibge_code === $destination->ibge_code) {
-            return 0.0;
+            return 0;
         }
 
         $cached = CityDistance::query()
@@ -89,7 +89,7 @@ class CityDistanceCalculator
             return null;
         }
 
-        return round(((float) $distance) / 1000, 1);
+        return (int) round(((float) $distance) / 1000);
     }
 
     protected function log(string $message, ?Throwable $exception = null): void

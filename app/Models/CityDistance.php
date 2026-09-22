@@ -17,7 +17,7 @@ class CityDistance extends Model
     protected function casts(): array
     {
         return [
-            'km' => 'float',
+            'km' => 'integer',
             'fetched_at' => 'datetime',
         ];
     }

@@ -22,7 +22,7 @@ class CityDistanceFactory extends Factory
         return [
             'origin_ibge' => fake()->unique()->numerify('#######'),
             'destination_ibge' => fake()->unique()->numerify('#######'),
-            'km' => fake()->randomFloat(1, 50, 1200),
+            'km' => fake()->numberBetween(50, 1200),
             'fetched_at' => now(),
         ];
     }

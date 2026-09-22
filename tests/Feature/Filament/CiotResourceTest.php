@@ -208,12 +208,12 @@ class CiotResourceTest extends TestCase
             ])
             ->callFormComponentAction('distance_km', 'calcularDistancia')
             ->assertHasNoFormComponentActionErrors()
-            ->assertFormSet(['distance_km' => 716.3]);
+            ->assertFormSet(['distance_km' => 716]);
 
         $this->assertDatabaseHas(CityDistance::class, [
             'origin_ibge' => $origin->ibge_code,
             'destination_ibge' => $destination->ibge_code,
-            'km' => 716.3,
+            'km' => 716,
         ]);
     }
 
