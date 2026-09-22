@@ -123,8 +123,10 @@ class CiotResourceTest extends TestCase
         Http::fake([
             'https://antt-hml.test/pefServices/token' => Http::response(['token' => 'tok'], 200),
             'https://antt-hml.test/pefServices/api/CancelamentoOperacaoTransporte' => Http::response([
+                'CodigoIdentificacaoOperacao' => $ciot->fullNumber(),
                 'Codigo' => '110',
                 'Mensagem' => 'Cancelado',
+                'DataCancelamento' => '2026-09-22T10:00:00-03:00',
             ], 200),
         ]);
 

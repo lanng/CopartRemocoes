@@ -25,9 +25,9 @@ class CancelCiot
 
         $response = app(AnttCiotClient::class)->cancel($fullNumber, $motivo);
 
-        if (! $response->isAccepted()) {
+        if (! $response->isSuccess() || blank($response->dataCancelamento())) {
             throw new AnttCiotException(
-                sprintf('Cancelamento rejeitado pela ANTT (HTTP %d): %s', $response->httpStatus, $response->mensagem()),
+                sprintf('Cancelamento rejeitado pela ANTT (código %s): %s', $response->codigo() ?? '?', $response->mensagem()),
                 codigo: $response->codigo(),
                 mensagem: $response->mensagem(),
                 httpStatus: $response->httpStatus,

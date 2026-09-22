@@ -54,6 +54,25 @@ class AnttCiotResponse
         return $aviso === null ? null : (string) $aviso;
     }
 
+    /**
+     * Data de efetivação do cancelamento — nula em rejeição. O encerramento/
+     * cancelamento pode devolver Protocolo mesmo rejeitando (N98…), então a
+     * decisão de sucesso usa Codigo + estas datas (spec §2.1).
+     */
+    public function dataCancelamento(): ?string
+    {
+        $data = $this->body['DataCancelamento'] ?? $this->body['dataCancelamento'] ?? null;
+
+        return filled($data) ? (string) $data : null;
+    }
+
+    public function dataEncerramento(): ?string
+    {
+        $data = $this->body['DataEncerramento'] ?? $this->body['dataEncerramento'] ?? null;
+
+        return filled($data) ? (string) $data : null;
+    }
+
     public function isSuccess(): bool
     {
         if ($this->sucesso() === true) {
@@ -61,15 +80,6 @@ class AnttCiotResponse
         }
 
         return in_array($this->codigo(), ['110', '111'], true);
-    }
-
-    /**
-     * Aceito pelo gateway (HTTP 2xx/3xx). Usado em operações cujo código de
-     * sucesso de negócio (cancelar/encerrar) ainda será confirmado na homologação.
-     */
-    public function isAccepted(): bool
-    {
-        return $this->httpStatus < 400;
     }
 
     /**

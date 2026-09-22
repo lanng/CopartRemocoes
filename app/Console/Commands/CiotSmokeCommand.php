@@ -8,6 +8,7 @@ use App\Models\CiotPayer;
 use App\Models\CiotVehicle;
 use App\Services\Ciot\AnttCiotClient;
 use App\Services\Ciot\AnttCiotException;
+use App\Services\Ciot\AnttCiotResponse;
 use App\Services\Ciot\BuildCiotDeclarationPayload;
 use App\Services\Ciot\CancelCiot;
 use App\Services\Ciot\CloseCiot;
@@ -118,19 +119,55 @@ class CiotSmokeCommand extends Command
             return self::SUCCESS;
         }
 
-        // Fim de linha da homologação (B15/B83): exercita cancelar/encerrar com o
-        // IdOperacaoTransporte gerado, só como diagnóstico das rotas.
-        $idOperacao = (string) $ciot->id_operacao_transporte;
+        // Fim de linha da homologação (B15/B83): exercita cancelar/encerrar até a
+        // regra de negócio com <ID do /gerar> + "0001" (verificador fabricado —
+        // o DV não é barrado nessa fase). Fim de linha esperado: Codigo 220 com
+        // B34 ("operação não encontrada") e B113 (cert ≠ responsável) — spec §2.1.
+        $codigoTeste = ((string) $ciot->id_operacao_transporte).'0001';
 
-        $this->info("=== Diagnóstico: cancelar/encerrar com o ID gerado ({$idOperacao}) ===");
+        $this->info("=== Diagnóstico: cancelar/encerrar com o código de teste ({$codigoTeste}) ===");
 
-        $cancelResponse = $client->cancel($idOperacao, 'CIOT de teste - smoke');
+        $cancelResponse = $client->cancel($codigoTeste, 'CIOT de teste - smoke');
         $this->line('Cancelamento: '.json_encode($cancelResponse->body, JSON_UNESCAPED_UNICODE));
 
-        $closeResponse = $client->encerrar($idOperacao);
+        $closeResponse = $client->encerrar($codigoTeste);
         $this->line('Encerramento: '.json_encode($closeResponse->body, JSON_UNESCAPED_UNICODE));
 
-        return self::SUCCESS;
+        $cancelOk = $this->isBusinessEndOfLine($cancelResponse);
+        $closeOk = $this->isBusinessEndOfLine($closeResponse);
+
+        if ($cancelOk && $closeOk) {
+            $this->info('✔ Cancelamento e encerramento chegaram à regra de negócio (Codigo 220 + B34/B113) — todo o fluxo provável em homologação foi provado.');
+
+            return self::SUCCESS;
+        }
+
+        if (! $cancelOk) {
+            $this->error('Cancelamento não chegou ao fim de linha esperado (Codigo 220 + B34/B113).');
+        }
+
+        if (! $closeOk) {
+            $this->error('Encerramento não chegou ao fim de linha esperado (Codigo 220 + B34/B113).');
+        }
+
+        return self::FAILURE;
+    }
+
+    /**
+     * Fim de linha do cancelamento/encerramento em homologação: a rejeição
+     * estruturada com Codigo 220 e as regras B34/B113 (spec §2.1).
+     */
+    protected function isBusinessEndOfLine(AnttCiotResponse $response): bool
+    {
+        if ($response->codigo() !== '220') {
+            return false;
+        }
+
+        $mensagem = (string) $response->mensagem();
+
+        return str_contains($mensagem, 'Operaçao de Transporte')
+            || str_contains($mensagem, 'Operação de Transporte')
+            || str_contains($mensagem, 'corresponde ao transportador');
     }
 
     protected function cancelOnly(AnttCiotClient $client): void

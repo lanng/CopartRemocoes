@@ -33,8 +33,10 @@ class CiotCancelAndCloseTest extends TestCase
         Http::fake([
             'https://antt-hml.test/pefServices/token' => Http::response(['token' => 'tok'], 200),
             'https://antt-hml.test/pefServices/api/CancelamentoOperacaoTransporte' => Http::response([
+                'CodigoIdentificacaoOperacao' => $ciot->fullNumber(),
                 'Codigo' => '110',
                 'Mensagem' => 'Cancelado com sucesso',
+                'DataCancelamento' => '2026-09-22T10:00:00-03:00',
             ], 200),
         ]);
 
@@ -69,6 +71,31 @@ class CiotCancelAndCloseTest extends TestCase
         app(CancelCiot::class)->handle($ciot, 'motivo');
     }
 
+    public function test_refuses_an_http_200_rejection_even_with_a_protocol(): void
+    {
+        $ciot = Ciot::factory()->issued()->create();
+
+        Http::fake([
+            'https://antt-hml.test/pefServices/api/CancelamentoOperacaoTransporte' => Http::response([
+                'CodigoIdentificacaoOperacao' => $ciot->fullNumber(),
+                'DataCancelamento' => null,
+                'Protocolo' => 'N98000000129999',
+                'Codigo' => '220',
+                'Mensagem' => '["Rejeição: Nao foi encontrada nenhuma Operaçao de Transporte com os dados informados."]',
+            ], 200),
+        ]);
+
+        try {
+            app(CancelCiot::class)->handle($ciot, 'motivo');
+            $this->fail('Expected AnttCiotException.');
+        } catch (AnttCiotException $exception) {
+            $this->assertSame('220', $exception->codigo);
+            $this->assertStringContainsString('Operaçao de Transporte', $exception->mensagem);
+        }
+
+        $this->assertSame(CiotStatusEnum::ISSUED, $ciot->refresh()->status);
+    }
+
     public function test_throws_when_the_antt_rejects_the_cancellation(): void
     {
         $ciot = Ciot::factory()->issued()->create();
@@ -98,8 +125,11 @@ class CiotCancelAndCloseTest extends TestCase
         Http::fake([
             'https://antt-hml.test/pefServices/token' => Http::response(['token' => 'tok'], 200),
             'https://antt-hml.test/pefServices/api/EncerramentoOperacaoTransporte' => Http::response([
+                'CodigoIdentificacaoOperacao' => $ciot->fullNumber(),
                 'Codigo' => '110',
                 'Mensagem' => 'Encerrado com sucesso',
+                'DataEncerramento' => '2026-09-22T10:00:00-03:00',
+                'Protocolo' => 'N98000000129999',
             ], 200),
         ]);
 
@@ -112,6 +142,30 @@ class CiotCancelAndCloseTest extends TestCase
             return str_contains($request->url(), '/api/EncerramentoOperacaoTransporte')
                 && $request->data() === ['CodigoIdentificacaoOperacao' => $ciot->fullNumber()];
         });
+    }
+
+    public function test_refuses_an_http_200_close_rejection_even_with_a_protocol(): void
+    {
+        $ciot = Ciot::factory()->issued()->create();
+
+        Http::fake([
+            'https://antt-hml.test/pefServices/api/EncerramentoOperacaoTransporte' => Http::response([
+                'CodigoIdentificacaoOperacao' => $ciot->fullNumber(),
+                'DataEncerramento' => null,
+                'Protocolo' => 'N98000000129999',
+                'Codigo' => '220',
+                'Mensagem' => '["Rejeição: Nao foi encontrada nenhuma Operaçao de Transporte com os dados informados."]',
+            ], 200),
+        ]);
+
+        try {
+            app(CloseCiot::class)->handle($ciot);
+            $this->fail('Expected AnttCiotException.');
+        } catch (AnttCiotException $exception) {
+            $this->assertSame('220', $exception->codigo);
+        }
+
+        $this->assertSame(CiotStatusEnum::ISSUED, $ciot->refresh()->status);
     }
 
     public function test_refuses_to_close_a_ciot_that_is_not_issued(): void

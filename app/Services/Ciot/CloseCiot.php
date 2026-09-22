@@ -19,9 +19,9 @@ class CloseCiot
 
         $response = app(AnttCiotClient::class)->encerrar($fullNumber);
 
-        if (! $response->isAccepted()) {
+        if (! $response->isSuccess() || blank($response->dataEncerramento())) {
             throw new AnttCiotException(
-                sprintf('Encerramento rejeitado pela ANTT (HTTP %d): %s', $response->httpStatus, $response->mensagem()),
+                sprintf('Encerramento rejeitado pela ANTT (código %s): %s', $response->codigo() ?? '?', $response->mensagem()),
                 codigo: $response->codigo(),
                 mensagem: $response->mensagem(),
                 httpStatus: $response->httpStatus,
