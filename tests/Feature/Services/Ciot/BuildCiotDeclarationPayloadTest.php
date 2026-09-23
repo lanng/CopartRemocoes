@@ -83,8 +83,9 @@ class BuildCiotDeclarationPayloadTest extends TestCase
         ], $payload['Veiculos']);
 
         $route = $payload['OrigemDestino'][0];
-        $this->assertSame(['CodigoMunicipioOrigem' => 3534609, 'CepOrigem' => '17700000'], $route['Origem']);
-        $this->assertSame(['CodigoMunicipioDestino' => 3508504, 'CepDestino' => '12286140'], $route['Destino']);
+        $this->assertSame(['CodigoMunicipioOrigem' => 3534609], $route['Origem']);
+        $this->assertSame(['CodigoMunicipioDestino' => 3508504], $route['Destino']);
+        $this->assertArrayNotHasKey('CepOrigem', $route['Origem']);
         $this->assertSame(716.0, $route['DistanciaPercorrida']);
 
         $this->assertSame(1, $payload['DadosCarga']['CodigoNaturezaCarga']);
@@ -214,18 +215,17 @@ class BuildCiotDeclarationPayloadTest extends TestCase
         app(BuildCiotDeclarationPayload::class)->handle($ciot);
     }
 
-    public function test_rejects_mixed_location_types_b111(): void
+    public function test_rejects_missing_ibge_on_origin_or_destination(): void
     {
         $ciot = Ciot::factory()->create([
-            'origin' => ['cidade' => 'Osvaldo Cruz', 'uf' => 'SP', 'cep' => '17700000', 'ibge' => '3534609'],
-            'destination' => ['cidade' => 'Caçapava', 'uf' => 'SP', 'cep' => null, 'ibge' => '3508504'],
+            'origin' => ['cidade' => 'Osvaldo Cruz', 'uf' => 'SP', 'cep' => '17700000', 'ibge' => null],
             'vehicles' => [
                 ['placa' => 'PUC8E55', 'rntrc' => '045963122', 'eixos' => 3, 'tipo' => 'automotor'],
             ],
         ]);
 
         $this->expectException(DomainException::class);
-        $this->expectExceptionMessage('B111');
+        $this->expectExceptionMessage('IBGE');
 
         app(BuildCiotDeclarationPayload::class)->handle($ciot);
     }

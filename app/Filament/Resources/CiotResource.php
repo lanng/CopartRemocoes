@@ -544,10 +544,9 @@ class CiotResource extends Resource
     {
         return [
             Forms\Components\TextInput::make("{$prefix}cep")
-                ->label('CEP')
+                ->label('CEP (opcional — busca cidade e coordenadas)')
                 ->mask('99999-999')
                 ->maxLength(9)
-                ->required()
                 ->live(onBlur: true)
                 ->afterStateUpdated(fn (Forms\Set $set, ?string $state) => self::fillFromCep($set, $prefix, $state))
                 ->suffixAction(

@@ -66,8 +66,8 @@ class BuildCiotDeclarationPayload
             throw new DomainException('A distância percorrida deve ser maior que zero (regra B82 da ANTT).');
         }
 
-        if (filled($ciot->origin['cep'] ?? null) xor filled($ciot->destination['cep'] ?? null)) {
-            throw new DomainException('Origem e destino devem ser do mesmo tipo de localização: informe CEP nos dois (regra B111 da ANTT).');
+        if (blank($ciot->origin['ibge'] ?? null) || blank($ciot->destination['ibge'] ?? null)) {
+            throw new DomainException('Informe o código IBGE da cidade de origem e da cidade de destino.');
         }
 
         if ((int) $ciot->freight_value_cents <= 0) {
@@ -131,7 +131,10 @@ class BuildCiotDeclarationPayload
     }
 
     /**
-     * Campos com sufixo (`CodigoMunicipioOrigem`/`CepOrigem` etc. — spec §2.1).
+     * Somente o município IBGE (spec §2.2): a ANTT mantém base própria de CEPs
+     * e rejeita CEPs que não conhece ("ainda não está cadastrado em nossos
+     * sistemas") mesmo com IBGE presente — município sozinho é determinístico
+     * e sempre aceito.
      *
      * @param  array<string, mixed>  $location
      * @return array<string, mixed>
@@ -140,7 +143,6 @@ class BuildCiotDeclarationPayload
     {
         return [
             "CodigoMunicipio{$suffix}" => filled($location['ibge'] ?? null) ? (int) $location['ibge'] : null,
-            "Cep{$suffix}" => filled($location['cep'] ?? null) ? (string) $location['cep'] : null,
         ];
     }
 
