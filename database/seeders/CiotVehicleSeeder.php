@@ -15,6 +15,7 @@ class CiotVehicleSeeder extends Seeder
                 'rntrc' => config('ciot.company.rntrc'),
                 'axles' => 3,
                 'type' => CiotVehicle::TYPE_AUTOMOTOR,
+                'line' => 'vehicle_removal',
                 'is_active' => true,
             ],
         );
@@ -25,6 +26,7 @@ class CiotVehicleSeeder extends Seeder
                 'rntrc' => config('ciot.company.rntrc'),
                 'axles' => 2,
                 'type' => CiotVehicle::TYPE_TRAILER,
+                'line' => 'vehicle_removal',
                 'is_active' => true,
             ],
         );

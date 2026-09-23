@@ -53,6 +53,15 @@ class CiotVehicleResource extends Resource
                     ])
                     ->default(CiotVehicle::TYPE_AUTOMOTOR)
                     ->required(),
+                Forms\Components\Select::make('line')
+                    ->label('Linha')
+                    ->options([
+                        'vehicle_removal' => 'Remoção de veículos',
+                        'tank_alcohol' => 'Tanque de álcool',
+                    ])
+                    ->placeholder('Todas as linhas')
+                    ->hintIcon('heroicon-m-information-circle')
+                    ->hintIconTooltip('Define a composição sugerida ao gerar CIOT para a linha. Vazio = disponível para todas.'),
                 Forms\Components\TextInput::make('description')
                     ->label('Descrição')
                     ->maxLength(150),
@@ -79,6 +88,15 @@ class CiotVehicleResource extends Resource
                     ->formatStateUsing(fn (string $state): string => $state === CiotVehicle::TYPE_AUTOMOTOR ? 'Automotor' : 'Reboque'),
                 Tables\Columns\TextColumn::make('axles')->label('Eixos'),
                 Tables\Columns\TextColumn::make('rntrc')->label('RNTRC')->fontFamily('mono')->placeholder('—'),
+                Tables\Columns\TextColumn::make('line')
+                    ->label('Linha')
+                    ->badge()
+                    ->color(fn (?string $state): string => $state === null ? 'gray' : 'primary')
+                    ->formatStateUsing(fn (?string $state): string => match ($state) {
+                        'vehicle_removal' => 'Remoção',
+                        'tank_alcohol' => 'Tanque',
+                        default => 'Todas',
+                    }),
                 Tables\Columns\TextColumn::make('description')->label('Descrição')->limit(40)->placeholder('—'),
                 Tables\Columns\IconColumn::make('is_active')->label('Ativo')->boolean(),
             ])

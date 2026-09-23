@@ -3,6 +3,7 @@
 namespace Database\Seeders;
 
 use App\Models\CiotPayer;
+use App\Models\City;
 use Illuminate\Database\Seeder;
 
 class CiotPayerSeeder extends Seeder
@@ -46,7 +47,7 @@ class CiotPayerSeeder extends Seeder
     public function run(): void
     {
         foreach (self::payers() as $payer) {
-            CiotPayer::query()->firstOrCreate(
+            $patio = CiotPayer::query()->firstOrCreate(
                 ['cnpj' => $payer['cnpj']],
                 [
                     'name' => $payer['name'],
@@ -55,6 +56,30 @@ class CiotPayerSeeder extends Seeder
                     'is_active' => true,
                 ],
             );
+
+            $this->resolveIbge($patio, $payer['city'], $payer['state']);
+        }
+    }
+
+    /**
+     * Resolve o código IBGE na base local de municípios (ciot:seed-cities).
+     */
+    protected function resolveIbge(CiotPayer $patio, string $city, string $state): void
+    {
+        if (filled($patio->ibge_code)) {
+            return;
+        }
+
+        $found = City::query()
+            ->where('state', $state)
+            ->where(fn ($query) => $query
+                ->where('name', $city)
+                ->orWhere('name', 'like', "{$city}%"))
+            ->orderByRaw('case when name = ? then 0 else 1 end', [$city])
+            ->first();
+
+        if ($found !== null) {
+            $patio->forceFill(['ibge_code' => $found->ibge_code])->save();
         }
     }
 }

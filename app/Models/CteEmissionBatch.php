@@ -44,6 +44,11 @@ class CteEmissionBatch extends Model
         return $this->belongsTo(User::class, 'approved_by');
     }
 
+    public function ciots(): HasMany
+    {
+        return $this->hasMany(Ciot::class);
+    }
+
     public function documents(): HasMany
     {
         return $this->hasMany(CteDocument::class);

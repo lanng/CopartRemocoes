@@ -24,8 +24,19 @@ class CiotVehicleFactory extends Factory
             'rntrc' => '045963122',
             'axles' => fake()->numberBetween(2, 4),
             'type' => CiotVehicle::TYPE_AUTOMOTOR,
+            'line' => null,
             'is_active' => true,
         ];
+    }
+
+    public function forRemoval(): static
+    {
+        return $this->state(fn (): array => ['line' => 'vehicle_removal']);
+    }
+
+    public function forTank(): static
+    {
+        return $this->state(fn (): array => ['line' => 'tank_alcohol']);
     }
 
     public function trailer(): static

@@ -15,7 +15,7 @@ class CiotVehicle extends Model
     public const TYPE_TRAILER = 'reboque';
 
     protected $fillable = [
-        'plate', 'rntrc', 'axles', 'type', 'description', 'is_active',
+        'plate', 'rntrc', 'axles', 'type', 'line', 'description', 'is_active',
     ];
 
     protected function casts(): array
@@ -29,6 +29,14 @@ class CiotVehicle extends Model
     public function isAutomotor(): bool
     {
         return $this->type === self::TYPE_AUTOMOTOR;
+    }
+
+    /**
+     * Linha para a qual o veículo é composto (nulo = disponível para todas).
+     */
+    public function servesLine(string $line): bool
+    {
+        return $this->is_active && ($this->line === null || $this->line === $line);
     }
 
     /**

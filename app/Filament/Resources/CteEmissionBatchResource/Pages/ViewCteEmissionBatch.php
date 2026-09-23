@@ -2,6 +2,7 @@
 
 namespace App\Filament\Resources\CteEmissionBatchResource\Pages;
 
+use App\Filament\Actions\GenerateCiotForBatchAction;
 use App\Filament\Resources\CteEmissionBatchResource;
 use App\Services\Cte\ApproveCteEmissionBatch;
 use App\Services\Cte\DeleteDraftCteEmissionBatch;
@@ -21,6 +22,7 @@ class ViewCteEmissionBatch extends ViewRecord
     protected function getHeaderActions(): array
     {
         return [
+            GenerateCiotForBatchAction::make($this->getRecord()),
             Actions\Action::make('delete')
                 ->label('Excluir lote')
                 ->icon('heroicon-o-trash')

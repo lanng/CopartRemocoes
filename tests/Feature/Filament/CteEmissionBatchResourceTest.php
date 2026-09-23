@@ -2,6 +2,7 @@
 
 namespace Tests\Feature\Filament;
 
+use App\Enums\CiotStatusEnum;
 use App\Enums\CteDocumentStatusEnum;
 use App\Enums\CteEmissionBatchStatusEnum;
 use App\Enums\RegisterStatusEnum;
@@ -10,6 +11,11 @@ use App\Filament\Resources\CteEmissionBatchResource\Pages\ListCteEmissionBatches
 use App\Filament\Resources\CteEmissionBatchResource\Pages\ViewCteEmissionBatch;
 use App\Filament\Resources\CteEmissionBatchResource\RelationManagers\DocumentsRelationManager;
 use App\Filament\Resources\RegisterResource;
+use App\Models\Ciot;
+use App\Models\CiotPayer;
+use App\Models\CiotVehicle;
+use App\Models\City;
+use App\Models\CityDistance;
 use App\Models\CteDocument;
 use App\Models\CteEmissionBatch;
 use App\Models\Register;
@@ -18,6 +24,8 @@ use Filament\Facades\Filament;
 use Filament\Support\Enums\MaxWidth;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Queue;
 use Livewire\Livewire;
 use Tests\TestCase;
 
@@ -29,10 +37,137 @@ class CteEmissionBatchResourceTest extends TestCase
     {
         parent::setUp();
 
+        config([
+            'ciot.env' => 'homologacao',
+            'ciot.base_url' => 'https://antt-hml.test/pefServices',
+            'ciot.gerar_base_url' => null,
+            'ciot.api_key' => 'test-api-key',
+            'ciot.natureza_fallback' => false,
+            'ciot.lines.vehicle_removal' => [
+                'bank_code' => '756',
+                'bank_agency' => '0001',
+                'bank_account' => '111',
+            ],
+        ]);
+
         Filament::setCurrentPanel(Filament::getPanel('admin'));
         /** @var User $user */
         $user = User::factory()->create();
         $this->actingAs($user);
+    }
+
+    public function test_generate_ciot_action_creates_and_emits_a_linked_ciot(): void
+    {
+        config(['ciot.removal.weight_per_vehicle_kg' => 2000]);
+
+        City::factory()->create([
+            'ibge_code' => '3534609', 'name' => 'Osvaldo Cruz', 'state' => 'SP',
+            'latitude' => -21.7972, 'longitude' => -50.9736,
+        ]);
+        City::factory()->create([
+            'ibge_code' => '3508504', 'name' => 'Caçapava', 'state' => 'SP',
+            'latitude' => -23.1006, 'longitude' => -45.6911,
+        ]);
+        $payer = CiotPayer::factory()->create([
+            'name' => 'Copart Caçapava', 'cnpj' => '14517191000925',
+            'city' => 'Caçapava', 'state' => 'SP', 'ibge_code' => '3508504',
+        ]);
+        $tractor = CiotVehicle::factory()->forRemoval()->create(['plate' => 'PUC8E55', 'type' => 'automotor', 'axles' => 3]);
+
+        CityDistance::query()->create([
+            'origin_ibge' => '3534609', 'destination_ibge' => '3508504',
+            'km' => 716, 'fetched_at' => now(),
+        ]);
+
+        $batch = CteEmissionBatch::factory()->create([
+            'status' => CteEmissionBatchStatusEnum::APPROVED,
+        ]);
+        CteDocument::factory()->create([
+            'cte_emission_batch_id' => $batch->id,
+            'snapshot' => [
+                'company' => 'copart', 'vehicle_plate' => 'ABC1234',
+                'origin_city' => 'Osvaldo Cruz', 'destination_city' => 'Caçapava',
+                'value' => '500.00', 'fipe_value' => '10000.00',
+            ],
+        ]);
+
+        Http::fake([
+            'https://antt-hml.test/pefServices/gerar' => Http::response([
+                'Sucesso' => true, 'Dados' => ['CIOT' => '520032951111'],
+            ], 200),
+            'https://antt-hml.test/pefServices/api/DeclaracaoOperacaoTransporte' => Http::response([
+                'Codigo' => '110',
+                'Mensagem' => 'Dados cadastrados com sucesso',
+                'Protocolo' => '5200329511110001',
+                'CodigoVerificador' => '0001',
+                'IdOperacaoTransporte' => '520032951111',
+            ], 200),
+        ]);
+
+        Queue::fake();
+
+        Livewire::test(ViewCteEmissionBatch::class, ['record' => $batch->id])
+            ->callAction('generateCiot', data: [
+                'operation_type' => 'lotation',
+                'payer_id' => $payer->id,
+                'delivery_payer_id' => $payer->id,
+                'origin.ibge' => '3534609',
+                'destination.ibge' => '3508504',
+                'distance_km' => '716',
+                'freight_value' => '500.00',
+                'cargo_weight_kg' => '2000',
+                'vehicle_ids' => [$tractor->id],
+                'travel_start_at' => now()->addDay()->format('Y-m-d'),
+                'travel_end_at' => now()->addDays(2)->format('Y-m-d'),
+            ])
+            ->assertHasNoActionErrors();
+
+        $ciot = Ciot::query()->where('cte_emission_batch_id', $batch->id)->firstOrFail();
+
+        $this->assertSame(CiotStatusEnum::ISSUED, $ciot->status);
+        $this->assertSame('520032951111', $ciot->ciot_number);
+        $this->assertSame('14517191000925', $ciot->payer_cnpj);
+
+        Queue::assertNothingPushed();
+    }
+
+    public function test_generate_ciot_action_blocks_duplicates(): void
+    {
+        $batch = CteEmissionBatch::factory()->create([
+            'status' => CteEmissionBatchStatusEnum::APPROVED,
+        ]);
+        CteDocument::factory()->create([
+            'cte_emission_batch_id' => $batch->id,
+            'snapshot' => [
+                'company' => 'copart', 'vehicle_plate' => 'ABC1234',
+                'origin_city' => 'Osvaldo Cruz', 'destination_city' => 'Caçapava',
+                'value' => '500.00', 'fipe_value' => '10000.00',
+            ],
+        ]);
+        Ciot::factory()->create([
+            'cte_emission_batch_id' => $batch->id,
+            'status' => CiotStatusEnum::ISSUED,
+        ]);
+
+        $count = Ciot::query()->where('cte_emission_batch_id', $batch->id)->count();
+
+        Livewire::test(ViewCteEmissionBatch::class, ['record' => $batch->id])
+            ->callAction('generateCiot', data: [
+                'operation_type' => 'lotation',
+                'payer_id' => 1,
+                'delivery_payer_id' => 1,
+                'origin.ibge' => '3534609',
+                'destination.ibge' => '3508504',
+                'distance_km' => '716',
+                'freight_value' => '500.00',
+                'cargo_weight_kg' => '2000',
+                'vehicle_ids' => [1],
+                'travel_start_at' => now()->addDay()->format('Y-m-d'),
+                'travel_end_at' => now()->addDays(2)->format('Y-m-d'),
+            ])
+            ->assertNotified('Este lote já possui um CIOT ativo');
+
+        $this->assertSame($count, Ciot::query()->where('cte_emission_batch_id', $batch->id)->count());
     }
 
     public function test_the_batch_list_uses_translated_labels_and_brasilia_dates(): void

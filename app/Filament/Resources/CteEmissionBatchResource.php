@@ -5,6 +5,7 @@ namespace App\Filament\Resources;
 use App\Enums\CteEmissionBatchStatusEnum;
 use App\Filament\Resources\CteEmissionBatchResource\Pages;
 use App\Filament\Resources\CteEmissionBatchResource\RelationManagers;
+use App\Models\Ciot;
 use App\Models\CteEmissionBatch;
 use App\Services\Cte\DeleteDraftCteEmissionBatch;
 use Filament\Forms\Form;
@@ -41,6 +42,21 @@ class CteEmissionBatchResource extends Resource
                 'wire:poll.5s' => 'refreshBatch',
             ])
             ->schema([
+                Section::make('CIOT da viagem')
+                    ->visible(fn (CteEmissionBatch $record): bool => $record->ciots()->exists())
+                    ->schema([
+                        TextEntry::make('ciots')
+                            ->label('CIOT (número para o MDF-e)')
+                            ->state(fn (CteEmissionBatch $record): string => $record->ciots()->get()
+                                ->map(fn (Ciot $ciot): string => trim(sprintf(
+                                    '%s — %s (%s)',
+                                    $ciot->ciot_number ?? '(sem número)',
+                                    $ciot->fullNumber() ?? '',
+                                    $ciot->status->label(),
+                                )))
+                                ->implode("\n"))
+                            ->fontFamily('mono'),
+                    ]),
                 Section::make('Resumo financeiro')
                     ->columns(2)
                     ->schema([
