@@ -33,6 +33,8 @@ class Ciot extends Model
             'status' => CiotStatusEnum::class,
             'line' => CiotLineEnum::class,
             'operation_type' => CiotOperationTypeEnum::class,
+            'distance_km' => 'decimal:2',
+            'cargo_weight_kg' => 'decimal:2',
             'additional_payers' => 'array',
             'origin' => 'array',
             'destination' => 'array',

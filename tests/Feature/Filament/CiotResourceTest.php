@@ -5,6 +5,7 @@ namespace Tests\Feature\Filament;
 use App\Enums\CiotStatusEnum;
 use App\Filament\Resources\CiotResource;
 use App\Filament\Resources\CiotResource\Pages\CreateCiot;
+use App\Filament\Resources\CiotResource\Pages\EditCiot;
 use App\Filament\Resources\CiotResource\Pages\ListCiots;
 use App\Filament\Resources\CiotResource\Pages\ViewCiot;
 use App\Jobs\EmitCiotJob;
@@ -230,6 +231,87 @@ class CiotResourceTest extends TestCase
             ])
             ->callFormComponentAction('distance_km', 'calcularDistancia')
             ->assertFormComponentActionExists('distance_km', 'calcularDistancia');
+    }
+
+    public function test_create_and_emit_issues_the_ciot_synchronously(): void
+    {
+        Queue::fake();
+
+        $payer = CiotPayer::factory()->create(['cnpj' => '14517191000925']);
+        $tractor = CiotVehicle::factory()->create(['plate' => 'PUC8E55', 'type' => 'automotor', 'axles' => 3]);
+
+        Http::fake([
+            'https://antt-hml.test/pefServices/gerar' => Http::response([
+                'Sucesso' => true,
+                'Dados' => ['CIOT' => '520032959999'],
+            ], 200),
+            'https://antt-hml.test/pefServices/api/DeclaracaoOperacaoTransporte' => Http::response([
+                'Codigo' => '110',
+                'Mensagem' => 'Dados cadastrados com sucesso',
+                'Protocolo' => '5200329599990001',
+                'CodigoVerificador' => '0001',
+                'IdOperacaoTransporte' => '520032959999',
+            ], 200),
+        ]);
+
+        Livewire::test(CreateCiot::class)
+            ->fillForm([
+                'line' => 'vehicle_removal',
+                'operation_type' => 'lotation',
+                'payer_id' => $payer->id,
+                'delivery_payer_id' => $payer->id,
+                'origin.cidade' => 'Osvaldo Cruz',
+                'origin.uf' => 'SP',
+                'origin.ibge' => '3534609',
+                'destination.cidade' => 'Caçapava',
+                'destination.uf' => 'SP',
+                'destination.ibge' => '3508504',
+                'distance_km' => '716',
+                'freight_value' => '1000.00',
+                'vehicle_ids' => [$tractor->id],
+                'travel_start_at' => now()->addDay()->format('Y-m-d'),
+                'travel_end_at' => now()->addDays(2)->format('Y-m-d'),
+            ])
+            ->call('createAndEmit')
+            ->assertNotified('CIOT emitido: 5200329599990001');
+
+        $ciot = Ciot::query()->firstOrFail();
+
+        $this->assertSame(CiotStatusEnum::ISSUED, $ciot->status);
+        $this->assertSame('520032959999', $ciot->ciot_number);
+        $this->assertSame('0001', $ciot->verifier_code);
+
+        Queue::assertNothingPushed();
+    }
+
+    public function test_edit_updates_a_failed_ciot_without_recreating_it(): void
+    {
+        $payer = CiotPayer::factory()->create(['cnpj' => '14517191000925']);
+        $tractor = CiotVehicle::factory()->create(['plate' => 'PUC8E55', 'type' => 'automotor', 'axles' => 3]);
+
+        $ciot = Ciot::factory()->create([
+            'status' => CiotStatusEnum::FAILED,
+            'payer_id' => $payer->id,
+            'payer_cnpj' => $payer->cnpj,
+            'payer_name' => $payer->name,
+            'delivery_payer_id' => $payer->id,
+            'delivery_payer_cnpj' => $payer->cnpj,
+            'delivery_payer_name' => $payer->name,
+            'vehicles' => [['placa' => 'PUC8E55', 'rntrc' => '045963122', 'eixos' => 3, 'tipo' => 'automotor']],
+            'freight_value_cents' => 100000,
+        ]);
+
+        $this->assertTrue(CiotResource::canEdit($ciot));
+        $this->assertFalse(CiotResource::canEdit(Ciot::factory()->issued()->create()));
+
+        Livewire::test(EditCiot::class, ['record' => $ciot->id])
+            ->fillForm(['distance_km' => '250'])
+            ->call('save')
+            ->assertHasNoErrors();
+
+        $this->assertSame('250.00', $ciot->refresh()->distance_km);
+        $this->assertSame('100000', (string) $ciot->freight_value_cents);
+        $this->assertSame(CiotStatusEnum::FAILED, $ciot->status);
     }
 
     public function test_the_view_page_renders_a_record_with_nested_responses(): void

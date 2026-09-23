@@ -6,6 +6,7 @@ use App\Enums\CiotStatusEnum;
 use App\Jobs\EmitCiotJob;
 use App\Models\Ciot;
 use App\Services\Ciot\AnttCiotException;
+use App\Services\Ciot\DeclareCiot;
 use App\Services\Ciot\EmitCiotDeclaration;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Http;
@@ -82,7 +83,7 @@ class EmitCiotDeclarationTest extends TestCase
             ], 200),
         ]);
 
-        (new EmitCiotJob($ciot->id))->handle(app(\App\Services\Ciot\AnttCiotClient::class));
+        (new EmitCiotJob($ciot->id))->handle(app(DeclareCiot::class));
 
         $ciot = $ciot->refresh();
 
@@ -110,7 +111,7 @@ class EmitCiotDeclarationTest extends TestCase
             ], 200),
         ]);
 
-        (new EmitCiotJob($ciot->id))->handle(app(\App\Services\Ciot\AnttCiotClient::class));
+        (new EmitCiotJob($ciot->id))->handle(app(DeclareCiot::class));
 
         $ciot = $ciot->refresh();
 
@@ -136,7 +137,7 @@ class EmitCiotDeclarationTest extends TestCase
             ], 200),
         ]);
 
-        (new EmitCiotJob($ciot->id))->handle(app(\App\Services\Ciot\AnttCiotClient::class));
+        (new EmitCiotJob($ciot->id))->handle(app(DeclareCiot::class));
 
         $ciot = $ciot->refresh();
 
@@ -159,7 +160,7 @@ class EmitCiotDeclarationTest extends TestCase
         ]);
 
         try {
-            (new EmitCiotJob($ciot->id))->handle(app(\App\Services\Ciot\AnttCiotClient::class));
+            (new EmitCiotJob($ciot->id))->handle(app(DeclareCiot::class));
             $this->fail('Expected AnttCiotException.');
         } catch (AnttCiotException $exception) {
             $this->assertSame(500, $exception->httpStatus);
@@ -187,7 +188,7 @@ class EmitCiotDeclarationTest extends TestCase
             ], 200),
         ]);
 
-        (new EmitCiotJob($ciot->id))->handle(app(\App\Services\Ciot\AnttCiotClient::class));
+        (new EmitCiotJob($ciot->id))->handle(app(DeclareCiot::class));
 
         $ciot = $ciot->refresh();
 

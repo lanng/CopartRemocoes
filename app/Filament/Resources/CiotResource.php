@@ -27,6 +27,7 @@ use Filament\Resources\Resource;
 use Filament\Tables;
 use Filament\Tables\Table;
 use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Database\Eloquent\Model;
 use Throwable;
 
 class CiotResource extends Resource
@@ -137,7 +138,12 @@ class CiotResource extends Resource
                             ->numeric()
                             ->prefix('R$')
                             ->minValue(0.01)
-                            ->required(),
+                            ->required()
+                            ->afterStateHydrated(function (?Ciot $record, Forms\Set $set): void {
+                                if ($record !== null) {
+                                    $set('freight_value', number_format($record->freight_value_cents / 100, 2, '.', ''));
+                                }
+                            }),
                         Forms\Components\TextInput::make('cargo_weight_kg')
                             ->label('Peso da carga (kg)')
                             ->numeric()
@@ -147,7 +153,18 @@ class CiotResource extends Resource
                             ->options(fn (): array => self::vehicleOptions())
                             ->columns(2)
                             ->required()
-                            ->columnSpanFull(),
+                            ->columnSpanFull()
+                            ->afterStateHydrated(function (?Ciot $record, Forms\Set $set): void {
+                                if ($record === null) {
+                                    return;
+                                }
+
+                                $plates = collect($record->vehicles ?? [])
+                                    ->pluck('placa')
+                                    ->map(fn ($plate): string => strtoupper(trim((string) $plate)));
+
+                                $set('vehicle_ids', CiotVehicle::query()->whereIn('plate', $plates)->pluck('id')->all());
+                            }),
                     ]),
                 Forms\Components\Section::make('Viagem')
                     ->columns(2)
@@ -488,12 +505,42 @@ class CiotResource extends Resource
         return 'warning';
     }
 
+    public static function canEdit(Model $record): bool
+    {
+        return in_array($record->status, [CiotStatusEnum::DRAFT, CiotStatusEnum::FAILED], true);
+    }
+
+    /**
+     * Transforma os dados do formulário (create/edit) nas colunas do model:
+     * snapshots de pagantes, snapshot de veículos e frete em centavos.
+     *
+     * @param  array<string, mixed>  $data
+     * @return array<string, mixed>
+     */
+    public static function transformFormData(array $data): array
+    {
+        $payer = CiotPayer::query()->findOrFail($data['payer_id']);
+        $delivery = CiotPayer::query()->find($data['delivery_payer_id'] ?? null) ?? $payer;
+        $vehicles = CiotVehicle::query()->whereIn('id', $data['vehicle_ids'] ?? [])->get();
+
+        $data['payer_cnpj'] = $payer->cnpj;
+        $data['payer_name'] = $payer->name;
+        $data['delivery_payer_cnpj'] = $delivery->cnpj;
+        $data['delivery_payer_name'] = $delivery->name;
+        $data['vehicles'] = $vehicles->map(fn (CiotVehicle $vehicle): array => $vehicle->snapshot())->all();
+        $data['freight_value_cents'] = (int) round(((float) str_replace(',', '.', (string) $data['freight_value'])) * 100);
+        unset($data['freight_value'], $data['vehicle_ids']);
+
+        return $data;
+    }
+
     public static function getPages(): array
     {
         return [
             'index' => Pages\ListCiots::route('/'),
             'create' => Pages\CreateCiot::route('/create'),
             'view' => Pages\ViewCiot::route('/{record}'),
+            'edit' => Pages\EditCiot::route('/{record}/edit'),
         ];
     }
 
