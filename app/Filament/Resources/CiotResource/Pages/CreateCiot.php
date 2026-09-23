@@ -23,7 +23,7 @@ class CreateCiot extends CreateRecord
     /**
      * @return list<Action>
      */
-    protected function getCreateFormActions(): array
+    protected function getFormActions(): array
     {
         return [
             Action::make('createAndEmit')
@@ -31,7 +31,9 @@ class CreateCiot extends CreateRecord
                 ->color('success')
                 ->icon('heroicon-m-paper-airplane')
                 ->action('createAndEmit'),
-            ...parent::getCreateFormActions(),
+            $this->getCreateFormAction(),
+            ...(static::canCreateAnother() ? [$this->getCreateAnotherFormAction()] : []),
+            $this->getCancelFormAction(),
         ];
     }
 

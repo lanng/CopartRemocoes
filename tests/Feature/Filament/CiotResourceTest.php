@@ -255,6 +255,7 @@ class CiotResourceTest extends TestCase
         ]);
 
         Livewire::test(CreateCiot::class)
+            ->assertSee('Criar e emitir')
             ->fillForm([
                 'line' => 'vehicle_removal',
                 'operation_type' => 'lotation',
