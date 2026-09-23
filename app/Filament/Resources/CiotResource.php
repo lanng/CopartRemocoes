@@ -76,6 +76,27 @@ class CiotResource extends Resource
                             ->label('Destinatário (pátio final da entrega)')
                             ->options(fn (): array => self::payerOptions())
                             ->searchable()
+                            ->live()
+                            ->afterStateUpdated(function (Forms\Set $set, ?string $state): void {
+                                $payer = CiotPayer::query()->find($state);
+
+                                if ($payer === null) {
+                                    return;
+                                }
+
+                                // O pátio de destino é o ponto final da rota:
+                                // reaproveita o endereço cadastrado no pagante.
+                                $set('destination.cidade', $payer->city);
+                                $set('destination.uf', $payer->state);
+
+                                if (filled($payer->zipcode)) {
+                                    $set('destination.cep', $payer->zipcode);
+                                }
+
+                                if (filled($payer->ibge_code)) {
+                                    $set('destination.ibge', $payer->ibge_code);
+                                }
+                            })
                             ->required(),
                         Forms\Components\CheckboxList::make('additional_payers')
                             ->label('Contratantes adicionais (demais pátios da viagem)')

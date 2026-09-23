@@ -278,6 +278,27 @@ class CiotResourceTest extends TestCase
         $this->assertSame(CiotStatusEnum::ISSUED, $ciot->refresh()->status);
     }
 
+    public function test_selecting_the_delivery_payer_autocompletes_the_destination(): void
+    {
+        $payer = CiotPayer::factory()->create([
+            'name' => 'Copart Caçapava',
+            'cnpj' => '14517191000925',
+            'city' => 'Caçapava',
+            'state' => 'SP',
+            'zipcode' => '12286140',
+            'ibge_code' => '3508504',
+        ]);
+
+        Livewire::test(CreateCiot::class)
+            ->fillForm(['delivery_payer_id' => $payer->id])
+            ->assertFormSet([
+                'destination.cidade' => 'Caçapava',
+                'destination.uf' => 'SP',
+                'destination.cep' => '12286140',
+                'destination.ibge' => '3508504',
+            ]);
+    }
+
     public function test_the_navigation_badge_counts_open_ciots(): void
     {
         Ciot::factory()->issued()->create();
