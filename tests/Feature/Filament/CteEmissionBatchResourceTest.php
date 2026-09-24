@@ -131,6 +131,54 @@ class CteEmissionBatchResourceTest extends TestCase
         Queue::assertNothingPushed();
     }
 
+    public function test_reemit_ciot_action_reissues_a_failed_ciot(): void
+    {
+        $batch = CteEmissionBatch::factory()->create([
+            'status' => CteEmissionBatchStatusEnum::COMPLETED,
+            'execution_mode' => 'live',
+        ]);
+        CteDocument::factory()->create([
+            'cte_emission_batch_id' => $batch->id,
+            'status' => CteDocumentStatusEnum::AUTHORIZED,
+            'access_key' => '35260912563112000130570010000028171839975374',
+            'snapshot' => [
+                'company' => 'copart', 'vehicle_plate' => 'ABC1234',
+                'origin_city' => 'Osvaldo Cruz', 'destination_city' => 'Caçapava',
+                'value' => '500.00', 'fipe_value' => '10000.00',
+            ],
+        ]);
+        $ciot = Ciot::factory()->create([
+            'cte_emission_batch_id' => $batch->id,
+            'status' => CiotStatusEnum::FAILED,
+            'error_message' => 'Rejeição anterior',
+            'id_operacao_transporte' => '520032959998',
+        ]);
+
+        Http::fake([
+            'https://antt-hml.test/pefServices/gerar' => Http::response([
+                'Sucesso' => true, 'Dados' => ['CIOT' => '520032952222'],
+            ], 200),
+            'https://antt-hml.test/pefServices/api/DeclaracaoOperacaoTransporte' => Http::response([
+                'Codigo' => '110',
+                'Mensagem' => 'Dados cadastrados com sucesso',
+                'Protocolo' => '5200329522220002',
+                'CodigoVerificador' => '0002',
+                'IdOperacaoTransporte' => '520032952222',
+            ], 200),
+        ]);
+
+        Livewire::test(ViewCteEmissionBatch::class, ['record' => $batch->id])
+            ->callAction('reemitCiot')
+            ->assertNotified('CIOT reemitido: 5200329522220002');
+
+        $ciot->refresh();
+
+        $this->assertSame(CiotStatusEnum::ISSUED, $ciot->status);
+        $this->assertSame('520032952222', $ciot->ciot_number);
+        $this->assertSame('0002', $ciot->verifier_code);
+        $this->assertNotSame('520032959998', $ciot->id_operacao_transporte);
+    }
+
     public function test_generate_ciot_action_blocks_duplicates(): void
     {
         $batch = CteEmissionBatch::factory()->create([

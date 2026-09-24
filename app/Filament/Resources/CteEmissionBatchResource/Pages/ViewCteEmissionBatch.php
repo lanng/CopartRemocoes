@@ -6,6 +6,7 @@ use App\Enums\CiotStatusEnum;
 use App\Filament\Actions\GenerateCiotForBatchAction;
 use App\Filament\Resources\CteEmissionBatchResource;
 use App\Services\Ciot\DispatchMdfeForBatch;
+use App\Services\Ciot\EmitCiotDeclaration;
 use App\Services\Cte\ApproveCteEmissionBatch;
 use App\Services\Cte\DeleteDraftCteEmissionBatch;
 use Filament\Actions;
@@ -26,6 +27,65 @@ class ViewCteEmissionBatch extends ViewRecord
     {
         return [
             GenerateCiotForBatchAction::make($this->getRecord()),
+            Actions\Action::make('reemitCiot')
+                ->label('Reemitir CIOT')
+                ->icon('heroicon-m-arrow-path')
+                ->color('primary')
+                ->visible(fn (): bool => $this->record->ciots()->where('status', CiotStatusEnum::FAILED->value)->exists())
+                ->requiresConfirmation()
+                ->modalHeading('Reemitir CIOT da viagem')
+                ->modalDescription('Gera um novo IdOperacaoTransporte e reenvia a declaração à ANTT com os dados atuais do CIOT (edite-os pelo botão Editar do CIOT, se necessário).')
+                ->action(function (): void {
+                    /** @var Ciot|null $ciot */
+                    $ciot = $this->record->ciots()
+                        ->where('status', CiotStatusEnum::FAILED->value)
+                        ->latest('id')
+                        ->first();
+
+                    if ($ciot === null) {
+                        Notification::make()
+                            ->title('Nenhum CIOT com falha neste lote.')
+                            ->warning()
+                            ->send();
+
+                        return;
+                    }
+
+                    try {
+                        $ciot = app(EmitCiotDeclaration::class)->handle($ciot, sync: true);
+                    } catch (Throwable $exception) {
+                        report($exception);
+
+                        EmitCiotJob::dispatch($ciot->id);
+
+                        Notification::make()
+                            ->title('Reemissão em processamento')
+                            ->body('A ANTT não respondeu agora; a reemissão ficou na fila com retry automático.')
+                            ->warning()
+                            ->send();
+
+                        $this->redirect(CteEmissionBatchResource::getUrl('view', ['record' => $this->record]));
+
+                        return;
+                    }
+
+                    $ciot->refresh();
+
+                    if ($ciot->status === CiotStatusEnum::ISSUED) {
+                        Notification::make()
+                            ->title('CIOT reemitido: '.$ciot->fullNumber())
+                            ->success()
+                            ->send();
+                    } else {
+                        Notification::make()
+                            ->title('Reemissão rejeitada pela ANTT')
+                            ->body((string) $ciot->error_message)
+                            ->danger()
+                            ->send();
+                    }
+
+                    $this->redirect(CteEmissionBatchResource::getUrl('view', ['record' => $this->record]));
+                }),
             Actions\Action::make('emitMdfe')
                 ->label('Emitir MDF-e')
                 ->icon('heroicon-m-document-check')

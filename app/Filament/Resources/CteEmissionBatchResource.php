@@ -71,6 +71,20 @@ class CteEmissionBatchResource extends Resource
                                 )))
                                 ->implode("\n"))
                             ->fontFamily('mono'),
+                        TextEntry::make('ciot_rejeicoes')
+                            ->label('Rejeição da ANTT')
+                            ->color('danger')
+                            ->visible(fn (CteEmissionBatch $record): bool => $record->ciots()
+                                ->where('status', 'failed')
+                                ->whereNotNull('error_message')
+                                ->exists())
+                            ->state(fn (CteEmissionBatch $record): string => $record->ciots()
+                                ->where('status', 'failed')
+                                ->whereNotNull('error_message')
+                                ->get()
+                                ->map(fn (Ciot $ciot): string => (string) $ciot->error_message)
+                                ->implode("\n"))
+                            ->columnSpanFull(),
                     ]),
                 Section::make('Resumo financeiro')
                     ->columns(2)
