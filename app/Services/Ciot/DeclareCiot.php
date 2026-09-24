@@ -62,7 +62,15 @@ class DeclareCiot
             ])->save();
         });
 
-        return $ciot->refresh();
+        $ciot = $ciot->refresh();
+
+        // Viagem completa + CIOT emitido: despacha o MDF-e (idempotente — os
+        // guards internos pulam se algo ainda falta, spec mdfe-agent-payload).
+        if ($ciot->cte_emission_batch_id !== null) {
+            app(DispatchMdfeForBatch::class)->handle($ciot->cteEmissionBatch);
+        }
+
+        return $ciot;
     }
 
     protected function markFailed(Ciot $ciot, ?string $codigo, string $mensagem): Ciot

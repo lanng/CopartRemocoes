@@ -49,6 +49,11 @@ class CteEmissionBatch extends Model
         return $this->hasMany(Ciot::class);
     }
 
+    public function mdfeDocuments(): HasMany
+    {
+        return $this->hasMany(MdfeDocument::class);
+    }
+
     public function documents(): HasMany
     {
         return $this->hasMany(CteDocument::class);

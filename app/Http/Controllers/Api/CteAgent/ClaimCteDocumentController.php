@@ -24,6 +24,7 @@ class ClaimCteDocumentController extends Controller
 
         return response()->json([
             'api_version' => config('cte.api_version'),
+            'document_type' => $claim['document_type'],
             'document_id' => $document->public_id,
             'idempotency_key' => $document->idempotency_key,
             'execution_mode' => $document->execution_mode,

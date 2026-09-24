@@ -7,6 +7,7 @@ use App\Filament\Resources\CteEmissionBatchResource\Pages;
 use App\Filament\Resources\CteEmissionBatchResource\RelationManagers;
 use App\Models\Ciot;
 use App\Models\CteEmissionBatch;
+use App\Models\MdfeDocument;
 use App\Services\Cte\DeleteDraftCteEmissionBatch;
 use Filament\Forms\Form;
 use Filament\Infolists\Components\Section;
@@ -42,6 +43,20 @@ class CteEmissionBatchResource extends Resource
                 'wire:poll.5s' => 'refreshBatch',
             ])
             ->schema([
+                Section::make('MDF-e da viagem')
+                    ->visible(fn (CteEmissionBatch $record): bool => $record->mdfeDocuments()->exists())
+                    ->schema([
+                        TextEntry::make('mdfe_documents')
+                            ->label('MDF-e')
+                            ->state(fn (CteEmissionBatch $record): string => $record->mdfeDocuments()
+                                ->map(fn (MdfeDocument $mdfe): string => trim(implode(' | ', array_filter([
+                                    $mdfe->mdfe_number ? 'Nº '.$mdfe->mdfe_number : 'sem número',
+                                    $mdfe->access_key,
+                                    $mdfe->protocol ? 'Protocolo '.$mdfe->protocol : null,
+                                    $mdfe->status->label(),
+                                ]))))
+                                ->implode("\n")),
+                    ]),
                 Section::make('CIOT da viagem')
                     ->visible(fn (CteEmissionBatch $record): bool => $record->ciots()->exists())
                     ->schema([

@@ -125,6 +125,11 @@ class GenerateCiotForBatchAction
                     $set('destination.cidade', $payer->city);
                     $set('destination.uf', $payer->state);
                     $set('destination.ibge', $payer->ibge_code);
+
+                    if (filled($payer->zipcode)) {
+                        $set('destination.cep', $payer->zipcode);
+                    }
+
                     static::recalculateDistance($get, $set);
                 })
                 ->required(),
@@ -148,8 +153,18 @@ class GenerateCiotForBatchAction
                             static::recalculateDistance($get, $set);
                         })
                         ->required(),
+                    TextInput::make('origin.cep')
+                        ->label('CEP de origem (usado no MDF-e)')
+                        ->mask('99999-999')
+                        ->maxLength(9)
+                        ->live(onBlur: true),
                     Hidden::make('origin.cidade')->default($form['origin.cidade']),
                     Hidden::make('origin.uf')->default($form['origin.uf']),
+                    TextInput::make('destination.cep')
+                        ->label('CEP de destino (usado no MDF-e)')
+                        ->mask('99999-999')
+                        ->maxLength(9)
+                        ->default($destination['cep'] ?? null),
                     Hidden::make('destination.ibge')->default($destination['ibge'] ?? null),
                     Hidden::make('destination.cidade')->default($destination['cidade'] ?? null),
                     Hidden::make('destination.uf')->default($destination['uf'] ?? null),
