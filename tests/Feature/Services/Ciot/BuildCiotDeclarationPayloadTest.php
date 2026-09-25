@@ -156,7 +156,9 @@ class BuildCiotDeclarationPayloadTest extends TestCase
             ['CpfCnpjContratante' => '14517191000410'],
             ['CpfCnpjContratante' => '14517191000259'],
         ], $payload['DadosCarga']['ContratantesCargaFrac']);
-        $this->assertSame([], $payload['InfIndicadoresOperacionais']);
+        // Array vazio de indicadores derruba o transformer da ANTT (NRE, sonda
+        // 25/09/2026): para fracionada a chave precisa sair do payload.
+        $this->assertArrayNotHasKey('InfIndicadoresOperacionais', $payload);
     }
 
     public function test_rejects_fractioned_without_additional_payers(): void

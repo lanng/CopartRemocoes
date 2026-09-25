@@ -22,7 +22,7 @@ class BuildCiotDeclarationPayload
     {
         $this->assertBusinessRules($ciot);
 
-        return [
+        $payload = [
             // Propriedade raiz exigida pelo binder do /gerar (validada em homologação).
             'cpfCnpj' => (string) config('ciot.company.cnpj'),
             'TipoOperacao' => $ciot->operation_type->code(),
@@ -40,8 +40,15 @@ class BuildCiotDeclarationPayload
             'OrigemDestino' => [$this->buildRoute($ciot)],
             'DadosCarga' => $this->buildCargo($ciot),
             'InfPagamento' => [$this->buildPayment($ciot)],
-            'InfIndicadoresOperacionais' => $this->buildIndicators($ciot),
         ];
+
+        $indicators = $this->buildIndicators($ciot);
+
+        if ($indicators !== []) {
+            $payload['InfIndicadoresOperacionais'] = $indicators;
+        }
+
+        return $payload;
     }
 
     protected function assertBusinessRules(Ciot $ciot): void
@@ -199,6 +206,11 @@ class BuildCiotDeclarationPayload
     }
 
     /**
+     * Indicadores só existem para lotação (tipo 1). Para fracionada a chave é
+     * OMITIDA — array vazio derruba o transformer da ANTT com
+     * NullReferenceException (HTTP 500), comprovado por sonda na homologação e
+     * reproduzido em produção (25/09/2026).
+     *
      * @return array<string, bool>|array{}
      */
     protected function buildIndicators(Ciot $ciot): array
