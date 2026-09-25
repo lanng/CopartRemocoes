@@ -23,6 +23,7 @@ use Filament\Forms\Components\Select;
 use Filament\Forms\Components\TextInput;
 use Filament\Forms\Components\Toggle;
 use Filament\Forms\Get;
+use Filament\Forms\Set;
 use Filament\Notifications\Notification;
 use Illuminate\Support\Str;
 use Throwable;
@@ -98,6 +99,13 @@ class GenerateCiotForBatchAction
                 ->searchable()
                 ->live()
                 ->default($form['payer_id'])
+                ->afterStateUpdated(function (Get $get, Set $set, ?string $state): void {
+                    $cnpj = CiotPayer::query()->find($state)?->cnpj;
+
+                    if (filled($cnpj)) {
+                        $set('additional_payers', \App\Filament\Resources\CiotResource::withoutPayerCnpjs($get('additional_payers') ?? [], [$cnpj]));
+                    }
+                })
                 ->required(),
 
             CheckboxList::make('additional_payers')
@@ -106,6 +114,8 @@ class GenerateCiotForBatchAction
                 ->columns(2)
                 ->live()
                 ->default($form['additional_payers'] ?? [])
+                ->nestedRecursiveRules([fn (Get $get): string => \App\Filament\Resources\CiotResource::additionalPayerRule($get)])
+                ->validationMessages(['not_in' => 'O pátio pagante não pode repetir nos contratantes adicionais (regra B119 da ANTT).'])
                 ->visible(fn (Get $get): bool => $get('operation_type') === 'fractioned'),
 
             Select::make('delivery_payer_id')

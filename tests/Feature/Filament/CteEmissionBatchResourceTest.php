@@ -220,6 +220,65 @@ class CteEmissionBatchResourceTest extends TestCase
         });
     }
 
+    public function test_generate_ciot_action_rejects_the_payer_repeated_as_additional_b119(): void
+    {
+        City::factory()->create([
+            'ibge_code' => '3534609', 'name' => 'Osvaldo Cruz', 'state' => 'SP',
+            'latitude' => -21.7972, 'longitude' => -50.9736,
+        ]);
+        City::factory()->create([
+            'ibge_code' => '3508504', 'name' => 'Caçapava', 'state' => 'SP',
+            'latitude' => -23.1006, 'longitude' => -45.6911,
+        ]);
+        $payer = CiotPayer::factory()->create([
+            'name' => 'Copart Caçapava', 'cnpj' => '14517191000925',
+            'city' => 'Caçapava', 'state' => 'SP', 'ibge_code' => '3508504',
+        ]);
+        CiotPayer::factory()->create([
+            'name' => 'Copart Osasco', 'cnpj' => '14517191000410',
+            'city' => 'Osasco', 'state' => 'SP', 'ibge_code' => '3518800',
+        ]);
+        $tractor = CiotVehicle::factory()->forRemoval()->create(['plate' => 'PUC8E55', 'type' => 'automotor', 'axles' => 3]);
+
+        CityDistance::query()->create([
+            'origin_ibge' => '3534609', 'destination_ibge' => '3508504',
+            'km' => 716, 'fetched_at' => now(),
+        ]);
+
+        $batch = CteEmissionBatch::factory()->create([
+            'status' => CteEmissionBatchStatusEnum::APPROVED,
+        ]);
+        CteDocument::factory()->create([
+            'cte_emission_batch_id' => $batch->id,
+            'snapshot' => [
+                'company' => 'copart', 'vehicle_plate' => 'ABC1234',
+                'origin_city' => 'Osvaldo Cruz', 'destination_city' => 'Caçapava',
+                'value' => '500.00', 'fipe_value' => '10000.00',
+            ],
+        ]);
+
+        Queue::fake();
+
+        Livewire::test(ViewCteEmissionBatch::class, ['record' => $batch->id])
+            ->callAction('generateCiot', data: [
+                'operation_type' => 'fractioned',
+                'payer_id' => $payer->id,
+                'delivery_payer_id' => $payer->id,
+                'additional_payers' => ['14517191000925', '14517191000410'],
+                'origin.ibge' => '3534609',
+                'destination.ibge' => '3508504',
+                'distance_km' => '716',
+                'freight_value' => '500.00',
+                'cargo_weight_kg' => '2000',
+                'vehicle_ids' => [$tractor->id],
+                'travel_start_at' => now()->addDay()->format('Y-m-d'),
+                'travel_end_at' => now()->addDays(2)->format('Y-m-d'),
+            ])
+            ->assertHasActionErrors();
+
+        $this->assertSame(0, Ciot::query()->where('cte_emission_batch_id', $batch->id)->count());
+    }
+
     public function test_reemit_ciot_action_reissues_a_failed_ciot(): void
     {
         $batch = CteEmissionBatch::factory()->create([

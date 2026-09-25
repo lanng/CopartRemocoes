@@ -72,6 +72,13 @@ class CiotResource extends Resource
                             ->options(fn (): array => self::payerOptions())
                             ->searchable()
                             ->live()
+                            ->afterStateUpdated(function (Forms\Get $get, Forms\Set $set, ?string $state): void {
+                                $cnpj = CiotPayer::query()->find($state)?->cnpj;
+
+                                if (filled($cnpj)) {
+                                    $set('additional_payers', self::withoutPayerCnpjs($get('additional_payers') ?? [], [$cnpj]));
+                                }
+                            })
                             ->required(),
                         Forms\Components\Select::make('delivery_payer_id')
                             ->label('Destinatário (pátio final da entrega)')
@@ -103,6 +110,15 @@ class CiotResource extends Resource
                             ->label('Contratantes adicionais (demais pátios da viagem)')
                             ->options(fn (Forms\Get $get): array => self::additionalPayerOptions($get('payer_id')))
                             ->live()
+                            ->nestedRecursiveRules([fn (Forms\Get $get): string => self::additionalPayerRule($get)])
+                            ->validationMessages(['not_in' => 'O pátio pagante não pode repetir nos contratantes adicionais (regra B119 da ANTT).'])
+                            ->afterStateHydrated(function (Forms\Set $set, ?Ciot $record, ?array $state): void {
+                                $clean = self::withoutPayerCnpjs($state ?? [], array_filter([$record?->payer_cnpj]));
+
+                                if ($clean !== ($state ?? [])) {
+                                    $set('additional_payers', $clean);
+                                }
+                            })
                             ->visible(fn (Forms\Get $get): bool => $get('operation_type') === CiotOperationTypeEnum::Fractioned->value)
                             ->columnSpanFull(),
                     ]),
@@ -529,9 +545,37 @@ class CiotResource extends Resource
         $data['delivery_payer_name'] = $delivery->name;
         $data['vehicles'] = $vehicles->map(fn (CiotVehicle $vehicle): array => $vehicle->snapshot())->all();
         $data['freight_value_cents'] = (int) round(((float) str_replace(',', '.', (string) $data['freight_value'])) * 100);
+        $data['additional_payers'] = self::withoutPayerCnpjs($data['additional_payers'] ?? [], [$payer->cnpj]);
         unset($data['freight_value'], $data['vehicle_ids']);
 
         return $data;
+    }
+
+    /**
+     * Regra B119 da ANTT para o campo de contratantes adicionais: o CNPJ do
+     * pagante selecionado é rejeitado já no formulário, antes de gastar
+     * tentativa na emissão. (CheckboxList aplica a regra por item marcado.)
+     */
+    public static function additionalPayerRule(Forms\Get $get): string
+    {
+        $cnpj = CiotPayer::query()->find($get('payer_id'))?->cnpj;
+
+        return filled($cnpj) ? 'not_in:'.$cnpj : 'nullable';
+    }
+
+    /**
+     * B119 ANTT: o contratante principal não pode repetir nos adicionais.
+     * Usado ao trocar o pagante (caixas marcadas antes ficam órfãs das opções
+     * quando a lista recalcula — o Livewire não desmarca sozinho), ao hidratar
+     * registros legados e como defesa final no transformFormData.
+     *
+     * @param  list<string>  $state
+     * @param  list<string>  $cnpjs
+     * @return list<string>
+     */
+    public static function withoutPayerCnpjs(array $state, array $cnpjs): array
+    {
+        return array_values(array_unique(array_diff($state, $cnpjs)));
     }
 
     public static function getPages(): array

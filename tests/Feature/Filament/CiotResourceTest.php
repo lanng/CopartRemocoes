@@ -315,6 +315,33 @@ class CiotResourceTest extends TestCase
         $this->assertSame(CiotStatusEnum::FAILED, $ciot->status);
     }
 
+    public function test_editing_prunes_the_payer_from_additional_payers_b119(): void
+    {
+        $payer = CiotPayer::factory()->create(['cnpj' => '14517191000925']);
+        CiotPayer::factory()->create(['cnpj' => '14517191000410']);
+        CiotVehicle::factory()->create(['plate' => 'PUC8E55', 'type' => 'automotor', 'axles' => 3]);
+
+        $ciot = Ciot::factory()->create([
+            'status' => CiotStatusEnum::DRAFT,
+            'operation_type' => \App\Enums\CiotOperationTypeEnum::Fractioned,
+            'payer_id' => $payer->id,
+            'payer_cnpj' => $payer->cnpj,
+            'payer_name' => $payer->name,
+            'delivery_payer_id' => $payer->id,
+            'delivery_payer_cnpj' => $payer->cnpj,
+            'delivery_payer_name' => $payer->name,
+            'additional_payers' => ['14517191000925', '14517191000410'],
+            'vehicles' => [['placa' => 'PUC8E55', 'rntrc' => '045963122', 'eixos' => 3, 'tipo' => 'automotor']],
+            'freight_value_cents' => 100000,
+        ]);
+
+        Livewire::test(EditCiot::class, ['record' => $ciot->id])
+            ->call('save')
+            ->assertHasNoErrors();
+
+        $this->assertSame(['14517191000410'], $ciot->refresh()->additional_payers);
+    }
+
     public function test_the_view_page_renders_a_record_with_nested_responses(): void
     {
         $ciot = Ciot::factory()->issued()->create([
