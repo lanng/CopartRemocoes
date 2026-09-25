@@ -131,6 +131,95 @@ class CteEmissionBatchResourceTest extends TestCase
         Queue::assertNothingPushed();
     }
 
+    public function test_generate_ciot_action_sends_additional_payers_cnpjs_to_the_antt(): void
+    {
+        City::factory()->create([
+            'ibge_code' => '3534609', 'name' => 'Osvaldo Cruz', 'state' => 'SP',
+            'latitude' => -21.7972, 'longitude' => -50.9736,
+        ]);
+        City::factory()->create([
+            'ibge_code' => '3508504', 'name' => 'Caçapava', 'state' => 'SP',
+            'latitude' => -23.1006, 'longitude' => -45.6911,
+        ]);
+        $payer = CiotPayer::factory()->create([
+            'name' => 'Copart Caçapava', 'cnpj' => '14517191000925',
+            'city' => 'Caçapava', 'state' => 'SP', 'ibge_code' => '3508504',
+        ]);
+        CiotPayer::factory()->create([
+            'name' => 'Copart Pirapora do Bom Jesus', 'cnpj' => '14517191000330',
+            'city' => 'Pirapora do Bom Jesus', 'state' => 'SP', 'ibge_code' => '3539506',
+        ]);
+        CiotPayer::factory()->create([
+            'name' => 'Copart Osasco', 'cnpj' => '14517191000410',
+            'city' => 'Osasco', 'state' => 'SP', 'ibge_code' => '3518800',
+        ]);
+        $tractor = CiotVehicle::factory()->forRemoval()->create(['plate' => 'PUC8E55', 'type' => 'automotor', 'axles' => 3]);
+
+        CityDistance::query()->create([
+            'origin_ibge' => '3534609', 'destination_ibge' => '3508504',
+            'km' => 716, 'fetched_at' => now(),
+        ]);
+
+        $batch = CteEmissionBatch::factory()->create([
+            'status' => CteEmissionBatchStatusEnum::APPROVED,
+        ]);
+        CteDocument::factory()->create([
+            'cte_emission_batch_id' => $batch->id,
+            'snapshot' => [
+                'company' => 'copart', 'vehicle_plate' => 'ABC1234',
+                'origin_city' => 'Osvaldo Cruz', 'destination_city' => 'Caçapava',
+                'value' => '500.00', 'fipe_value' => '10000.00',
+            ],
+        ]);
+
+        Http::fake([
+            'https://antt-hml.test/pefServices/gerar' => Http::response([
+                'Sucesso' => true, 'Dados' => ['CIOT' => '520032952222'],
+            ], 200),
+            'https://antt-hml.test/pefServices/api/DeclaracaoOperacaoTransporte' => Http::response([
+                'Codigo' => '110',
+                'Mensagem' => 'Dados cadastrados com sucesso',
+                'Protocolo' => '5200329522220001',
+                'CodigoVerificador' => '0001',
+                'IdOperacaoTransporte' => '520032952222',
+            ], 200),
+        ]);
+
+        Queue::fake();
+
+        Livewire::test(ViewCteEmissionBatch::class, ['record' => $batch->id])
+            ->callAction('generateCiot', data: [
+                'operation_type' => 'fractioned',
+                'payer_id' => $payer->id,
+                'delivery_payer_id' => $payer->id,
+                'additional_payers' => ['14517191000330', '14517191000410'],
+                'origin.ibge' => '3534609',
+                'destination.ibge' => '3508504',
+                'distance_km' => '716',
+                'freight_value' => '500.00',
+                'cargo_weight_kg' => '2000',
+                'vehicle_ids' => [$tractor->id],
+                'travel_start_at' => now()->addDay()->format('Y-m-d'),
+                'travel_end_at' => now()->addDays(2)->format('Y-m-d'),
+            ])
+            ->assertHasNoActionErrors();
+
+        $ciot = Ciot::query()->where('cte_emission_batch_id', $batch->id)->firstOrFail();
+
+        $this->assertSame(['14517191000330', '14517191000410'], $ciot->additional_payers);
+
+        Http::assertSent(function (\Illuminate\Http\Client\Request $request): bool {
+            if (! str_contains($request->url(), 'DeclaracaoOperacaoTransporte')) {
+                return false;
+            }
+
+            return ($request->data()['DadosCarga'] ?? [])['ContratantesCargaFrac'] === [
+                ['CpfCnpjContratante' => '14517191000330'],
+                ['CpfCnpjContratante' => '14517191000410'],
+            ];
+        });
+    }
+
     public function test_reemit_ciot_action_reissues_a_failed_ciot(): void
     {
         $batch = CteEmissionBatch::factory()->create([

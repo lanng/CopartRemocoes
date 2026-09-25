@@ -101,7 +101,7 @@ class CiotResource extends Resource
                             ->required(),
                         Forms\Components\CheckboxList::make('additional_payers')
                             ->label('Contratantes adicionais (demais pátios da viagem)')
-                            ->options(fn (Forms\Get $get): array => self::payerOptions(excludeCnpj: CiotPayer::find($get('payer_id'))?->cnpj))
+                            ->options(fn (Forms\Get $get): array => self::additionalPayerOptions($get('payer_id')))
                             ->live()
                             ->visible(fn (Forms\Get $get): bool => $get('operation_type') === CiotOperationTypeEnum::Fractioned->value)
                             ->columnSpanFull(),
@@ -570,17 +570,32 @@ class CiotResource extends Resource
         return 'Fracionada quando a viagem tem mais de um pátio.';
     }
 
-    /**
-     * @return array<int|string, string>
-     */
-    protected static function payerOptions(?string $excludeCnpj = null): array
+    /** @return array<int, string> */
+    protected static function payerOptions(): array
     {
         return CiotPayer::query()
             ->where('is_active', true)
             ->orderBy('name')
             ->get()
-            ->filter(fn (CiotPayer $payer): bool => $payer->cnpj !== $excludeCnpj)
             ->mapWithKeys(fn (CiotPayer $payer): array => [$payer->id => sprintf('%s — %s/%s', $payer->name, $payer->city, $payer->state)])
+            ->all();
+    }
+
+    /**
+     * Contratantes adicionais chaveados pelo CNPJ: o valor marcado no checkbox
+     * já é o CNPJ que segue ao payload (ContratantesCargaFrac). Nunca chavear
+     * pelo ID do pagante — o ID vaza para a ANTT como se fosse documento.
+     *
+     * @return array<string, string>
+     */
+    public static function additionalPayerOptions(?string $payerId = null): array
+    {
+        return CiotPayer::query()
+            ->where('is_active', true)
+            ->orderBy('name')
+            ->get()
+            ->reject(fn (CiotPayer $payer): bool => $payer->id === (int) $payerId)
+            ->mapWithKeys(fn (CiotPayer $payer): array => [$payer->cnpj => sprintf('%s — %s/%s', $payer->name, $payer->city, $payer->state)])
             ->all();
     }
 
