@@ -27,6 +27,8 @@
         <env name="MAIL_MAILER" value="array"/>
         <env name="PULSE_ENABLED" value="false"/>
         <env name="QUEUE_CONNECTION" value="sync"/>
+        <env name="CIOT_NATUREZA_FALLBACK" value="false"/>
+        <env name="CIOT_ENV" value="homologacao"/>
         <env name="SESSION_DRIVER" value="array"/>
         <env name="TELESCOPE_ENABLED" value="false"/>
     </php>
