@@ -102,11 +102,10 @@ class GenerateCiotForBatchAction
 
             CheckboxList::make('additional_payers')
                 ->label('Contratantes adicionais (demais pátios da viagem)')
-                ->options(fn (Get $get): array => collect($payerOptions)
-                    ->except([$get('payer_id')])
-                    ->all())
+                ->options(fn (Get $get): array => \App\Filament\Resources\CiotResource::additionalPayerOptions($get('payer_id')))
                 ->columns(2)
                 ->live()
+                ->default($form['additional_payers'] ?? [])
                 ->visible(fn (Get $get): bool => $get('operation_type') === 'fractioned'),
 
             Select::make('delivery_payer_id')
