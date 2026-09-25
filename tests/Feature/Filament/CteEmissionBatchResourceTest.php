@@ -213,9 +213,9 @@ class CteEmissionBatchResourceTest extends TestCase
                 return false;
             }
 
-            return ($request->data()['DadosCarga'] ?? [])['ContratantesCargaFrac'] === [
-                ['CpfCnpjContratante' => '14517191000330'],
-                ['CpfCnpjContratante' => '14517191000410'],
+            return ($request->data()['DadosCarga'] ?? [])['ContratantesCargFrac'] === [
+                '14517191000330',
+                '14517191000410',
             ];
         });
     }

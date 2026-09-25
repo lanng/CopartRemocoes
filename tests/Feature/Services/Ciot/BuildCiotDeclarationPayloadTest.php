@@ -91,7 +91,9 @@ class BuildCiotDeclarationPayloadTest extends TestCase
         $this->assertSame(1, $payload['DadosCarga']['CodigoNaturezaCarga']);
         $this->assertSame(5, $payload['DadosCarga']['CodigoTipoCarga']);
         $this->assertSame(20000.0, $payload['DadosCarga']['PesoCarga']);
-        $this->assertSame([], $payload['DadosCarga']['ContratantesCargaFrac']);
+        // B64: proibido na lotação — nenhuma grafia da chave pode existir.
+        $this->assertArrayNotHasKey('ContratantesCargFrac', $payload['DadosCarga']);
+        $this->assertArrayNotHasKey('ContratantesCargaFrac', $payload['DadosCarga']);
 
         $this->assertSame([
             'TipoPagamento' => 2,
@@ -152,10 +154,10 @@ class BuildCiotDeclarationPayloadTest extends TestCase
         $payload = app(BuildCiotDeclarationPayload::class)->handle($ciot);
 
         $this->assertSame(2, $payload['TipoOperacao']);
-        $this->assertSame([
-            ['CpfCnpjContratante' => '14517191000410'],
-            ['CpfCnpjContratante' => '14517191000259'],
-        ], $payload['DadosCarga']['ContratantesCargaFrac']);
+        // Nome com o typo da ANTT (sem o "a") e elementos string — List<string>
+        // no DTO deles; a grafia correta não liga e objetos crasham (NRE 500).
+        $this->assertSame(['14517191000410', '14517191000259'], $payload['DadosCarga']['ContratantesCargFrac']);
+        $this->assertArrayNotHasKey('ContratantesCargaFrac', $payload['DadosCarga']);
         // Array vazio de indicadores derruba o transformer da ANTT (NRE, sonda
         // 25/09/2026): para fracionada a chave precisa sair do payload.
         $this->assertArrayNotHasKey('InfIndicadoresOperacionais', $payload);

@@ -154,27 +154,34 @@ class BuildCiotDeclarationPayload
     }
 
     /**
+     * `ContratantesCargFrac` (nome com o typo da ANTT, sem o "a" — DCS pág. 25
+     * e a própria mensagem de rejeição grafam assim) é um List<string> de
+     * CNPJs/CPFs: objetos crasham o transformer com NRE 500, e a grafia
+     * correta não liga (a ANTT responde "campo obrigatório"). Proibido na
+     * lotação (B64) e obrigatório na fracionada.
+     *
      * @return array<string, mixed>
      */
     protected function buildCargo(Ciot $ciot): array
     {
-        $additional = array_map(
-            fn (string $cnpj): array => ['CpfCnpjContratante' => $cnpj],
-            $ciot->additional_payers ?? [],
-        );
-
         // A base de naturezas da homologação só conhece o código 1 (spec §2.1);
         // em produção vale a tabela oficial por linha (13 remoção / 8 tanque).
         $fallback = (bool) config('ciot.natureza_fallback');
 
-        return [
+        $cargo = [
             'CodigoNaturezaCarga' => $fallback ? 1 : (int) $ciot->line->naturezaCarga(),
-            'PesoCarga' => $ciot->cargo_weight_kg !== null ? (float) $ciot->cargo_weight_kg : null,
             'CodigoTipoCarga' => $fallback ? 1 : $ciot->line->tipoCarga(),
-            'ContratantesCargaFrac' => $ciot->operation_type === CiotOperationTypeEnum::Fractioned
-                ? array_values($additional)
-                : [],
         ];
+
+        if ($ciot->cargo_weight_kg !== null) {
+            $cargo['PesoCarga'] = (float) $ciot->cargo_weight_kg;
+        }
+
+        if ($ciot->operation_type === CiotOperationTypeEnum::Fractioned) {
+            $cargo['ContratantesCargFrac'] = array_values($ciot->additional_payers ?? []);
+        }
+
+        return $cargo;
     }
 
     /**
