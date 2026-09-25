@@ -18,6 +18,7 @@ use App\Models\City;
 use App\Models\CityDistance;
 use App\Models\CteDocument;
 use App\Models\CteEmissionBatch;
+use App\Models\MdfeDocument;
 use App\Models\Register;
 use App\Models\User;
 use Filament\Facades\Filament;
@@ -54,6 +55,25 @@ class CteEmissionBatchResourceTest extends TestCase
         /** @var User $user */
         $user = User::factory()->create();
         $this->actingAs($user);
+    }
+
+    public function test_the_batch_view_renders_the_mdfe_section_with_a_document(): void
+    {
+        $batch = CteEmissionBatch::factory()->create([
+            'status' => CteEmissionBatchStatusEnum::COMPLETED,
+        ]);
+
+        MdfeDocument::factory()->create([
+            'cte_emission_batch_id' => $batch->id,
+            'status' => CteDocumentStatusEnum::FAILED_BEFORE_AUTHORIZATION,
+            'mdfe_number' => null,
+            'protocol' => null,
+        ]);
+
+        Livewire::test(ViewCteEmissionBatch::class, ['record' => $batch->id])
+            ->assertSuccessful()
+            ->assertSee('MDF-e da viagem')
+            ->assertSee('sem número');
     }
 
     public function test_generate_ciot_action_creates_and_emits_a_linked_ciot(): void

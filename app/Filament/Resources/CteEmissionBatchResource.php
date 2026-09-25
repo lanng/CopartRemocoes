@@ -49,6 +49,7 @@ class CteEmissionBatchResource extends Resource
                         TextEntry::make('mdfe_documents')
                             ->label('MDF-e')
                             ->state(fn (CteEmissionBatch $record): string => $record->mdfeDocuments()
+                                ->get()
                                 ->map(fn (MdfeDocument $mdfe): string => trim(implode(' | ', array_filter([
                                     $mdfe->mdfe_number ? 'Nº '.$mdfe->mdfe_number : 'sem número',
                                     $mdfe->access_key,
