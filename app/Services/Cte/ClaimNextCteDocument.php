@@ -116,6 +116,8 @@ class ClaimNextCteDocument
                 CteDocumentStatusEnum::FILLING,
                 CteDocumentStatusEnum::VALIDATING,
                 CteDocumentStatusEnum::READY_TO_AUTHORIZE,
+                CteDocumentStatusEnum::AUTHORIZING,
+                CteDocumentStatusEnum::WAITING_FOR_XML,
             ])
             ->where('claim_expires_at', '<', now())
             ->update($requeue);
@@ -126,6 +128,8 @@ class ClaimNextCteDocument
                 CteDocumentStatusEnum::FILLING,
                 CteDocumentStatusEnum::VALIDATING,
                 CteDocumentStatusEnum::READY_TO_AUTHORIZE,
+                CteDocumentStatusEnum::AUTHORIZING,
+                CteDocumentStatusEnum::WAITING_FOR_XML,
             ])
             ->where('claim_expires_at', '<', now())
             ->update($requeue);

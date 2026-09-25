@@ -3,6 +3,7 @@
 namespace App\Filament\Resources\CteEmissionBatchResource\Pages;
 
 use App\Enums\CiotStatusEnum;
+use App\Enums\CteDocumentStatusEnum;
 use App\Filament\Actions\GenerateCiotForBatchAction;
 use App\Filament\Resources\CteEmissionBatchResource;
 use App\Services\Ciot\DispatchMdfeForBatch;
@@ -12,6 +13,7 @@ use App\Services\Cte\DeleteDraftCteEmissionBatch;
 use Filament\Actions;
 use Filament\Notifications\Notification;
 use Filament\Resources\Pages\ViewRecord;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class ViewCteEmissionBatch extends ViewRecord
 {
@@ -21,6 +23,32 @@ class ViewCteEmissionBatch extends ViewRecord
     {
         $this->authorizeAccess();
         $this->getRecord()->refresh();
+    }
+
+    /**
+     * MDF-es reiniciáveis: falhos/rejeitados OU presos em estado intermediário
+     * com lease expirado (agent morreu/pausou no meio do fluxo sem reportar
+     * falha terminal — o documento nunca sairia daí pelos próprios meios).
+     */
+    protected function restartableMdfeDocuments(): HasMany
+    {
+        return $this->record->mdfeDocuments()
+            ->where(function ($query): void {
+                $query->whereIn('status', [
+                    CteDocumentStatusEnum::REJECTED->value,
+                    CteDocumentStatusEnum::FAILED_BEFORE_AUTHORIZATION->value,
+                ])
+                    ->orWhere(fn ($query) => $query
+                        ->whereIn('status', [
+                            CteDocumentStatusEnum::CLAIMED->value,
+                            CteDocumentStatusEnum::FILLING->value,
+                            CteDocumentStatusEnum::VALIDATING->value,
+                            CteDocumentStatusEnum::READY_TO_AUTHORIZE->value,
+                            CteDocumentStatusEnum::AUTHORIZING->value,
+                            CteDocumentStatusEnum::WAITING_FOR_XML->value,
+                        ])
+                        ->where('claim_expires_at', '<', now()));
+            });
     }
 
     protected function getHeaderActions(): array
@@ -118,15 +146,12 @@ class ViewCteEmissionBatch extends ViewRecord
                 ->label('Reenviar MDF-e')
                 ->icon('heroicon-m-arrow-path')
                 ->color('warning')
-                ->visible(fn (): bool => $this->record->mdfeDocuments()
-                    ->whereIn('status', ['rejected', 'failed_before_authorization'])
-                    ->exists())
+                ->visible(fn (): bool => self::restartableMdfeDocuments()->exists())
                 ->requiresConfirmation()
                 ->modalHeading('Reenviar MDF-e')
                 ->modalDescription('O documento volta para a fila do agente para nova tentativa.')
                 ->action(function (): void {
-                    $this->record->mdfeDocuments()
-                        ->whereIn('status', ['rejected', 'failed_before_authorization'])
+                    self::restartableMdfeDocuments()
                         ->each(fn ($mdfe) => $mdfe->forceFill([
                             'status' => 'queued',
                             'claimed_by' => null,

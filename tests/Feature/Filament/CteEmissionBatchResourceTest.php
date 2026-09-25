@@ -76,6 +76,29 @@ class CteEmissionBatchResourceTest extends TestCase
             ->assertSee('sem número');
     }
 
+    public function test_the_requeue_mdfe_action_covers_a_document_stuck_with_an_expired_lease(): void
+    {
+        $batch = CteEmissionBatch::factory()->create([
+            'status' => CteEmissionBatchStatusEnum::COMPLETED,
+        ]);
+
+        MdfeDocument::factory()->create([
+            'cte_emission_batch_id' => $batch->id,
+            'status' => CteDocumentStatusEnum::AUTHORIZING,
+            'claim_expires_at' => now()->subMinutes(5),
+        ]);
+
+        Livewire::test(ViewCteEmissionBatch::class, ['record' => $batch->id])
+            ->assertSuccessful()
+            ->assertActionVisible('requeueMdfe')
+            ->callAction('requeueMdfe');
+
+        $mdfe = MdfeDocument::query()->where('cte_emission_batch_id', $batch->id)->firstOrFail();
+
+        $this->assertSame('queued', $mdfe->status->value);
+        $this->assertNull($mdfe->claim_expires_at);
+    }
+
     public function test_generate_ciot_action_creates_and_emits_a_linked_ciot(): void
     {
         config(['ciot.removal.weight_per_vehicle_kg' => 2000]);

@@ -26,17 +26,17 @@ class UpdateCteDocumentProgress
                 throw new DomainException('The claim token is invalid for this document.');
             }
 
-            if ($document->claim_expires_at?->isPast() && $target !== CteDocumentStatusEnum::AUTHORIZING) {
-                throw new DomainException('The claim lease has expired.');
-            }
-
             app(CteDocumentWorkflow::class)->transition($document, $target);
 
             if ($target === CteDocumentStatusEnum::AUTHORIZING) {
                 $document->forceFill(['authorization_started_at' => now()])->save();
-            } elseif ($target !== CteDocumentStatusEnum::WAITING_FOR_XML) {
-                $document->forceFill(['claim_expires_at' => now()->addMinutes(config('cte.claim_lease_minutes'))])->save();
             }
+
+            // Cada progresso autenticado prova que o agent está vivo (o claim
+            // token é a fronteira de segurança): renova o lease em todas as
+            // transições (mesma regra do MDF-e — o reaper recupera os mortos,
+            // o progresso autenticado não pode ser rejeitado por lease).
+            $document->forceFill(['claim_expires_at' => now()->addMinutes(config('cte.claim_lease_minutes'))])->save();
 
             return $document->refresh();
         });
