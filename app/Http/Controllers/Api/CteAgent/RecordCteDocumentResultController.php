@@ -8,6 +8,7 @@ use App\Models\CteAgent;
 use App\Services\Cte\RecordCteAgentResult;
 use DomainException;
 use Illuminate\Http\JsonResponse;
+use Illuminate\Support\Facades\Log;
 
 class RecordCteDocumentResultController extends Controller
 {
@@ -22,6 +23,12 @@ class RecordCteDocumentResultController extends Controller
         try {
             $result = $recordCteAgentResult->handle($agent, $document, $request->validated());
         } catch (DomainException $exception) {
+            Log::warning('cte-agent rejection', [
+                'agent' => $agent->name,
+                'document' => $document,
+                'reason' => $exception->getMessage(),
+            ]);
+
             return response()->json(['message' => $exception->getMessage()], 409);
         }
 

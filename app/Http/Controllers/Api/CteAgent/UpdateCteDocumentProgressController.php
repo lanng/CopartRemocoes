@@ -9,6 +9,7 @@ use App\Models\CteAgent;
 use App\Services\Cte\UpdateCteDocumentProgress;
 use DomainException;
 use Illuminate\Http\JsonResponse;
+use Illuminate\Support\Facades\Log;
 
 class UpdateCteDocumentProgressController extends Controller
 {
@@ -27,6 +28,12 @@ class UpdateCteDocumentProgressController extends Controller
                 CteDocumentStatusEnum::from($request->string('stage')->toString()),
             );
         } catch (DomainException $exception) {
+            Log::warning('cte-agent rejection', [
+                'agent' => $agent->name,
+                'document' => $document,
+                'reason' => $exception->getMessage(),
+            ]);
+
             return response()->json(['message' => $exception->getMessage()], 409);
         }
 
