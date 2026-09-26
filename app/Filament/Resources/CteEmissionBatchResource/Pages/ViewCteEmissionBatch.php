@@ -37,6 +37,7 @@ class ViewCteEmissionBatch extends ViewRecord
                 $query->whereIn('status', [
                     CteDocumentStatusEnum::REJECTED->value,
                     CteDocumentStatusEnum::FAILED_BEFORE_AUTHORIZATION->value,
+                    CteDocumentStatusEnum::DRY_RUN_COMPLETED->value,
                 ])
                     ->orWhere(fn ($query) => $query
                         ->whereIn('status', [
@@ -161,6 +162,18 @@ class ViewCteEmissionBatch extends ViewRecord
                             'error_stage' => null,
                             'error_code' => null,
                             'error_message' => null,
+                            // Resultado da tentativa anterior: sem limpar o hash,
+                            // toda nova tentativa esbarrava no 409 "a different
+                            // result was already recorded".
+                            'result_payload_hash' => null,
+                            'issued_at' => null,
+                            'authorized_at' => null,
+                            'mdfe_number' => null,
+                            'access_key' => null,
+                            'series' => null,
+                            'protocol' => null,
+                            'fiscal_status_code' => null,
+                            'fiscal_status_message' => null,
                         ])->save());
 
                     Notification::make()

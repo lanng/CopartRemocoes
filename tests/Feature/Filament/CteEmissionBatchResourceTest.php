@@ -99,6 +99,32 @@ class CteEmissionBatchResourceTest extends TestCase
         $this->assertNull($mdfe->claim_expires_at);
     }
 
+    public function test_the_requeue_mdfe_action_clears_a_previously_recorded_result(): void
+    {
+        $batch = CteEmissionBatch::factory()->create([
+            'status' => CteEmissionBatchStatusEnum::COMPLETED,
+        ]);
+
+        MdfeDocument::factory()->create([
+            'cte_emission_batch_id' => $batch->id,
+            'status' => CteDocumentStatusEnum::REJECTED,
+            'result_payload_hash' => hash('sha256', 'resultado-anterior'),
+            'fiscal_status_code' => '203',
+            'fiscal_status_message' => 'Rejeição antiga',
+        ]);
+
+        Livewire::test(ViewCteEmissionBatch::class, ['record' => $batch->id])
+            ->assertActionVisible('requeueMdfe')
+            ->callAction('requeueMdfe');
+
+        $mdfe = MdfeDocument::query()->where('cte_emission_batch_id', $batch->id)->firstOrFail();
+
+        $this->assertSame('queued', $mdfe->status->value);
+        $this->assertNull($mdfe->result_payload_hash);
+        $this->assertNull($mdfe->fiscal_status_code);
+        $this->assertNull($mdfe->fiscal_status_message);
+    }
+
     public function test_generate_ciot_action_creates_and_emits_a_linked_ciot(): void
     {
         config(['ciot.removal.weight_per_vehicle_kg' => 2000]);
