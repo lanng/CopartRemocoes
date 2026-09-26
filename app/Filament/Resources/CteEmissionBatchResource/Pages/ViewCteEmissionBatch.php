@@ -10,7 +10,10 @@ use App\Services\Ciot\DispatchMdfeForBatch;
 use App\Services\Ciot\EmitCiotDeclaration;
 use App\Services\Cte\ApproveCteEmissionBatch;
 use App\Services\Cte\DeleteDraftCteEmissionBatch;
+use App\Services\Cte\ReconcileMdfeDocument;
+use DomainException;
 use Filament\Actions;
+use Filament\Forms\Components\TextInput;
 use Filament\Notifications\Notification;
 use Filament\Resources\Pages\ViewRecord;
 use Illuminate\Database\Eloquent\Relations\HasMany;
@@ -178,6 +181,63 @@ class ViewCteEmissionBatch extends ViewRecord
 
                     Notification::make()
                         ->title('MDF-e reenfileirado.')
+                        ->success()
+                        ->send();
+
+                    $this->redirect(CteEmissionBatchResource::getUrl('view', ['record' => $this->record]));
+                }),
+            Actions\Action::make('reconcileMdfe')
+                ->label('Conciliar MDF-e')
+                ->icon('heroicon-o-clipboard-document-check')
+                ->color('success')
+                ->visible(fn (): bool => $this->record->mdfeDocuments()
+                    ->where('status', CteDocumentStatusEnum::RECONCILIATION_REQUIRED->value)
+                    ->exists())
+                ->form([
+                    TextInput::make('access_key')
+                        ->label('Chave de acesso do MDF-e (44 dígitos)')
+                        ->mask(str_repeat('9', 44))
+                        ->maxLength(44)
+                        ->required(),
+                    TextInput::make('protocol')
+                        ->label('Protocolo de autorização (opcional)')
+                        ->maxLength(60),
+                ])
+                ->modalHeading('Conciliar MDF-e da viagem')
+                ->modalDescription('Use quando o agente autorizou o MDF-e no Lab mas não conseguiu reportar o resultado. O número e a série são derivados da chave de acesso.')
+                ->action(function (array $data): void {
+                    $mdfe = $this->record->mdfeDocuments()
+                        ->where('status', CteDocumentStatusEnum::RECONCILIATION_REQUIRED->value)
+                        ->latest('id')
+                        ->first();
+
+                    if ($mdfe === null) {
+                        Notification::make()
+                            ->title('Nenhum MDF-e aguardando conciliação neste lote.')
+                            ->warning()
+                            ->send();
+
+                        return;
+                    }
+
+                    try {
+                        app(ReconcileMdfeDocument::class)->handle(
+                            $mdfe,
+                            (string) $data['access_key'],
+                            filled($data['protocol'] ?? null) ? (string) $data['protocol'] : null,
+                        );
+                    } catch (DomainException $exception) {
+                        Notification::make()
+                            ->title('Falha ao conciliar o MDF-e')
+                            ->body($exception->getMessage())
+                            ->danger()
+                            ->send();
+
+                        return;
+                    }
+
+                    Notification::make()
+                        ->title('MDF-e conciliado e marcado como autorizado.')
                         ->success()
                         ->send();
 

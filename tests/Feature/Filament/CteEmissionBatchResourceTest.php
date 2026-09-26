@@ -125,6 +125,32 @@ class CteEmissionBatchResourceTest extends TestCase
         $this->assertNull($mdfe->fiscal_status_message);
     }
 
+    public function test_the_reconcile_mdfe_action_closes_a_reconciliation_with_the_access_key(): void
+    {
+        $batch = CteEmissionBatch::factory()->create([
+            'status' => CteEmissionBatchStatusEnum::COMPLETED,
+        ]);
+
+        MdfeDocument::factory()->create([
+            'cte_emission_batch_id' => $batch->id,
+            'status' => CteDocumentStatusEnum::RECONCILIATION_REQUIRED,
+        ]);
+
+        Livewire::test(ViewCteEmissionBatch::class, ['record' => $batch->id])
+            ->assertActionVisible('reconcileMdfe')
+            ->callAction('reconcileMdfe', data: [
+                'access_key' => '35260912563112000130580010000001231123456785',
+                'protocol' => '135260000123456',
+            ]);
+
+        $mdfe = MdfeDocument::query()->where('cte_emission_batch_id', $batch->id)->firstOrFail();
+
+        $this->assertSame('authorized', $mdfe->status->value);
+        $this->assertSame('000000123', $mdfe->mdfe_number);
+        $this->assertSame('001', $mdfe->series);
+        $this->assertSame('135260000123456', $mdfe->protocol);
+    }
+
     public function test_generate_ciot_action_creates_and_emits_a_linked_ciot(): void
     {
         config(['ciot.removal.weight_per_vehicle_kg' => 2000]);
