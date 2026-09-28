@@ -202,7 +202,7 @@ Commit autocontido e revertivel: `git commit -m "refactor(ciot): model state tra
 - Modify: `tests/Feature/Services/Ciot/EmitCiotDeclarationTest.php`
 - Create: `tests/Feature/Services/Ciot/EmitCiotOutcomeTest.php`
 
-- [ ] **2.1 Gerar os artefatos**
+- [x] **2.1 Gerar os artefatos**
 
 Run:
 ```bash
@@ -213,14 +213,14 @@ php artisan make:class Filament/Support/CiotEmissionNotice --no-interaction
 
 `CiotEmissionOutcome`: cases `Issued`, `Failed`, `Invalid`, `Queued`, `Enqueued`, `Errored`. `CiotEmissionResult`: `__construct(public readonly CiotEmissionOutcome $outcome, public readonly Ciot $ciot, public readonly ?string $message = null)` + `isIssued(): bool` + `fullNumber(): ?string`. `CiotEmissionNotice`: props readonly da secao Design, `static reemission(): self`, `send(CiotEmissionResult $result): void` usando `Filament\Notifications\Notification` (a classe correta — `Filament\Support\Notifications\Notification` nao existe).
 
-- [ ] **2.2 Escrever a matriz RED de outcomes**
+- [x] **2.2 Escrever a matriz RED de outcomes**
 
 Criar `tests/Feature/Services/Ciot/EmitCiotOutcomeTest.php` (mesmo `setUp()` de config do `EmitCiotDeclarationTest.php:21-34`) cobrindo via `emit()`: Issued (HTTP aceita), Failed (rejeicao de negocio, `error_message` no `message`), Invalid por `DomainException` (CIOT `issued()` — hoje o guard dispara em `BuildCiotDeclarationPayload.php:47-50`; registro inalterado, `Queue::assertNothingPushed`, sem `report()`), Invalid por `AnttCiotException` non-retryable no prepare (`/gerar` responde 400 com codigo), Queued por retryable no declare (`/api/DeclaracaoOperacaoTransporte` 500 -> `report()` + pushed + PENDING). Via `enqueue()`: Enqueued (prepare ok + pushed), Invalid por `DomainException` e por retryable do prepare (`/gerar` 500 — registro inalterado, sem push), Errored por `Throwable` (conexao recusada -> `report()`, registro inalterado). Regressao D3: `/gerar` 500 -> `emit()` devolve Queued com registro DRAFT -> arrumar `/gerar` 200 + declare aceito -> `(new EmitCiotJob($id))->handle(app(EmitCiotDeclaration::class))` -> ISSUED. E o caso terminal do job: `DomainException` dentro do handle marca FAILED sem relancar.
 
 Run: `php artisan test --compact tests/Feature/Services/Ciot/EmitCiotOutcomeTest.php`
 Expected: FAIL (metodos ausentes).
 
-- [ ] **2.3 Implementar `attempt`/`emit`/`enqueue`; `handle` vira adapter**
+- [x] **2.3 Implementar `attempt`/`emit`/`enqueue`; `handle` vira adapter**
 
 Em `EmitCiotDeclaration`: `attempt()` (prepare-if-needed `[DRAFT, FAILED] || payload vazio` -> `transitionTo(PENDING)` -> `DeclareCiot::handle`, lancando cru), `emit()` e `enqueue()` com a semantica da secao Design. `handle(Ciot, bool $sync)` permanece como adapter fino preservando o contrato atual: `sync: true` -> `return $this->attempt($ciot)` (lanca como hoje); `sync: false` -> o caminho interno compartilhado por `enqueue()` (prepare + dispatch + registro fresco). Nenhum call site muda nesta fase.
 
@@ -228,7 +228,7 @@ Run: `php artisan test --compact tests/Feature/Services/Ciot/EmitCiotOutcomeTest
 Run: `php artisan test --compact tests/Feature/Services/Ciot/EmitCiotDeclarationTest.php`
 Expected: PASS.
 
-- [ ] **2.4 Rewirar o job (D3) e atualizar testes mecanicamente**
+- [x] **2.4 Rewirar o job (D3) e atualizar testes mecanicamente**
 
 `EmitCiotJob::handle` (`app/Jobs/EmitCiotJob.php:45-54`): type-hint `EmitCiotDeclaration` e chamar `attempt($ciot)`; envolver em `try/catch (DomainException)` -> `transitionTo(FAILED, ['error_code' => null, 'error_message' => $e->getMessage()])` + `return` (terminal, sem queimar tentativas). Cuidado: se o registro JÁ esta FAILED (job re-tentando um CIOT com regras ainda violadas), `FAILED->FAILED` nao esta no mapa e `transitionTo` relancaria dentro do catch — pular a transicao quando o status ja for FAILED (apenas atualizar `error_message` ou retornar). `failed()`: encadear `transitionFrom(PENDING, FAILED, ...) ?? transitionFrom(DRAFT, FAILED, ...)`. Em `tests/Feature/Services/Ciot/EmitCiotDeclarationTest.php`: trocar `app(DeclareCiot::class)` por `app(EmitCiotDeclaration::class)` nas linhas 86, 114, 140, 163 e 191; `test_cannot_enqueue_an_issued_ciot` (58-65) passa a chamar `enqueue()` e assertar `CiotEmissionOutcome::Invalid` + `Queue::assertNothingPushed`; `test_failed_hook_marks_pending_ciot_as_failed` (202-216) ganha um caso DRAFT->FAILED. Middleware/tries/backoff intocados.
 
@@ -237,7 +237,7 @@ Run: `php artisan test --compact tests/Feature/Services/Ciot/EmitCiotOutcomeTest
 Run: `php artisan test --compact tests/Feature/Filament/CiotResourceTest.php tests/Feature/Filament/CteEmissionBatchResourceTest.php`
 Expected: PASS (UI ainda usa `handle()`, adapter preserva contrato).
 
-- [ ] **2.5 Fechar a fase**
+- [x] **2.5 Fechar a fase**
 
 Run: `php artisan test --compact tests/Feature/Services/Ciot/ tests/Feature/Models/CiotTransitionTest.php tests/Feature/Filament/CiotResourceTest.php tests/Feature/Filament/CteEmissionBatchResourceTest.php`
 Run: `vendor/bin/pint --dirty --format agent`

@@ -4,7 +4,8 @@ namespace App\Jobs;
 
 use App\Enums\CiotStatusEnum;
 use App\Models\Ciot;
-use App\Services\Ciot\DeclareCiot;
+use App\Services\Ciot\EmitCiotDeclaration;
+use DomainException;
 use Illuminate\Contracts\Queue\ShouldBeUnique;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
@@ -42,7 +43,7 @@ class EmitCiotJob implements ShouldBeUnique, ShouldQueue
         return [60, 300];
     }
 
-    public function handle(DeclareCiot $declarer): void
+    public function handle(EmitCiotDeclaration $emitter): void
     {
         $ciot = Ciot::query()->find($this->ciotId);
 
@@ -50,7 +51,22 @@ class EmitCiotJob implements ShouldBeUnique, ShouldQueue
             return;
         }
 
-        $declarer->handle($ciot);
+        try {
+            $emitter->attempt($ciot);
+        } catch (DomainException $exception) {
+            // Terminal: violação de regra/guard não melhora com retry —
+            // marca FAILED sem queimar as 3 tentativas + backoff.
+            if ($ciot->status === CiotStatusEnum::FAILED) {
+                $ciot->forceFill(['error_message' => $exception->getMessage()])->save();
+
+                return;
+            }
+
+            $ciot->transitionTo(CiotStatusEnum::FAILED, [
+                'error_code' => null,
+                'error_message' => $exception->getMessage(),
+            ]);
+        }
     }
 
     public function failed(Throwable $exception): void
@@ -58,10 +74,13 @@ class EmitCiotJob implements ShouldBeUnique, ShouldQueue
         $ciot = Ciot::query()->find($this->ciotId);
 
         if ($ciot !== null) {
-            $ciot->transitionFrom(CiotStatusEnum::PENDING, CiotStatusEnum::FAILED, fn (): array => [
+            $fields = fn (): array => [
                 'error_code' => 'job_exhausted',
                 'error_message' => $exception->getMessage(),
-            ]);
+            ];
+
+            $ciot->transitionFrom(CiotStatusEnum::PENDING, CiotStatusEnum::FAILED, $fields)
+                ?? $ciot->transitionFrom(CiotStatusEnum::DRAFT, CiotStatusEnum::FAILED, $fields);
         }
     }
 }
