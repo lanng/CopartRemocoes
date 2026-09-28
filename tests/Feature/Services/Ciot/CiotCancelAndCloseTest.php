@@ -147,6 +147,36 @@ class CiotCancelAndCloseTest extends TestCase
         });
     }
 
+    public function test_closes_a_fractioned_ciot_without_the_weight_rejection_274(): void
+    {
+        $ciot = Ciot::factory()->issued()->create([
+            'operation_type' => \App\Enums\CiotOperationTypeEnum::Fractioned,
+            'cargo_weight_kg' => '40000.00',
+        ]);
+
+        Http::fake([
+            'https://antt-hml.test/pefServices/api/EncerramentoOperacaoTransporte' => Http::response([
+                'CodigoIdentificacaoOperacao' => $ciot->fullNumber(),
+                'Codigo' => '110',
+                'Mensagem' => 'Encerrado com sucesso',
+                'DataEncerramento' => '2026-09-25T23:00:00-03:00',
+                'Protocolo' => 'N98000000130001',
+            ], 200),
+        ]);
+
+        $ciot = app(CloseCiot::class)->handle($ciot);
+
+        $this->assertSame(CiotStatusEnum::CLOSED, $ciot->status);
+
+        // Rejeição 274: peso é PROIBIDO no encerramento de carga fracionada.
+        Http::assertSent(function ($request) use ($ciot): bool {
+            return str_contains($request->url(), '/api/EncerramentoOperacaoTransporte')
+                && $request->data() === [
+                    'CodigoIdentificacaoOperacao' => $ciot->fullNumber(),
+                ];
+        });
+    }
+
     public function test_refuses_an_http_200_close_rejection_even_with_a_protocol(): void
     {
         $ciot = Ciot::factory()->issued()->create();

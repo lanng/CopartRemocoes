@@ -2,6 +2,7 @@
 
 namespace App\Services\Ciot;
 
+use App\Enums\CiotOperationTypeEnum;
 use App\Enums\CiotStatusEnum;
 use App\Models\Ciot;
 use DomainException;
@@ -17,9 +18,13 @@ class CloseCiot
             throw new DomainException('Somente CIOTs emitidos podem ser encerrados.');
         }
 
-        $pesoCarga = $ciot->cargo_weight_kg !== null ? (float) $ciot->cargo_weight_kg : null;
+        // Rejeição 274 da ANTT (25/09/2026): o peso é PROIBIDO no encerramento
+        // de carga fracionada e obrigatório apenas na lotação (spec §2.2).
+        $pesoCarga = $ciot->operation_type === CiotOperationTypeEnum::Lotation
+            ? (float) $ciot->cargo_weight_kg
+            : null;
 
-        if ($pesoCarga === null) {
+        if ($ciot->operation_type === CiotOperationTypeEnum::Lotation && $pesoCarga === null) {
             throw new DomainException('O encerramento exige o peso da carga: preencha o peso no CIOT antes de encerrar.');
         }
 
