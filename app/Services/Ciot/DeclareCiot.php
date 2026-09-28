@@ -4,7 +4,6 @@ namespace App\Services\Ciot;
 
 use App\Enums\CiotStatusEnum;
 use App\Models\Ciot;
-use Illuminate\Support\Facades\DB;
 
 /**
  * Envia a declaração pendente à ANTT e grava o resultado (emitido/falha).
@@ -39,30 +38,16 @@ class DeclareCiot
             );
         }
 
-        DB::transaction(function () use ($ciot, $response): void {
-            $ciot = Ciot::query()
-                ->whereKey($ciot->id)
-                ->lockForUpdate()
-                ->firstOrFail();
-
-            if ($ciot->status !== CiotStatusEnum::PENDING) {
-                return;
-            }
-
-            $ciot->forceFill([
-                'status' => CiotStatusEnum::ISSUED,
-                'ciot_number' => $response->identificacaoOperacao(),
-                'verifier_code' => $response->codigoVerificador(),
-                'protocol' => $response->protocolo(),
-                'carrier_notice' => $response->avisoTransportador(),
-                'issued_at' => now(),
-                'response' => $response->body,
-                'error_code' => null,
-                'error_message' => null,
-            ])->save();
-        });
-
-        $ciot = $ciot->refresh();
+        $ciot = $ciot->transitionFrom(CiotStatusEnum::PENDING, CiotStatusEnum::ISSUED, fn (Ciot $locked): array => [
+            'ciot_number' => $response->identificacaoOperacao(),
+            'verifier_code' => $response->codigoVerificador(),
+            'protocol' => $response->protocolo(),
+            'carrier_notice' => $response->avisoTransportador(),
+            'issued_at' => now(),
+            'response' => $response->body,
+            'error_code' => null,
+            'error_message' => null,
+        ]) ?? $ciot->refresh();
 
         // Viagem completa + CIOT emitido: despacha o MDF-e (idempotente — os
         // guards internos pulam se algo ainda falta, spec mdfe-agent-payload).
@@ -75,15 +60,9 @@ class DeclareCiot
 
     protected function markFailed(Ciot $ciot, ?string $codigo, string $mensagem): Ciot
     {
-        Ciot::query()
-            ->whereKey($ciot->id)
-            ->where('status', CiotStatusEnum::PENDING->value)
-            ->update([
-                'status' => CiotStatusEnum::FAILED->value,
-                'error_code' => $codigo,
-                'error_message' => $mensagem,
-            ]);
-
-        return $ciot->refresh();
+        return $ciot->transitionFrom(CiotStatusEnum::PENDING, CiotStatusEnum::FAILED, fn (): array => [
+            'error_code' => $codigo,
+            'error_message' => $mensagem,
+        ]) ?? $ciot->refresh();
     }
 }

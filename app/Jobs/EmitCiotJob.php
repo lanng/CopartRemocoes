@@ -57,12 +57,11 @@ class EmitCiotJob implements ShouldBeUnique, ShouldQueue
     {
         $ciot = Ciot::query()->find($this->ciotId);
 
-        if ($ciot !== null && $ciot->status === CiotStatusEnum::PENDING) {
-            $ciot->forceFill([
-                'status' => CiotStatusEnum::FAILED->value,
+        if ($ciot !== null) {
+            $ciot->transitionFrom(CiotStatusEnum::PENDING, CiotStatusEnum::FAILED, fn (): array => [
                 'error_code' => 'job_exhausted',
                 'error_message' => $exception->getMessage(),
-            ])->save();
+            ]);
         }
     }
 }

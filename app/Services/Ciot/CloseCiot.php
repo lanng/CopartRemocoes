@@ -6,7 +6,6 @@ use App\Enums\CiotOperationTypeEnum;
 use App\Enums\CiotStatusEnum;
 use App\Models\Ciot;
 use DomainException;
-use Illuminate\Support\Facades\DB;
 
 class CloseCiot
 {
@@ -40,23 +39,9 @@ class CloseCiot
             );
         }
 
-        return DB::transaction(function () use ($ciot, $response): Ciot {
-            $ciot = Ciot::query()
-                ->whereKey($ciot->id)
-                ->lockForUpdate()
-                ->firstOrFail();
-
-            if ($ciot->status !== CiotStatusEnum::ISSUED) {
-                return $ciot;
-            }
-
-            $ciot->forceFill([
-                'status' => CiotStatusEnum::CLOSED,
-                'closed_at' => now(),
-                'response' => array_merge($ciot->response ?? [], ['encerramento' => $response->body]),
-            ])->save();
-
-            return $ciot;
-        });
+        return $ciot->transitionFrom(CiotStatusEnum::ISSUED, CiotStatusEnum::CLOSED, fn (Ciot $locked): array => [
+            'closed_at' => now(),
+            'response' => array_merge($locked->response ?? [], ['encerramento' => $response->body]),
+        ]) ?? $ciot->refresh();
     }
 }

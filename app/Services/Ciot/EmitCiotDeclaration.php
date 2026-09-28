@@ -5,8 +5,6 @@ namespace App\Services\Ciot;
 use App\Enums\CiotStatusEnum;
 use App\Jobs\EmitCiotJob;
 use App\Models\Ciot;
-use DomainException;
-use Illuminate\Support\Facades\DB;
 
 class EmitCiotDeclaration
 {
@@ -25,27 +23,13 @@ class EmitCiotDeclaration
 
         $payload['IdOperacaoTransporte'] = $idOperacaoTransporte;
 
-        $ciot = DB::transaction(function () use ($ciot, $payload, $idOperacaoTransporte): Ciot {
-            $ciot = Ciot::query()
-                ->whereKey($ciot->id)
-                ->lockForUpdate()
-                ->firstOrFail();
-
-            if (! in_array($ciot->status, [CiotStatusEnum::DRAFT, CiotStatusEnum::FAILED], true)) {
-                throw new DomainException('Somente CIOTs em rascunho ou com falha podem ser emitidos.');
-            }
-
-            $ciot->forceFill([
-                'id_operacao_transporte' => $idOperacaoTransporte,
-                'payload' => $payload,
-                'status' => CiotStatusEnum::PENDING,
-                'error_code' => null,
-                'error_message' => null,
-                'response' => null,
-            ])->save();
-
-            return $ciot;
-        });
+        $ciot = $ciot->transitionTo(CiotStatusEnum::PENDING, [
+            'id_operacao_transporte' => $idOperacaoTransporte,
+            'payload' => $payload,
+            'error_code' => null,
+            'error_message' => null,
+            'response' => null,
+        ], guardMessage: 'Somente CIOTs em rascunho ou com falha podem ser emitidos.');
 
         if ($sync) {
             return app(DeclareCiot::class)->handle($ciot);
