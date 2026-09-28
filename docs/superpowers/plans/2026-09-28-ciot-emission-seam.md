@@ -258,46 +258,46 @@ Commit: `git commit -m "feat(ciot): emission outcome seam"`.
 - Modify: `tests/Feature/Filament/CiotResourceTest.php`
 - Modify: `tests/Feature/Filament/CteEmissionBatchResourceTest.php`
 
-- [ ] **3.1 Criar `CreateCiotForBatch` (D5)**
+- [x] **3.1 Criar `CreateCiotForBatch` (D5)**
 
 RED em `tests/Feature/Services/Ciot/CreateCiotForBatchTest.php`: criacao feliz devolve `Ciot` com `public_id` (UUID), `cte_emission_batch_id`, campos de `transformFormData` e activity log `"CIOT gerado pelo lote de CT-e #{$batch->id}."`; lote com CIOT ativo lanca `DomainException('Este lote já possui um CIOT ativo')`; lote so com CIOT `canceled` passa. Implementar com `DB::transaction()` + `lockForUpdate()` na LINHA do lote (`CteEmissionBatch::query()->whereKey($batch->id)->lockForUpdate()->firstOrFail()`) serializando a corrida, guard `whereNotIn('status', [CANCELED])` DENTRO da transacao, e o bloco absorvido de `GenerateCiotForBatchAction::submit` (`app/Filament/Actions/GenerateCiotForBatchAction.php:301-310`).
 
 Run: `php artisan test --compact tests/Feature/Services/Ciot/CreateCiotForBatchTest.php` — Expected: FAIL, depois GREEN.
 
-- [ ] **3.2 Migrar `CreateCiot` (D6 junto)**
+- [x] **3.2 Migrar `CreateCiot` (D6 junto)**
 
 `createAndEmit` (`app/Filament/Resources/CiotResource/Pages/CreateCiot.php:45-89`) vira: criar registro (igual), `$result = app(EmitCiotDeclaration::class)->emit($record)`, `(new CiotEmissionNotice())->send($result)`, `$this->redirect(CiotResource::getUrl('view', ['record' => $result->ciot]))`. D6: `mutateFormDataBeforeCreate` (`:95-111`) passa a fazer `$data['public_id'] = (string) Str::uuid(); return CiotResource::transformFormData($data);` — a poda B119 `withoutPayerCnpjs` (`CiotResource.php:548`) passa a valer no create avulso.
 
 Run: `php artisan test --compact tests/Feature/Filament/CiotResourceTest.php`
 Expected: PASS — `test_create_and_emit_issues_the_ciot_synchronously` (236-286) asserta `CIOT emitido: 5200329599990001` e `Queue::assertNothingPushed` byte-identical; `test_the_create_form_builds_a_draft_ciot_snapshot` (59-100) prova o D6 sem quebrar.
 
-- [ ] **3.3 Migrar `EditCiot` e `ViewCiot` (D1 morre) — primeira cobertura deles**
+- [x] **3.3 Migrar `EditCiot` e `ViewCiot` (D1 morre) — primeira cobertura deles**
 
 Remover o import fantasma `Filament\Support\Notifications\Notification` das linhas 12 (`EditCiot.php`) e 11 (`ViewCiot.php`). `saveAndEmit` (`EditCiot.php:60-100`): `$this->save()` + `emit()` + `(new CiotEmissionNotice(queuedTitle: 'CIOT salvo — emissão em processamento'))->send($result)` + redirect via `getRedirectUrl()`. Acao `emit` da `ViewCiot` (`ViewCiot.php:28-74`): `emit()` + notice com `queuedTitle: 'Emissão em processamento'` + redirect para a view do CIOT. Novos testes parametrizados em `tests/Feature/Filament/CiotResourceTest.php`: para cada site, happy path (assert `assertNotified('CIOT emitido: ...')`) + um caso por outcome de notice (Queued warning, Failed danger com body, Invalid danger com body).
 
 Run: `php artisan test --compact tests/Feature/Filament/CiotResourceTest.php` — Expected: PASS.
 
-- [ ] **3.4 Migrar `GenerateCiotForBatchAction`**
+- [x] **3.4 Migrar `GenerateCiotForBatchAction`**
 
 `submit` (`app/Filament/Actions/GenerateCiotForBatchAction.php:284-346`) vira: `try { $ciot = app(CreateCiotForBatch::class)->handle($batch, $data); } catch (DomainException) { warning verbatim 'Este lote já possui um CIOT ativo' + body 'Cancele o CIOT existente para emitir outro para esta viagem.'; return; }` + `emit()` + `(new CiotEmissionNotice())->send($result)` + `redirect()->to(...)` (helper global, como hoje). Remover imports mortos (`EmitCiotJob`, `Throwable`, `Str`, `Ciot` conforme sobrar).
 
 Run: `php artisan test --compact tests/Feature/Filament/CteEmissionBatchResourceTest.php --filter=generate_ciot`
 Expected: PASS — happy (154-227), additional payers (229-316), B119 (318-375) e duplicado (425-462) byte-identical.
 
-- [ ] **3.5 Migrar `reemitCiot` (D2 morre) + ramo null**
+- [x] **3.5 Migrar `reemitCiot` (D2 morre) + ramo null**
 
 `app/Filament/Resources/CteEmissionBatchResource/Pages/ViewCteEmissionBatch.php:62-120`: manter localmente a busca do ultimo CIOT FAILED + null-guard `Nenhum CIOT com falha neste lote.`; o resto vira `emit()` + `CiotEmissionNotice::reemission()->send($result)` + redirect para a view do LOTE. Adicionar imports (`CiotEmissionNotice`) e remover os mortos. Novo teste do ramo null (lote sem CIOT FAILED chama a acao e asserta o warning) em `tests/Feature/Filament/CteEmissionBatchResourceTest.php`.
 
 Run: `php artisan test --compact tests/Feature/Filament/CteEmissionBatchResourceTest.php` — Expected: PASS (`CIOT reemitido: 5200329522220002` verbatim, 377-423).
 
-- [ ] **3.6 Migrar a acao `emit` da `ListCiots` (D4 morre)**
+- [x] **3.6 Migrar a acao `emit` da `ListCiots` (D4 morre)**
 
 `app/Filament/Resources/CiotResource.php:404-436`: os dois `catch` e o success manual viram `$result = app(EmitCiotDeclaration::class)->enqueue($record); (new CiotEmissionNotice())->send($result);` — sem redirect. Enqueued -> `Emissão enfileirada.`, Invalid -> `Falha ao emitir o CIOT` + mensagem real (D4: antes warning falso), Errored -> `Erro inesperado ao emitir o CIOT` verbatim.
 
 Run: `php artisan test --compact tests/Feature/Filament/CiotResourceTest.php --filter=test_the_emit_action_enqueues_the_emission`
 Expected: PASS (102-120 byte-identical).
 
-- [ ] **3.7 Fechar a fase**
+- [x] **3.7 Fechar a fase**
 
 Run: `php artisan test --compact tests/Feature/Services/Ciot/CreateCiotForBatchTest.php tests/Feature/Services/Ciot/EmitCiotOutcomeTest.php tests/Feature/Services/Ciot/EmitCiotDeclarationTest.php tests/Feature/Models/CiotTransitionTest.php tests/Feature/Filament/CiotResourceTest.php tests/Feature/Filament/CteEmissionBatchResourceTest.php`
 Run: `vendor/bin/pint --dirty --format agent`

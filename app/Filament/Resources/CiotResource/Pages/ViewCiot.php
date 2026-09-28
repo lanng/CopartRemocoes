@@ -4,12 +4,10 @@ namespace App\Filament\Resources\CiotResource\Pages;
 
 use App\Enums\CiotStatusEnum;
 use App\Filament\Resources\CiotResource;
-use App\Jobs\EmitCiotJob;
+use App\Filament\Support\CiotEmissionNotice;
 use App\Services\Ciot\EmitCiotDeclaration;
 use Filament\Actions\Action;
 use Filament\Resources\Pages\ViewRecord;
-use Filament\Support\Notifications\Notification;
-use Throwable;
 
 class ViewCiot extends ViewRecord
 {
@@ -35,42 +33,11 @@ class ViewCiot extends ViewRecord
                 ->modalHeading('Emitir CIOT na ANTT')
                 ->modalDescription('A declaração será enviada agora; o botão fica em loading até a resposta da ANTT.')
                 ->action(function (): void {
-                    $record = $this->getRecord();
+                    $result = app(EmitCiotDeclaration::class)->emit($this->getRecord());
 
-                    try {
-                        $record = app(EmitCiotDeclaration::class)->handle($record, sync: true);
-                    } catch (Throwable $exception) {
-                        report($exception);
+                    (new CiotEmissionNotice(queuedTitle: 'Emissão em processamento'))->send($result);
 
-                        EmitCiotJob::dispatch($record->id);
-
-                        Notification::make()
-                            ->title('Emissão em processamento')
-                            ->body('A ANTT não respondeu agora; a emissão ficou na fila com retry automático.')
-                            ->warning()
-                            ->send();
-
-                        $this->redirect(CiotResource::getUrl('view', ['record' => $record]));
-
-                        return;
-                    }
-
-                    $record->refresh();
-
-                    if ($record->status === CiotStatusEnum::ISSUED) {
-                        Notification::make()
-                            ->title('CIOT emitido: '.$record->fullNumber())
-                            ->success()
-                            ->send();
-                    } else {
-                        Notification::make()
-                            ->title('Emissão rejeitada pela ANTT')
-                            ->body((string) $record->error_message)
-                            ->danger()
-                            ->send();
-                    }
-
-                    $this->redirect(CiotResource::getUrl('view', ['record' => $record]));
+                    $this->redirect(CiotResource::getUrl('view', ['record' => $result->ciot]));
                 }),
         ];
     }

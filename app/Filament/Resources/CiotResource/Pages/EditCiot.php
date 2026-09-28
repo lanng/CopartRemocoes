@@ -2,15 +2,12 @@
 
 namespace App\Filament\Resources\CiotResource\Pages;
 
-use App\Enums\CiotStatusEnum;
 use App\Filament\Resources\CiotResource;
-use App\Jobs\EmitCiotJob;
+use App\Filament\Support\CiotEmissionNotice;
 use App\Services\Ciot\EmitCiotDeclaration;
 use Filament\Actions;
 use Filament\Actions\Action;
 use Filament\Resources\Pages\EditRecord;
-use Filament\Support\Notifications\Notification;
-use Throwable;
 
 class EditCiot extends EditRecord
 {
@@ -61,40 +58,9 @@ class EditCiot extends EditRecord
     {
         $this->save();
 
-        $record = $this->getRecord();
+        $result = app(EmitCiotDeclaration::class)->emit($this->getRecord());
 
-        try {
-            $record = app(EmitCiotDeclaration::class)->handle($record, sync: true);
-        } catch (Throwable $exception) {
-            report($exception);
-
-            EmitCiotJob::dispatch($record->id);
-
-            Notification::make()
-                ->title('CIOT salvo — emissão em processamento')
-                ->body('A ANTT não respondeu agora; a emissão ficou na fila com retry automático.')
-                ->warning()
-                ->send();
-
-            $this->redirect($this->getRedirectUrl());
-
-            return;
-        }
-
-        $record->refresh();
-
-        if ($record->status === CiotStatusEnum::ISSUED) {
-            Notification::make()
-                ->title('CIOT emitido: '.$record->fullNumber())
-                ->success()
-                ->send();
-        } else {
-            Notification::make()
-                ->title('Emissão rejeitada pela ANTT')
-                ->body((string) $record->error_message)
-                ->danger()
-                ->send();
-        }
+        (new CiotEmissionNotice(queuedTitle: 'CIOT salvo — emissão em processamento'))->send($result);
 
         $this->redirect($this->getRedirectUrl());
     }

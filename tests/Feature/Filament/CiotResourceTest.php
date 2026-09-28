@@ -285,6 +285,180 @@ class CiotResourceTest extends TestCase
         Queue::assertNothingPushed();
     }
 
+    public function test_save_and_emit_issues_the_ciot_synchronously(): void
+    {
+        Queue::fake();
+
+        $ciot = $this->editableCiot();
+
+        $this->fakeAnttAcceptingTheDeclaration('520032959997');
+
+        Livewire::test(EditCiot::class, ['record' => $ciot->id])
+            ->call('saveAndEmit')
+            ->assertNotified('CIOT emitido: 5200329599970001');
+
+        $this->assertSame(CiotStatusEnum::ISSUED, $ciot->refresh()->status);
+
+        Queue::assertNothingPushed();
+    }
+
+    public function test_save_and_emit_warns_when_the_antt_does_not_respond(): void
+    {
+        Queue::fake();
+
+        $ciot = $this->editableCiot();
+
+        $this->fakeAnttQueueingTheDeclaration('520032959997');
+
+        $component = Livewire::test(EditCiot::class, ['record' => $ciot->id])
+            ->call('saveAndEmit');
+
+        $this->assertNotificationSent(
+            'CIOT salvo — emissão em processamento',
+            'A ANTT não respondeu agora; a emissão ficou na fila com retry automático.',
+            'warning',
+        );
+
+        $component->assertNotified('CIOT salvo — emissão em processamento');
+
+        $this->assertSame(CiotStatusEnum::PENDING, $ciot->refresh()->status);
+
+        Queue::assertPushed(EmitCiotJob::class);
+    }
+
+    public function test_save_and_emit_notifies_the_antt_rejection(): void
+    {
+        Queue::fake();
+
+        $ciot = $this->editableCiot();
+
+        $this->fakeAnttRejectingTheDeclaration('520032959997');
+
+        $component = Livewire::test(EditCiot::class, ['record' => $ciot->id])
+            ->call('saveAndEmit');
+
+        $this->assertNotificationSent('Emissão rejeitada pela ANTT', 'Contratante bloqueado', 'danger');
+
+        $component->assertNotified('Emissão rejeitada pela ANTT');
+
+        $this->assertSame(CiotStatusEnum::FAILED, $ciot->refresh()->status);
+
+        Queue::assertNothingPushed();
+    }
+
+    public function test_save_and_emit_notifies_an_invalid_ciot(): void
+    {
+        Queue::fake();
+
+        $ciot = $this->editableCiot();
+
+        Http::fake([
+            'https://antt-hml.test/pefServices/gerar' => Http::response('CNPJ nao autorizado', 400),
+        ]);
+
+        $component = Livewire::test(EditCiot::class, ['record' => $ciot->id])
+            ->call('saveAndEmit');
+
+        $this->assertNotificationSent(
+            'Falha ao emitir o CIOT',
+            'Geração de IdOperacaoTransporte falhou (HTTP 400): CNPJ nao autorizado',
+            'danger',
+        );
+
+        $component->assertNotified('Falha ao emitir o CIOT');
+
+        $this->assertSame(CiotStatusEnum::DRAFT, $ciot->refresh()->status);
+
+        Queue::assertNothingPushed();
+    }
+
+    public function test_the_view_emit_action_issues_the_ciot_synchronously(): void
+    {
+        Queue::fake();
+
+        $ciot = $this->editableCiot();
+
+        $this->fakeAnttAcceptingTheDeclaration('520032959997');
+
+        Livewire::test(ViewCiot::class, ['record' => $ciot->id])
+            ->callAction('emit')
+            ->assertNotified('CIOT emitido: 5200329599970001');
+
+        $this->assertSame(CiotStatusEnum::ISSUED, $ciot->refresh()->status);
+
+        Queue::assertNothingPushed();
+    }
+
+    public function test_the_view_emit_action_warns_when_the_antt_does_not_respond(): void
+    {
+        Queue::fake();
+
+        $ciot = $this->editableCiot();
+
+        $this->fakeAnttQueueingTheDeclaration('520032959997');
+
+        $component = Livewire::test(ViewCiot::class, ['record' => $ciot->id])
+            ->callAction('emit');
+
+        $this->assertNotificationSent(
+            'Emissão em processamento',
+            'A ANTT não respondeu agora; a emissão ficou na fila com retry automático.',
+            'warning',
+        );
+
+        $component->assertNotified('Emissão em processamento');
+
+        $this->assertSame(CiotStatusEnum::PENDING, $ciot->refresh()->status);
+
+        Queue::assertPushed(EmitCiotJob::class);
+    }
+
+    public function test_the_view_emit_action_notifies_the_antt_rejection(): void
+    {
+        Queue::fake();
+
+        $ciot = $this->editableCiot();
+
+        $this->fakeAnttRejectingTheDeclaration('520032959997');
+
+        $component = Livewire::test(ViewCiot::class, ['record' => $ciot->id])
+            ->callAction('emit');
+
+        $this->assertNotificationSent('Emissão rejeitada pela ANTT', 'Contratante bloqueado', 'danger');
+
+        $component->assertNotified('Emissão rejeitada pela ANTT');
+
+        $this->assertSame(CiotStatusEnum::FAILED, $ciot->refresh()->status);
+
+        Queue::assertNothingPushed();
+    }
+
+    public function test_the_view_emit_action_notifies_an_invalid_ciot(): void
+    {
+        Queue::fake();
+
+        $ciot = $this->editableCiot();
+
+        Http::fake([
+            'https://antt-hml.test/pefServices/gerar' => Http::response('CNPJ nao autorizado', 400),
+        ]);
+
+        $component = Livewire::test(ViewCiot::class, ['record' => $ciot->id])
+            ->callAction('emit');
+
+        $this->assertNotificationSent(
+            'Falha ao emitir o CIOT',
+            'Geração de IdOperacaoTransporte falhou (HTTP 400): CNPJ nao autorizado',
+            'danger',
+        );
+
+        $component->assertNotified('Falha ao emitir o CIOT');
+
+        $this->assertSame(CiotStatusEnum::DRAFT, $ciot->refresh()->status);
+
+        Queue::assertNothingPushed();
+    }
+
     public function test_edit_updates_a_failed_ciot_without_recreating_it(): void
     {
         $payer = CiotPayer::factory()->create(['cnpj' => '14517191000925']);
@@ -416,5 +590,94 @@ class CiotResourceTest extends TestCase
         Ciot::factory()->create();
 
         $this->assertSame('2', CiotResource::getNavigationBadge());
+    }
+
+    /**
+     * Confirma título, corpo e status da notificação enviada (o
+     * assertNotified do Filament cobre apenas o título).
+     */
+    protected function assertNotificationSent(string $title, ?string $body, string $status): void
+    {
+        $notification = collect(session('filament.notifications', []))
+            ->first(fn (array $sent): bool => $sent['title'] === $title);
+
+        $this->assertNotNull($notification, "A notificação '{$title}' não foi enviada.");
+        $this->assertSame($body, $notification['body']);
+        $this->assertSame($status, $notification['status']);
+    }
+
+    /**
+     * Rascunho hidratável pelo formulário de edição: pagante e veículo
+     * existem como registros, então o save() valida e o emit() tem payload.
+     */
+    protected function editableCiot(): Ciot
+    {
+        $payer = CiotPayer::factory()->create(['cnpj' => '14517191000925']);
+        CiotVehicle::factory()->create(['plate' => 'PUC8E55', 'type' => 'automotor', 'axles' => 3]);
+
+        return Ciot::factory()->create([
+            'payer_id' => $payer->id,
+            'payer_cnpj' => $payer->cnpj,
+            'payer_name' => $payer->name,
+            'delivery_payer_id' => $payer->id,
+            'delivery_payer_cnpj' => $payer->cnpj,
+            'delivery_payer_name' => $payer->name,
+            'vehicles' => [['placa' => 'PUC8E55', 'rntrc' => '045963122', 'eixos' => 3, 'tipo' => 'automotor']],
+            'freight_value_cents' => 100000,
+        ]);
+    }
+
+    /**
+     * Stub do caminho feliz: gerador de IdOperacaoTransporte, token e
+     * declaração aceita com protocolo de 16 dígitos.
+     */
+    protected function fakeAnttAcceptingTheDeclaration(string $idOperacaoTransporte): void
+    {
+        Http::fake([
+            'https://antt-hml.test/pefServices/gerar' => Http::response([
+                'Sucesso' => true,
+                'Dados' => ['CIOT' => $idOperacaoTransporte],
+            ], 200),
+            'https://antt-hml.test/pefServices/token' => Http::response(['token' => 'tok'], 200),
+            'https://antt-hml.test/pefServices/api/DeclaracaoOperacaoTransporte' => Http::response([
+                'Codigo' => '110',
+                'Mensagem' => 'Dados cadastrados com sucesso',
+                'Protocolo' => $idOperacaoTransporte.'0001',
+                'CodigoVerificador' => '0001',
+                'IdOperacaoTransporte' => $idOperacaoTransporte,
+            ], 200),
+        ]);
+    }
+
+    /**
+     * Stub do fallback: prepare aceito, declaração recusada (500 retryable) —
+     * a emissão fica PENDING com o job na fila.
+     */
+    protected function fakeAnttQueueingTheDeclaration(string $idOperacaoTransporte): void
+    {
+        Http::fake([
+            'https://antt-hml.test/pefServices/gerar' => Http::response([
+                'Sucesso' => true,
+                'Dados' => ['CIOT' => $idOperacaoTransporte],
+            ], 200),
+            'https://antt-hml.test/pefServices/api/DeclaracaoOperacaoTransporte' => Http::response('boom', 500),
+        ]);
+    }
+
+    /**
+     * Stub da rejeição de negócio: declaração respondida com Código 999.
+     */
+    protected function fakeAnttRejectingTheDeclaration(string $idOperacaoTransporte): void
+    {
+        Http::fake([
+            'https://antt-hml.test/pefServices/gerar' => Http::response([
+                'Sucesso' => true,
+                'Dados' => ['CIOT' => $idOperacaoTransporte],
+            ], 200),
+            'https://antt-hml.test/pefServices/api/DeclaracaoOperacaoTransporte' => Http::response([
+                'Codigo' => '999',
+                'Mensagem' => 'Contratante bloqueado',
+            ], 200),
+        ]);
     }
 }

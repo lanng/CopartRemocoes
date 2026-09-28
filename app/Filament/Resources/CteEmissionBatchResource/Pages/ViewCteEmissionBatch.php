@@ -6,6 +6,8 @@ use App\Enums\CiotStatusEnum;
 use App\Enums\CteDocumentStatusEnum;
 use App\Filament\Actions\GenerateCiotForBatchAction;
 use App\Filament\Resources\CteEmissionBatchResource;
+use App\Filament\Support\CiotEmissionNotice;
+use App\Models\Ciot;
 use App\Services\Ciot\DispatchMdfeForBatch;
 use App\Services\Ciot\EmitCiotDeclaration;
 use App\Services\Cte\ApproveCteEmissionBatch;
@@ -83,38 +85,9 @@ class ViewCteEmissionBatch extends ViewRecord
                         return;
                     }
 
-                    try {
-                        $ciot = app(EmitCiotDeclaration::class)->handle($ciot, sync: true);
-                    } catch (Throwable $exception) {
-                        report($exception);
+                    $result = app(EmitCiotDeclaration::class)->emit($ciot);
 
-                        EmitCiotJob::dispatch($ciot->id);
-
-                        Notification::make()
-                            ->title('Reemissão em processamento')
-                            ->body('A ANTT não respondeu agora; a reemissão ficou na fila com retry automático.')
-                            ->warning()
-                            ->send();
-
-                        $this->redirect(CteEmissionBatchResource::getUrl('view', ['record' => $this->record]));
-
-                        return;
-                    }
-
-                    $ciot->refresh();
-
-                    if ($ciot->status === CiotStatusEnum::ISSUED) {
-                        Notification::make()
-                            ->title('CIOT reemitido: '.$ciot->fullNumber())
-                            ->success()
-                            ->send();
-                    } else {
-                        Notification::make()
-                            ->title('Reemissão rejeitada pela ANTT')
-                            ->body((string) $ciot->error_message)
-                            ->danger()
-                            ->send();
-                    }
+                    CiotEmissionNotice::reemission()->send($result);
 
                     $this->redirect(CteEmissionBatchResource::getUrl('view', ['record' => $this->record]));
                 }),
