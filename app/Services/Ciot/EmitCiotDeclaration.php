@@ -93,23 +93,6 @@ class EmitCiotDeclaration
     }
 
     /**
-     * Adapter legacy do contrato anterior: `sync: true` lança como hoje,
-     * `sync: false` prepara e despacha. Removido na Fase 4.
-     */
-    public function handle(Ciot $ciot, bool $sync = false): Ciot
-    {
-        if ($sync) {
-            return $this->attempt($ciot);
-        }
-
-        $ciot = $this->prepareIfNeeded($ciot);
-
-        EmitCiotJob::dispatch($ciot->id);
-
-        return $ciot;
-    }
-
-    /**
      * Valida as regras, obtém o IdOperacaoTransporte do servidor ANTT
      * (nunca inventado pelo cliente — spec §2.1) e grava o PENDING.
      * PENDING com payload pula direto (já preparado).

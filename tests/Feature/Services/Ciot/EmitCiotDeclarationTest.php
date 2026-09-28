@@ -46,13 +46,14 @@ class EmitCiotDeclarationTest extends TestCase
 
         $ciot = Ciot::factory()->create();
 
-        $ciot = app(EmitCiotDeclaration::class)->handle($ciot);
+        $result = app(EmitCiotDeclaration::class)->enqueue($ciot);
 
-        $this->assertSame(CiotStatusEnum::PENDING, $ciot->status);
-        $this->assertSame('560000569999', $ciot->id_operacao_transporte);
-        $this->assertSame('560000569999', $ciot->payload['IdOperacaoTransporte']);
+        $this->assertSame(CiotEmissionOutcome::Enqueued, $result->outcome);
+        $this->assertSame(CiotStatusEnum::PENDING, $result->ciot->status);
+        $this->assertSame('560000569999', $result->ciot->id_operacao_transporte);
+        $this->assertSame('560000569999', $result->ciot->payload['IdOperacaoTransporte']);
 
-        Queue::assertPushed(EmitCiotJob::class, fn (EmitCiotJob $job): bool => $job->ciotId === $ciot->id);
+        Queue::assertPushed(EmitCiotJob::class, fn (EmitCiotJob $job): bool => $job->ciotId === $result->ciot->id);
     }
 
     public function test_cannot_enqueue_an_issued_ciot(): void

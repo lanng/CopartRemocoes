@@ -310,13 +310,13 @@ Commit: `git commit -m "refactor(ciot): six call sites on the emission seam"`.
 - Modify: `app/Services/Ciot/EmitCiotDeclaration.php`
 - Modify: `tests/Feature/Services/Ciot/EmitCiotDeclarationTest.php`
 
-- [ ] **4.1 Deletar `handle()`/`bool $sync` e migrar o ultimo teste**
+- [x] **4.1 Deletar `handle()`/`bool $sync` e migrar o ultimo teste**
 
 Remover `handle()` de `app/Services/Ciot/EmitCiotDeclaration.php`. `test_enqueueing_sets_the_ciot_pending_and_dispatches_the_job` (`tests/Feature/Services/Ciot/EmitCiotDeclarationTest.php:36-56`) passa a usar `enqueue()` e assertar `CiotEmissionOutcome::Enqueued`, `status` PENDING, `id_operacao_transporte` no payload e `Queue::assertPushed` com `ciotId`.
 
 Run: `php artisan test --compact tests/Feature/Services/Ciot/EmitCiotDeclarationTest.php` — Expected: PASS.
 
-- [ ] **4.2 Cacar sobreviventes**
+- [x] **4.2 Cacar sobreviventes**
 
 Run:
 ```bash
@@ -325,7 +325,7 @@ grep -rn "DeclareCiot" app/Filament app/Jobs tests/Feature/Filament
 ```
 Expected: zero ocorrencias do primeiro grupo; `DeclareCiot` restante apenas em `app/Services/Ciot/` e nos tests de servico.
 
-- [ ] **4.3 Suite completa e fechamento**
+- [x] **4.3 Suite completa e fechamento**
 
 Run: `php artisan test --compact`
 Run: `vendor/bin/pint --dirty --format agent`
