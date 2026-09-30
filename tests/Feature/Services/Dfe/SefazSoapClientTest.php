@@ -173,13 +173,13 @@ class SefazSoapClientTest extends TestCase
 
     public function test_http_options_force_tls_1_2_http_1_1_and_p12_certificate(): void
     {
-        $options = $this->invokeHttpOptions();
+        $curl = $this->invokeHttpOptions()['curl'];
 
-        $this->assertSame(CURL_SSLVERSION_TLSv1_2, $options[CURLOPT_SSLVERSION]);
-        $this->assertSame(CURL_HTTP_VERSION_1_1, $options[CURLOPT_HTTP_VERSION]);
-        $this->assertSame($this->certPath, $options['curl'][CURLOPT_SSLCERT]);
-        $this->assertSame('P12', $options['curl'][CURLOPT_SSLCERTTYPE]);
-        $this->assertSame($this->certPassword, $options['curl'][CURLOPT_SSLCERTPASSWD]);
+        $this->assertSame(CURL_SSLVERSION_TLSv1_2, $curl[CURLOPT_SSLVERSION]);
+        $this->assertSame(CURL_HTTP_VERSION_1_1, $curl[CURLOPT_HTTP_VERSION]);
+        $this->assertSame($this->certPath, $curl[CURLOPT_SSLCERT]);
+        $this->assertSame('P12', $curl[CURLOPT_SSLCERTTYPE]);
+        $this->assertSame($this->certPassword, $curl[CURLOPT_SSLCERTPASSWD]);
     }
 
     public function test_http_options_verify_peer_with_the_ca_bundle_when_provisioned(): void
@@ -188,11 +188,11 @@ class SefazSoapClientTest extends TestCase
         file_put_contents($caBundle, "-----BEGIN CERTIFICATE-----\ntest\n-----END CERTIFICATE-----\n");
         config(['dfe.ca_bundle' => $caBundle]);
 
-        $options = $this->invokeHttpOptions();
+        $curl = $this->invokeHttpOptions()['curl'];
 
-        $this->assertTrue($options[CURLOPT_SSL_VERIFYPEER]);
-        $this->assertSame(2, $options[CURLOPT_SSL_VERIFYHOST]);
-        $this->assertSame($caBundle, $options[CURLOPT_CAINFO]);
+        $this->assertTrue($curl[CURLOPT_SSL_VERIFYPEER]);
+        $this->assertSame(2, $curl[CURLOPT_SSL_VERIFYHOST]);
+        $this->assertSame($caBundle, $curl[CURLOPT_CAINFO]);
 
         unlink($caBundle);
     }

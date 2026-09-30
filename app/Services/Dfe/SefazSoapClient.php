@@ -106,7 +106,10 @@ class SefazSoapClient
      */
     protected function httpOptions(): array
     {
-        $options = [
+        // Todas as opções de TLS vão no sub-array 'curl': o Guzzle só aplica
+        // CURLOPT_* a partir dele (opções inteiras de nível superior são
+        // ignoradas). TLS 1.2 + HTTP/1.1 forçados como no AnttCiotClient (spec §2.3).
+        $curl = [
             CURLOPT_SSLVERSION => CURL_SSLVERSION_TLSv1_2,
             CURLOPT_HTTP_VERSION => CURL_HTTP_VERSION_1_1,
         ];
@@ -116,9 +119,9 @@ class SefazSoapClient
         if ($caBundle !== '' && is_readable($caBundle)) {
             // Verificação de peer obrigatória com a cadeia CA da SEFAZ embutida
             // (spec §7) — VERIFYPEER=false era artefato de spike.
-            $options[CURLOPT_SSL_VERIFYPEER] = true;
-            $options[CURLOPT_SSL_VERIFYHOST] = 2;
-            $options[CURLOPT_CAINFO] = $caBundle;
+            $curl[CURLOPT_SSL_VERIFYPEER] = true;
+            $curl[CURLOPT_SSL_VERIFYHOST] = 2;
+            $curl[CURLOPT_CAINFO] = $caBundle;
         } else {
             if ($this->tpAmb() === 1) {
                 throw new SefazException('Cadeia CA da SEFAZ não encontrada (DFE_CA_BUNDLE): verificação de peer é obrigatória em produção (spec §7).');
@@ -126,19 +129,17 @@ class SefazSoapClient
 
             $this->log('warning', 'DFE_CA_BUNDLE inexistente — verificação de TLS desativada (aceitável apenas em homologação).');
 
-            $options[CURLOPT_SSL_VERIFYPEER] = false;
-            $options[CURLOPT_SSL_VERIFYHOST] = 0;
+            $curl[CURLOPT_SSL_VERIFYPEER] = false;
+            $curl[CURLOPT_SSL_VERIFYHOST] = 0;
         }
 
         // Mesmo A1 do CIOT, P12 direto (spec §7).
-        $options['curl'] = [
-            CURLOPT_SSLCERT => $this->certificate->certificatePath(),
-            CURLOPT_SSLCERTTYPE => 'P12',
-            CURLOPT_SSLCERTPASSWD => $this->certificate->password(),
-            CURLOPT_SSLKEYPASSWD => $this->certificate->password(),
-        ];
+        $curl[CURLOPT_SSLCERT] = $this->certificate->certificatePath();
+        $curl[CURLOPT_SSLCERTTYPE] = 'P12';
+        $curl[CURLOPT_SSLCERTPASSWD] = $this->certificate->password();
+        $curl[CURLOPT_SSLKEYPASSWD] = $this->certificate->password();
 
-        return $options;
+        return ['curl' => $curl];
     }
 
     protected function tpAmb(): int
