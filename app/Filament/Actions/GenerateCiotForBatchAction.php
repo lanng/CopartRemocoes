@@ -4,14 +4,15 @@ namespace App\Filament\Actions;
 
 use App\Enums\CiotStatusEnum;
 use App\Enums\CteEmissionBatchStatusEnum;
-use App\Jobs\EmitCiotJob;
-use App\Models\Ciot;
+use App\Filament\Support\CiotEmissionNotice;
 use App\Models\CiotPayer;
 use App\Models\City;
 use App\Models\CteEmissionBatch;
 use App\Services\Ciot\CityDistanceCalculator;
+use App\Services\Ciot\CreateCiotForBatch;
 use App\Services\Ciot\EmitCiotDeclaration;
 use App\Services\Ciot\PrefillCiotFromBatch;
+use DomainException;
 use Filament\Actions\Action;
 use Filament\Forms\Components\Actions\Action as FormsAction;
 use Filament\Forms\Components\CheckboxList;
@@ -25,8 +26,6 @@ use Filament\Forms\Components\Toggle;
 use Filament\Forms\Get;
 use Filament\Forms\Set;
 use Filament\Notifications\Notification;
-use Illuminate\Support\Str;
-use Throwable;
 
 class GenerateCiotForBatchAction
 {
@@ -283,12 +282,9 @@ class GenerateCiotForBatchAction
 
     protected static function submit(CteEmissionBatch $batch, array $data): void
     {
-        $duplicado = Ciot::query()
-            ->where('cte_emission_batch_id', $batch->id)
-            ->whereNotIn('status', [CiotStatusEnum::CANCELED->value])
-            ->exists();
-
-        if ($duplicado) {
+        try {
+            $ciot = app(CreateCiotForBatch::class)->handle($batch, $data);
+        } catch (DomainException) {
             Notification::make()
                 ->title('Este lote já possui um CIOT ativo')
                 ->body('Cancele o CIOT existente para emitir outro para esta viagem.')
@@ -298,50 +294,10 @@ class GenerateCiotForBatchAction
             return;
         }
 
-        $data['public_id'] = (string) Str::uuid();
-        $data['cte_emission_batch_id'] = $batch->id;
-        $data = \App\Filament\Resources\CiotResource::transformFormData($data);
+        $result = app(EmitCiotDeclaration::class)->emit($ciot);
 
-        /** @var Ciot $ciot */
-        $ciot = Ciot::create($data);
+        (new CiotEmissionNotice)->send($result);
 
-        activity()
-            ->performedOn($ciot)
-            ->log("CIOT gerado pelo lote de CT-e #{$batch->id}.");
-
-        try {
-            $ciot = app(EmitCiotDeclaration::class)->handle($ciot, sync: true);
-        } catch (Throwable $exception) {
-            report($exception);
-
-            EmitCiotJob::dispatch($ciot->id);
-
-            Notification::make()
-                ->title('CIOT criado — emissão em processamento')
-                ->body('A ANTT não respondeu agora; a emissão ficou na fila com retry automático.')
-                ->warning()
-                ->send();
-
-            redirect()->to(\App\Filament\Resources\CiotResource::getUrl('view', ['record' => $ciot]));
-
-            return;
-        }
-
-        $ciot->refresh();
-
-        if ($ciot->status === CiotStatusEnum::ISSUED) {
-            Notification::make()
-                ->title('CIOT emitido: '.$ciot->fullNumber())
-                ->success()
-                ->send();
-        } else {
-            Notification::make()
-                ->title('Emissão rejeitada pela ANTT')
-                ->body((string) $ciot->error_message)
-                ->danger()
-                ->send();
-        }
-
-        redirect()->to(\App\Filament\Resources\CiotResource::getUrl('view', ['record' => $ciot]));
+        redirect()->to(\App\Filament\Resources\CiotResource::getUrl('view', ['record' => $result->ciot]));
     }
 }

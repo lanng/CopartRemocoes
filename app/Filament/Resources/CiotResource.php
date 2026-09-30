@@ -6,6 +6,7 @@ use App\Enums\CiotLineEnum;
 use App\Enums\CiotOperationTypeEnum;
 use App\Enums\CiotStatusEnum;
 use App\Filament\Resources\CiotResource\Pages;
+use App\Filament\Support\CiotEmissionNotice;
 use App\Models\Ciot;
 use App\Models\CiotPayer;
 use App\Models\CiotVehicle;
@@ -410,29 +411,9 @@ class CiotResource extends Resource
                     ->modalHeading('Emitir CIOT na ANTT')
                     ->modalDescription('O CIOT será enviado para a ANTT em segundo plano com retry automático.')
                     ->action(function (Ciot $record): void {
-                        try {
-                            app(EmitCiotDeclaration::class)->handle($record);
-                        } catch (AnttCiotException|DomainException $exception) {
-                            Notification::make()
-                                ->title('Falha ao emitir o CIOT')
-                                ->body($exception->getMessage())
-                                ->danger()
-                                ->send();
+                        $result = app(EmitCiotDeclaration::class)->enqueue($record);
 
-                            return;
-                        } catch (Throwable $exception) {
-                            report($exception);
-
-                            Notification::make()
-                                ->title('Erro inesperado ao emitir o CIOT')
-                                ->body('Tente novamente; se persistir, contate o suporte.')
-                                ->danger()
-                                ->send();
-
-                            return;
-                        }
-
-                        Notification::make()->title('Emissão enfileirada.')->success()->send();
+                        (new CiotEmissionNotice)->send($result);
                     }),
                 Tables\Actions\Action::make('cancel')
                     ->label('Cancelar')

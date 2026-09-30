@@ -3,6 +3,7 @@
 namespace App\Filament\Resources;
 
 use App\Enums\CompanyEnum;
+use App\Enums\CteDocumentStatusEnum;
 use App\Enums\RegisterStatusEnum;
 use App\Exports\RegistersExport;
 use App\Exports\RegistersJsonExport;
@@ -10,6 +11,7 @@ use App\Filament\Resources\RegisterResource\Pages\CreateRegister;
 use App\Filament\Resources\RegisterResource\Pages\EditRegister;
 use App\Filament\Resources\RegisterResource\Pages\ListRegisters;
 use App\Filament\Resources\RegisterResource\Pages\ViewRegister;
+use App\Models\CteDocument;
 use App\Models\IntegrationInboxItem;
 use App\Models\Register;
 use App\Services\Cte\CreateCteEmissionBatch;
@@ -17,6 +19,7 @@ use App\Services\MicrosoftGraph\RemovalRequests\ResolveRemovalRequestImport;
 use App\Services\PdfExtractorService;
 use App\Services\WhatsappExtractorService;
 use Exception;
+use Filament\Forms\Components\Checkbox;
 use Filament\Forms\Components\DatePicker;
 use Filament\Forms\Components\FileUpload;
 use Filament\Forms\Components\Placeholder;
@@ -39,6 +42,7 @@ use Filament\Tables\Columns\Layout\Split;
 use Filament\Tables\Columns\Layout\Stack;
 use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Filters\SelectFilter;
+use Filament\Tables\Filters\TernaryFilter;
 use Filament\Tables\Table;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Carbon;
@@ -421,6 +425,11 @@ class RegisterResource extends Resource
                             ->formatStateUsing(fn (RegisterStatusEnum $state): string => $state->localizedLabel())
                             ->sortable()
                             ->searchable(),
+                        TextColumn::make('latestAuthorizedCteDocument.cte_number')
+                            ->label('CT-e autorizado')
+                            ->badge()
+                            ->color('success')
+                            ->placeholder('-'),
                         TextColumn::make('unresolved_removal_imports_exists')
                             ->label('Integração')
                             ->state(fn (Register $record): ?string => self::removalImportSummary($record))
@@ -521,6 +530,21 @@ class RegisterResource extends Resource
                 SelectFilter::make('status')
                     ->label('Situação')
                     ->options(RegisterStatusEnum::optionsWithLabels()),
+                TernaryFilter::make('cte_autorizado')
+                    ->label('CT-e autorizado')
+                    ->placeholder('Todos')
+                    ->trueLabel('Com CT-e autorizado')
+                    ->falseLabel('Sem CT-e autorizado')
+                    ->queries(
+                        true: fn (Builder $query): Builder => $query->whereHas(
+                            'cteDocuments',
+                            fn (Builder $query): Builder => $query->where('status', CteDocumentStatusEnum::AUTHORIZED),
+                        ),
+                        false: fn (Builder $query): Builder => $query->whereDoesntHave(
+                            'cteDocuments',
+                            fn (Builder $query): Builder => $query->where('status', CteDocumentStatusEnum::AUTHORIZED),
+                        ),
+                    ),
             ])
             ->actions([
                 Action::make('viewRemovalImport')
@@ -552,21 +576,15 @@ class RegisterResource extends Resource
                     BulkAction::make('createCteEmissionBatch')
                         ->label('Criar lote de CT-e')
                         ->icon('heroicon-o-document-plus')
-                        ->form([
-                            Select::make('execution_mode')
-                                ->label('Modo de execucao')
-                                ->options([
-                                    'dry_run' => 'Dry-run (sem autorizacao fiscal)',
-                                    'live' => 'Emissao real',
-                                ])
-                                ->default('dry_run')
-                                ->required(),
-                        ])
+                        ->modalDescription(fn (Collection $records): ?string => self::getCteReemissionWarning($records))
+                        ->form(fn (Collection $records): array => self::getCteEmissionBatchForm($records))
                         ->action(function (Collection $records, array $data) {
                             $batch = app(CreateCteEmissionBatch::class)->handle(
                                 $records,
                                 auth()->user(),
                                 $data['execution_mode'],
+                                reemissionConfirmed: (bool) ($data['confirm_reemission'] ?? false),
+                                reemissionReason: $data['reemission_reason'] ?? null,
                             );
 
                             Notification::make()
@@ -610,7 +628,8 @@ class RegisterResource extends Resource
             ])->modifyQueryUsing(function (Builder $query) {
                 $query
                     ->withExists('unresolvedRemovalImports')
-                    ->with('unresolvedRemovalImports:id,register_id,status,alerts,failure_reason');
+                    ->with('unresolvedRemovalImports:id,register_id,status,alerts,failure_reason')
+                    ->with('latestAuthorizedCteDocument');
 
                 $query->orderByRaw("
                     CASE status
@@ -671,6 +690,75 @@ class RegisterResource extends Resource
         }
 
         $record->update($updateData);
+    }
+
+    /**
+     * @param  Collection<int, Register>  $records
+     * @return array<string, CteDocument> documentos autorizados atuais, indexados por register_id
+     */
+    private static function authorizedCtesByRegister(Collection $records): array
+    {
+        if ($records->isEmpty()) {
+            return [];
+        }
+
+        return CteDocument::query()
+            ->whereIn('register_id', $records->modelKeys())
+            ->where('status', CteDocumentStatusEnum::AUTHORIZED)
+            ->orderBy('authorized_at')
+            ->orderBy('id')
+            ->get()
+            ->keyBy('register_id')
+            ->all();
+    }
+
+    /** @param  Collection<int, Register>  $records */
+    private static function getCteReemissionWarning(Collection $records): ?string
+    {
+        $authorized = self::authorizedCtesByRegister($records);
+
+        if ($authorized === []) {
+            return null;
+        }
+
+        $list = collect($authorized)
+            ->map(fn (CteDocument $document): string => "Remoção #{$document->register_id} — CT-e {$document->cte_number}")
+            ->implode('; ');
+
+        return "Os registros selecionados já possuem CT-e autorizado e serão incluídos em um novo lote como reemissão: {$list}. O CT-e anterior será marcado como substituído quando este lote for aprovado.";
+    }
+
+    /**
+     * @param  Collection<int, Register>  $records
+     * @return array<int, \Filament\Forms\Components\Component>
+     */
+    private static function getCteEmissionBatchForm(Collection $records): array
+    {
+        $form = [
+            Select::make('execution_mode')
+                ->label('Modo de execucao')
+                ->options([
+                    'dry_run' => 'Dry-run (sem autorizacao fiscal)',
+                    'live' => 'Emissao real',
+                ])
+                ->default('dry_run')
+                ->required(),
+        ];
+
+        if (self::authorizedCtesByRegister($records) === []) {
+            return $form;
+        }
+
+        $form[] = Checkbox::make('confirm_reemission')
+            ->label('Confirmo a reemissão dos CT-es listados')
+            ->helperText('Marque apenas se você realmente deseja refazer o CT-e destes registros. Confira a lista antes de continuar.')
+            ->accepted();
+        $form[] = TextInput::make('reemission_reason')
+            ->label('Motivo da reemissão (opcional)')
+            ->placeholder('Ex.: recusado pelo contratante')
+            ->maxLength(255);
+
+        return $form;
     }
 
     public static function getRelations(): array

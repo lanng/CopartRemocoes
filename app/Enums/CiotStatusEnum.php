@@ -38,4 +38,22 @@ enum CiotStatusEnum: string
     {
         return $this === self::ISSUED;
     }
+
+    /**
+     * Statuses dos quais este status pode ser atingido (mapa da
+     * máquina de estados usada pelas transições do model Ciot).
+     *
+     * @return list<CiotStatusEnum>
+     */
+    public function allowedSources(): array
+    {
+        return match ($this) {
+            self::PENDING => [self::DRAFT, self::FAILED],
+            self::ISSUED => [self::PENDING],
+            self::CANCELED => [self::ISSUED],
+            self::CLOSED => [self::ISSUED],
+            self::FAILED => [self::PENDING, self::DRAFT],
+            self::DRAFT => [],
+        };
+    }
 }

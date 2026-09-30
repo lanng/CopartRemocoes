@@ -17,8 +17,13 @@ class CreateCteEmissionBatch
     /**
      * @param  Collection<int, Register>  $registers
      */
-    public function handle(Collection $registers, User $user, string $executionMode): CteEmissionBatch
-    {
+    public function handle(
+        Collection $registers,
+        User $user,
+        string $executionMode,
+        bool $reemissionConfirmed = false,
+        ?string $reemissionReason = null,
+    ): CteEmissionBatch {
         if (! in_array($executionMode, ['dry_run', 'live'], true)) {
             throw ValidationException::withMessages(['execution_mode' => 'Modo de execucao invalido.']);
         }
@@ -27,17 +32,37 @@ class CreateCteEmissionBatch
             throw ValidationException::withMessages(['registers' => 'Selecione ao menos uma remocao.']);
         }
 
-        return DB::transaction(function () use ($registers, $user, $executionMode): CteEmissionBatch {
+        return DB::transaction(function () use ($registers, $user, $executionMode, $reemissionConfirmed, $reemissionReason): CteEmissionBatch {
             $batch = CteEmissionBatch::query()->create([
                 'status' => CteEmissionBatchStatusEnum::DRAFT,
                 'execution_mode' => $executionMode,
                 'created_by' => $user->id,
             ]);
 
-            foreach ($registers as $register) {
+            $lockedRegisters = Register::query()
+                ->whereIn('id', $registers->pluck('id'))
+                ->lockForUpdate()
+                ->get()
+                ->keyBy('id');
+
+            foreach ($registers as $selected) {
+                $register = $lockedRegisters->get($selected->id);
+
+                if ($register === null) {
+                    throw ValidationException::withMessages([
+                        'registers' => "A remocao {$selected->id} nao foi encontrada.",
+                    ]);
+                }
+
                 $this->validateRegister($register);
 
-                if ($register->cteDocuments()->where('status', CteDocumentStatusEnum::AUTHORIZED)->exists()) {
+                $authorizedDocument = $register->cteDocuments()
+                    ->where('status', CteDocumentStatusEnum::AUTHORIZED)
+                    ->orderByDesc('authorized_at')
+                    ->orderByDesc('id')
+                    ->first();
+
+                if ($authorizedDocument !== null && ! $reemissionConfirmed) {
                     throw ValidationException::withMessages([
                         'registers' => "A remocao {$register->id} ja possui um CT-e autorizado.",
                     ]);
@@ -50,6 +75,8 @@ class CreateCteEmissionBatch
                     'snapshot' => $this->snapshot($register),
                     'idempotency_key' => (string) Str::uuid(),
                     'execution_mode' => $executionMode,
+                    'replaced_document_id' => $authorizedDocument?->id,
+                    'replacement_reason' => $authorizedDocument !== null ? $reemissionReason : null,
                 ]);
             }
 

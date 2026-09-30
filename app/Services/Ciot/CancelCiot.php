@@ -5,7 +5,6 @@ namespace App\Services\Ciot;
 use App\Enums\CiotStatusEnum;
 use App\Models\Ciot;
 use DomainException;
-use Illuminate\Support\Facades\DB;
 
 class CancelCiot
 {
@@ -35,24 +34,10 @@ class CancelCiot
             );
         }
 
-        return DB::transaction(function () use ($ciot, $motivo, $response): Ciot {
-            $ciot = Ciot::query()
-                ->whereKey($ciot->id)
-                ->lockForUpdate()
-                ->firstOrFail();
-
-            if ($ciot->status !== CiotStatusEnum::ISSUED) {
-                return $ciot;
-            }
-
-            $ciot->forceFill([
-                'status' => CiotStatusEnum::CANCELED,
-                'cancel_reason' => $motivo,
-                'canceled_at' => now(),
-                'response' => array_merge($ciot->response ?? [], ['cancelamento' => $response->body]),
-            ])->save();
-
-            return $ciot;
-        });
+        return $ciot->transitionFrom(CiotStatusEnum::ISSUED, CiotStatusEnum::CANCELED, fn (Ciot $locked): array => [
+            'cancel_reason' => $motivo,
+            'canceled_at' => now(),
+            'response' => array_merge($locked->response ?? [], ['cancelamento' => $response->body]),
+        ]) ?? $ciot->refresh();
     }
 }

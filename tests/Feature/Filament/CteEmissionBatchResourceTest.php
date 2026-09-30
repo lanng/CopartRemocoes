@@ -422,6 +422,28 @@ class CteEmissionBatchResourceTest extends TestCase
         $this->assertNotSame('520032959998', $ciot->id_operacao_transporte);
     }
 
+    public function test_reemit_ciot_warns_when_the_batch_has_no_failed_ciot(): void
+    {
+        Http::fake();
+
+        $batch = CteEmissionBatch::factory()->create([
+            'status' => CteEmissionBatchStatusEnum::COMPLETED,
+            'execution_mode' => 'live',
+        ]);
+
+        // Sem CIOT com falha a ação fica oculta (e o Filament desabilita
+        // ações ocultas), então o ramo null do guard só ocorre na corrida em
+        // que o CIOT falho deixa de existir entre o render e o clique —
+        // invocamos a closure real pela API pública da ação.
+        $component = Livewire::test(ViewCteEmissionBatch::class, ['record' => $batch->id]);
+
+        $component->instance()->getAction('reemitCiot')->call();
+
+        $component->assertNotified('Nenhum CIOT com falha neste lote.');
+
+        $this->assertSame(0, Ciot::query()->where('cte_emission_batch_id', $batch->id)->count());
+    }
+
     public function test_generate_ciot_action_blocks_duplicates(): void
     {
         $batch = CteEmissionBatch::factory()->create([

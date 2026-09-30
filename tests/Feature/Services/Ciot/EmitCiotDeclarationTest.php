@@ -2,11 +2,11 @@
 
 namespace Tests\Feature\Services\Ciot;
 
+use App\Enums\CiotEmissionOutcome;
 use App\Enums\CiotStatusEnum;
 use App\Jobs\EmitCiotJob;
 use App\Models\Ciot;
 use App\Services\Ciot\AnttCiotException;
-use App\Services\Ciot\DeclareCiot;
 use App\Services\Ciot\EmitCiotDeclaration;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Http;
@@ -46,22 +46,28 @@ class EmitCiotDeclarationTest extends TestCase
 
         $ciot = Ciot::factory()->create();
 
-        $ciot = app(EmitCiotDeclaration::class)->handle($ciot);
+        $result = app(EmitCiotDeclaration::class)->enqueue($ciot);
 
-        $this->assertSame(CiotStatusEnum::PENDING, $ciot->status);
-        $this->assertSame('560000569999', $ciot->id_operacao_transporte);
-        $this->assertSame('560000569999', $ciot->payload['IdOperacaoTransporte']);
+        $this->assertSame(CiotEmissionOutcome::Enqueued, $result->outcome);
+        $this->assertSame(CiotStatusEnum::PENDING, $result->ciot->status);
+        $this->assertSame('560000569999', $result->ciot->id_operacao_transporte);
+        $this->assertSame('560000569999', $result->ciot->payload['IdOperacaoTransporte']);
 
-        Queue::assertPushed(EmitCiotJob::class, fn (EmitCiotJob $job): bool => $job->ciotId === $ciot->id);
+        Queue::assertPushed(EmitCiotJob::class, fn (EmitCiotJob $job): bool => $job->ciotId === $result->ciot->id);
     }
 
     public function test_cannot_enqueue_an_issued_ciot(): void
     {
+        Queue::fake();
+
         $ciot = Ciot::factory()->issued()->create();
 
-        $this->expectException(\DomainException::class);
+        $result = app(EmitCiotDeclaration::class)->enqueue($ciot);
 
-        app(EmitCiotDeclaration::class)->handle($ciot);
+        $this->assertSame(CiotEmissionOutcome::Invalid, $result->outcome);
+        $this->assertSame(CiotStatusEnum::ISSUED, $result->ciot->status);
+
+        Queue::assertNothingPushed();
     }
 
     public function test_job_marks_the_ciot_issued_when_antt_accepts(): void
@@ -83,7 +89,7 @@ class EmitCiotDeclarationTest extends TestCase
             ], 200),
         ]);
 
-        (new EmitCiotJob($ciot->id))->handle(app(DeclareCiot::class));
+        (new EmitCiotJob($ciot->id))->handle(app(EmitCiotDeclaration::class));
 
         $ciot = $ciot->refresh();
 
@@ -111,7 +117,7 @@ class EmitCiotDeclarationTest extends TestCase
             ], 200),
         ]);
 
-        (new EmitCiotJob($ciot->id))->handle(app(DeclareCiot::class));
+        (new EmitCiotJob($ciot->id))->handle(app(EmitCiotDeclaration::class));
 
         $ciot = $ciot->refresh();
 
@@ -137,7 +143,7 @@ class EmitCiotDeclarationTest extends TestCase
             ], 200),
         ]);
 
-        (new EmitCiotJob($ciot->id))->handle(app(DeclareCiot::class));
+        (new EmitCiotJob($ciot->id))->handle(app(EmitCiotDeclaration::class));
 
         $ciot = $ciot->refresh();
 
@@ -160,7 +166,7 @@ class EmitCiotDeclarationTest extends TestCase
         ]);
 
         try {
-            (new EmitCiotJob($ciot->id))->handle(app(DeclareCiot::class));
+            (new EmitCiotJob($ciot->id))->handle(app(EmitCiotDeclaration::class));
             $this->fail('Expected AnttCiotException.');
         } catch (AnttCiotException $exception) {
             $this->assertSame(500, $exception->httpStatus);
@@ -188,7 +194,7 @@ class EmitCiotDeclarationTest extends TestCase
             ], 200),
         ]);
 
-        (new EmitCiotJob($ciot->id))->handle(app(DeclareCiot::class));
+        (new EmitCiotJob($ciot->id))->handle(app(EmitCiotDeclaration::class));
 
         $ciot = $ciot->refresh();
 
@@ -205,6 +211,19 @@ class EmitCiotDeclarationTest extends TestCase
             'status' => CiotStatusEnum::PENDING,
             'payload' => ['IdOperacaoTransporte' => '260921123456'],
         ]);
+
+        (new EmitCiotJob($ciot->id))->failed(new RuntimeException('attempts exhausted'));
+
+        $ciot = $ciot->refresh();
+
+        $this->assertSame(CiotStatusEnum::FAILED, $ciot->status);
+        $this->assertSame('job_exhausted', $ciot->error_code);
+        $this->assertSame('attempts exhausted', $ciot->error_message);
+    }
+
+    public function test_failed_hook_marks_a_draft_ciot_as_failed(): void
+    {
+        $ciot = Ciot::factory()->create();
 
         (new EmitCiotJob($ciot->id))->failed(new RuntimeException('attempts exhausted'));
 
