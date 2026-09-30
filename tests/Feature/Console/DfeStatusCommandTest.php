@@ -59,17 +59,17 @@ class DfeStatusCommandTest extends TestCase
 
     protected function statusResponse(string $cStat, string $xMotivo): string
     {
-        $ret = '<retConsStatServCte versao="4.00" xmlns="http://www.portalfiscal.inf.br/cte">'
+        $ret = '<retConsStatServCTe versao="4.00" xmlns="http://www.portalfiscal.inf.br/cte">'
             .'<tpAmb>2</tpAmb><verAplic>SP_PL_CTe_400</verAplic><cStat>'.$cStat.'</cStat>'
             .'<xMotivo>'.$xMotivo.'</xMotivo><dhRecbto>2026-09-30T12:00:00-03:00</dhRecbto>'
             .'<tMed>1</tMed><cUF>35</cUF><tpImp>1</tpImp>'
-            .'</retConsStatServCte>';
+            .'</retConsStatServCTe>';
 
         return '<?xml version="1.0" encoding="utf-8"?>'
             .'<soap:Envelope xmlns:soap="http://www.w3.org/2003/05/soap-envelope"><soap:Body>'
-            .'<cteStatusServicoCTeResult xmlns="http://www.portalfiscal.inf.br/cte/wsdl/CTeStatusServicoV4">'
+            .'<cteStatusServicoCTResult xmlns="http://www.portalfiscal.inf.br/cte/wsdl/CTeStatusServicoV4">'
             .htmlspecialchars($ret, ENT_XML1 | ENT_COMPAT)
-            .'</cteStatusServicoCTeResult>'
+            .'</cteStatusServicoCTResult>'
             .'</soap:Body></soap:Envelope>';
     }
 }

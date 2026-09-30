@@ -39,7 +39,7 @@ class SefazSoapClientTest extends TestCase
     {
         Http::fake([
             'https://sefaz-hml.test/CTeWS/WS/CTeStatusServicoV4.asmx' => Http::response(
-                $this->soapEnvelope('cteStatusServicoCTeResult', $this->retConsStatServCte()),
+                $this->soapEnvelope('cteStatusServicoCTResult', $this->retConsStatServCTe()),
                 200,
             ),
         ]);
@@ -68,7 +68,7 @@ class SefazSoapClientTest extends TestCase
     {
         Http::fake([
             'https://sefaz-hml.test/CTeWS/WS/CTeStatusServicoV4.asmx' => Http::response(
-                $this->soapEnvelope('cteStatusServicoCTeResult', $this->retConsStatServCte(), escaped: false),
+                $this->soapEnvelope('cteStatusServicoCTResult', $this->retConsStatServCTe(), escaped: false),
                 200,
             ),
         ]);
@@ -218,13 +218,13 @@ class SefazSoapClientTest extends TestCase
         return $method->invoke(app(SefazSoapClient::class));
     }
 
-    protected function retConsStatServCte(): string
+    protected function retConsStatServCTe(): string
     {
-        return '<retConsStatServCte versao="4.00" xmlns="http://www.portalfiscal.inf.br/cte">'
+        return '<retConsStatServCTe versao="4.00" xmlns="http://www.portalfiscal.inf.br/cte">'
             .'<tpAmb>2</tpAmb><verAplic>SP_PL_CTe_400</verAplic><cStat>107</cStat>'
             .'<xMotivo>Servico em Operacao</xMotivo><dhRecbto>2026-09-30T12:00:00-03:00</dhRecbto>'
             .'<tMed>1</tMed><cUF>35</cUF><tpImp>1</tpImp>'
-            .'</retConsStatServCte>';
+            .'</retConsStatServCTe>';
     }
 
     protected function retCteAuthorized(): string
