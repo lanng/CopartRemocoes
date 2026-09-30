@@ -118,6 +118,15 @@ return [
             'replace_placeholders' => true,
         ],
 
+        // Auditoria do módulo de emissão direta SEFAZ (spec dfe §7).
+        'dfe' => [
+            'driver' => 'daily',
+            'path' => storage_path('logs/dfe.log'),
+            'level' => env('LOG_LEVEL', 'debug'),
+            'days' => (int) env('DFE_LOG_DAYS', 90),
+            'replace_placeholders' => true,
+        ],
+
         'null' => [
             'driver' => 'monolog',
             'handler' => NullHandler::class,
