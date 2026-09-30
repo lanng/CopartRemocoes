@@ -3,9 +3,11 @@
 namespace Tests\Feature\Filament;
 
 use App\Enums\CteDocumentStatusEnum;
+use App\Enums\CteEmissionBatchStatusEnum;
 use App\Filament\Resources\RegisterResource\Pages\ListRegisters;
 use App\Filament\Resources\RegisterResource\Pages\ViewRegister;
 use App\Models\CteDocument;
+use App\Models\CteEmissionBatch;
 use App\Models\IntegrationInboxItem;
 use App\Models\Register;
 use App\Models\User;
@@ -228,5 +230,107 @@ class RegisterResourceTest extends TestCase
 
         $this->assertSame('Comitente', $column->formatState($column->getState()));
         $this->assertNotNull($column->getUrl());
+    }
+
+    public function test_register_list_shows_the_authorized_cte_number(): void
+    {
+        $register = Register::factory()->create();
+        CteDocument::factory()->authorized()->create([
+            'register_id' => $register->id,
+            'cte_number' => '900100',
+        ]);
+
+        $table = Livewire::test(ListRegisters::class)->instance()->getTable();
+        $column = $table->getColumn('latestAuthorizedCteDocument.cte_number')->record($register);
+
+        $this->assertSame('900100', $column->getState());
+    }
+
+    public function test_the_cte_batch_action_lists_the_authorized_ctes_of_the_selection(): void
+    {
+        $register = Register::factory()->create();
+        CteDocument::factory()->authorized()->create([
+            'register_id' => $register->id,
+            'cte_number' => '900100',
+        ]);
+
+        $description = Livewire::test(ListRegisters::class)
+            ->mountTableBulkAction('createCteEmissionBatch', [$register])
+            ->instance()
+            ->getMountedTableBulkAction()
+            ->getModalDescription();
+
+        $this->assertNotNull($description);
+        $this->assertStringContainsString('CT-e 900100', $description);
+        $this->assertStringContainsString('serão incluídos em um novo lote', $description);
+
+        $fresh = Register::factory()->create();
+
+        $this->assertNull(
+            Livewire::test(ListRegisters::class)
+                ->mountTableBulkAction('createCteEmissionBatch', [$fresh])
+                ->instance()
+                ->getMountedTableBulkAction()
+                ->getModalDescription(),
+        );
+    }
+
+    public function test_the_cte_batch_action_requires_confirmation_for_registers_with_an_authorized_cte(): void
+    {
+        $register = Register::factory()->create();
+        $oldBatch = CteEmissionBatch::factory()->create([
+            'status' => CteEmissionBatchStatusEnum::COMPLETED,
+            'execution_mode' => 'live',
+        ]);
+        CteDocument::factory()->authorized()->create([
+            'register_id' => $register->id,
+            'cte_emission_batch_id' => $oldBatch->id,
+        ]);
+
+        Livewire::test(ListRegisters::class)
+            ->callTableBulkAction('createCteEmissionBatch', [$register], ['execution_mode' => 'dry_run'])
+            ->assertHasTableBulkActionErrors(['confirm_reemission']);
+
+        $this->assertSame(1, CteEmissionBatch::count());
+    }
+
+    public function test_the_cte_batch_action_creates_a_reemission_when_confirmed(): void
+    {
+        $register = Register::factory()->create();
+        $oldDocument = CteDocument::factory()->authorized()->create([
+            'register_id' => $register->id,
+            'cte_number' => '900100',
+        ]);
+
+        Livewire::test(ListRegisters::class)
+            ->callTableBulkAction('createCteEmissionBatch', [$register], [
+                'execution_mode' => 'dry_run',
+                'confirm_reemission' => true,
+                'reemission_reason' => 'Recusado pelo contratante',
+            ])
+            ->assertNotified('Lote de CT-e criado');
+
+        $document = CteDocument::query()
+            ->where('register_id', $register->id)
+            ->whereKeyNot($oldDocument->id)
+            ->first();
+
+        $this->assertNotNull($document);
+        $this->assertSame($oldDocument->id, $document->replaced_document_id);
+        $this->assertSame('Recusado pelo contratante', $document->replacement_reason);
+    }
+
+    public function test_the_cte_batch_action_does_not_require_confirmation_for_fresh_registers(): void
+    {
+        $registers = Register::factory()->count(2)->create();
+
+        Livewire::test(ListRegisters::class)
+            ->callTableBulkAction('createCteEmissionBatch', $registers, ['execution_mode' => 'dry_run'])
+            ->assertHasNoTableBulkActionErrors()
+            ->assertNotified('Lote de CT-e criado');
+
+        $batch = CteEmissionBatch::query()->sole();
+        $this->assertSame(2, $batch->documents()->count());
+        $this->assertNull($batch->documents()->first()->replaced_document_id);
     }
 }

@@ -4,6 +4,7 @@ namespace App\Services\Cte;
 
 use App\Enums\CteDocumentStatusEnum;
 use App\Enums\CteEmissionBatchStatusEnum;
+use App\Models\CteDocument;
 use App\Models\CteEmissionBatch;
 use App\Models\Register;
 use App\Models\User;
@@ -29,6 +30,8 @@ class ApproveCteEmissionBatch
                 $this->ensureSnapshotStillMatches($document->register, $document->snapshot);
             }
 
+            $this->supersedeReplacedDocuments($batch);
+
             $batch->forceFill([
                 'status' => CteEmissionBatchStatusEnum::APPROVED,
                 'approved_by' => $user->id,
@@ -39,6 +42,31 @@ class ApproveCteEmissionBatch
 
             return $batch->refresh()->load('documents');
         });
+    }
+
+    /**
+     * Substitui formalmente o CT-e autorizado anterior de cada documento de
+     * reemissao: so torna o antigo SUPERSEDED quando o novo lote e aprovado,
+     * de modo que um rascunho abandonado nao altera nada.
+     */
+    private function supersedeReplacedDocuments(CteEmissionBatch $batch): void
+    {
+        foreach ($batch->documents as $document) {
+            if ($document->replaced_document_id === null) {
+                continue;
+            }
+
+            /** @var CteDocument $replaced */
+            $replaced = CteDocument::query()->lockForUpdate()->findOrFail($document->replaced_document_id);
+
+            if ($replaced->status !== CteDocumentStatusEnum::AUTHORIZED) {
+                throw ValidationException::withMessages([
+                    'batch' => "O CT-e {$replaced->cte_number} da remocao {$document->register_id} nao esta mais autorizado. Crie um novo lote.",
+                ]);
+            }
+
+            app(CteDocumentWorkflow::class)->transition($replaced, CteDocumentStatusEnum::SUPERSEDED);
+        }
     }
 
     /** @param array<string, mixed> $snapshot */

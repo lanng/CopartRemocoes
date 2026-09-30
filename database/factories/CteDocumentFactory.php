@@ -36,4 +36,18 @@ class CteDocumentFactory extends Factory
             'execution_mode' => 'dry_run',
         ];
     }
+
+    public function authorized(): static
+    {
+        return $this->state(fn (array $attributes): array => [
+            'status' => CteDocumentStatusEnum::AUTHORIZED,
+            'cte_number' => fake()->unique()->numerify('9######'),
+            'access_key' => fake()->unique()->numerify(str_repeat('#', 44)),
+            'series' => '1',
+            'protocol' => fake()->numerify('135###########'),
+            'fiscal_status_code' => '100',
+            'issued_at' => now(),
+            'authorized_at' => now(),
+        ]);
+    }
 }
