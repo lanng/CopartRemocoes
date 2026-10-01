@@ -11,6 +11,14 @@ use Illuminate\Support\Facades\DB;
  * sob lockForUpdate garante continuidade sem salto/duplicidade. Em produção a
  * seed inicial é manual no switch do Lab (último nCT + 1, spec §7) — recusar
  * chutar nunca é opcional.
+ *
+ * REGRA DO ORQUESTRADOR — o número queima SEMPRE: a transação abaixo é
+ * autocontida e commita antes de assinar/transmitir/gravar; um rollback
+ * downstream (ex.: falha de S3 no registro) NUNCA devolve o número. Por isso
+ * NÃO chamar este serviço (nem o BuildCteXml) dentro de uma transação
+ * externa: um rollback ali devolveria um nCT cujo CT-e pode ter sido
+ * autorizado pela SEFAZ — colisão 539 real. Hoje nenhuma chamada aninha
+ * (EmitCteDocument::attempt e dfe:smoke rodam fora de transações).
  */
 class AllocateCteNumber
 {

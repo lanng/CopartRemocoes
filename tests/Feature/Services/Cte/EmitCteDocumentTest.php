@@ -5,10 +5,12 @@ namespace Tests\Feature\Services\Cte;
 use App\Enums\CteDocumentStatusEnum;
 use App\Jobs\EmitCteDirectJob;
 use App\Services\Cte\EmitCteDocument;
+use App\Services\Dfe\DfeDocumentStore;
 use App\Services\Dfe\SefazException;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Storage;
+use RuntimeException;
 use Tests\Support\BuildsCteWorld;
 use Tests\Support\DfeSoapResponses;
 use Tests\Support\DfeTestCertificate;
@@ -167,5 +169,55 @@ class EmitCteDocumentTest extends TestCase
         Http::assertNothingSent();
 
         $this->assertSame(CteDocumentStatusEnum::AUTHORIZED, $document->refresh()->status);
+    }
+
+    /**
+     * Regra do orquestrador: o nCT queima SEMPRE. A gravação roda em
+     * transação própria (rollback na falha de S3), mas a alocação commitou na
+     * transação autocontida do AllocateCteNumber — o retry reemite com o
+     * PRÓXIMO número, jamais o queimado (colisão 539).
+     */
+    public function test_a_failed_persistence_burns_the_number_and_the_retry_uses_the_next_one(): void
+    {
+        DfeSoapResponses::fakeOnline($this->baseUrl);
+        DfeSoapResponses::fakeTransmission($this->baseUrl);
+
+        $document = $this->liveDirectDocument();
+
+        $this->mock(DfeDocumentStore::class, fn ($mock) => $mock
+            ->shouldReceive('storeCteProc')
+            ->andThrow(new RuntimeException('S3 indisponível')));
+
+        try {
+            app(EmitCteDocument::class)->attempt($document);
+            $this->fail('Expected RuntimeException.');
+        } catch (RuntimeException $exception) {
+            $this->assertSame('S3 indisponível', $exception->getMessage());
+        }
+
+        // O rollback do registro devolveu o documento para authorizing...
+        $this->assertSame(CteDocumentStatusEnum::AUTHORIZING, $document->refresh()->status);
+        $this->assertNull($document->xml_path);
+
+        // ...mas o número QUEIMOU: a sequência avançou.
+        $this->assertDatabaseHas('cte_number_sequences', [
+            'cnpj' => '12563112000130',
+            'serie' => 1,
+            'next_number' => 900000002,
+        ]);
+
+        // Retry com o store real: novo número, nova chave — nunca 900000001.
+        $this->app->forgetInstance(DfeDocumentStore::class);
+
+        $authorized = app(EmitCteDocument::class)->attempt($document)->refresh();
+
+        $this->assertSame(CteDocumentStatusEnum::AUTHORIZED, $authorized->status);
+        $this->assertSame('900000002', $authorized->cte_number);
+        $this->assertStringStartsWith('3526101256311200013057001900000002', $authorized->access_key);
+        $this->assertDatabaseHas('cte_number_sequences', [
+            'cnpj' => '12563112000130',
+            'serie' => 1,
+            'next_number' => 900000003,
+        ]);
     }
 }
