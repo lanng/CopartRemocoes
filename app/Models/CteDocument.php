@@ -15,10 +15,11 @@ class CteDocument extends Model
 
     protected $fillable = [
         'public_id', 'cte_emission_batch_id', 'register_id', 'replaced_document_id',
-        'replacement_reason', 'status', 'snapshot', 'idempotency_key', 'execution_mode', 'claimed_by',
+        'replacement_reason', 'status', 'snapshot', 'idempotency_key', 'execution_mode', 'emitter', 'claimed_by',
         'claim_token_hash', 'claimed_at', 'claim_expires_at', 'authorization_started_at',
         'issued_at', 'authorized_at', 'cte_number', 'access_key', 'series', 'protocol',
-        'fiscal_status_code', 'fiscal_status_message', 'error_stage', 'error_code',
+        'fiscal_status_code', 'fiscal_status_message', 'payload_xml', 'response_xml',
+        'digest_value', 'xml_path', 'pdf_path', 'sha256', 'error_stage', 'error_code',
         'error_message', 'result_payload_hash',
     ];
 

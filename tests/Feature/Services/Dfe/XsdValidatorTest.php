@@ -2,8 +2,8 @@
 
 namespace Tests\Feature\Services\Dfe;
 
-use App\Services\Dfe\SefazException;
 use App\Services\Dfe\XsdValidator;
+use DomainException;
 use Tests\TestCase;
 
 class XsdValidatorTest extends TestCase
@@ -44,8 +44,8 @@ class XsdValidatorTest extends TestCase
 
         try {
             $this->validator->validateCte($tampered);
-            $this->fail('Expected SefazException.');
-        } catch (SefazException $exception) {
+            $this->fail('Expected DomainException.');
+        } catch (DomainException $exception) {
             $this->assertStringContainsString('cte_v4.00.xsd', $exception->getMessage());
             $this->assertStringContainsString('linha', $exception->getMessage());
         }

@@ -75,6 +75,9 @@ class CreateCteEmissionBatch
                     'snapshot' => $this->snapshot($register),
                     'idempotency_key' => (string) Str::uuid(),
                     'execution_mode' => $executionMode,
+                    // O documento nasce com o emissor que vai processá-lo
+                    // (spec dfe §1.1): lab (default) ou direct.
+                    'emitter' => (string) config('cte.emitter', 'lab'),
                     'replaced_document_id' => $authorizedDocument?->id,
                     'replacement_reason' => $authorizedDocument !== null ? $reemissionReason : null,
                 ]);

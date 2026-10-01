@@ -69,6 +69,16 @@ return [
         'default_weight_kg' => env('DFE_CTE_DEFAULT_WEIGHT_KG', '2000.0000'),
     ],
 
+    // Nomes abreviados/alternativos que chegam dos registros (extração de PDF)
+    // → nome canônico na base IBGE local (cities). Chaves já normalizadas
+    // (maiúsculas, sem acento). A resolução é case/acento-insensível; aqui
+    // ficam só as diferenças reais de nome (portado do CITY_CONFIG do script
+    // Python de emissão; teclas do Lab ignoradas).
+    'city_aliases' => [
+        'PIRAPORA' => 'Pirapora do Bom Jesus',
+        'EMBU' => 'Embu das Artes',
+    ],
+
     // Primeiro nCT da sequência própria quando a linha de numeração não existe
     // ainda. Homologação usa o número livre de teste (spec §2.4); em produção a
     // seed manual no switch é OBRIGATÓRIA (último nCT do Lab + 1, spec §7) —

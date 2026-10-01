@@ -99,8 +99,26 @@ class SefazResponse
             accessKey: $infProt !== null ? self::childText($infProt, 'chCTe') : null,
             receivedAt: $infProt !== null ? self::childText($infProt, 'dhRecbto') : self::childText($payload, 'dhRecbto'),
             httpStatus: $httpStatus,
-            rawXml: $soapXml,
+            // Evidência fiscal persistida: o documento ret* extraído (com
+            // declaração XML), não o envelope SOAP que o carregou.
+            rawXml: self::payloadXml($payload),
         );
+    }
+
+    /**
+     * Serializa o documento ret* (a partir de qualquer documento onde ele
+     * tenha sido encontrado, inclusive o parse do texto escapado) com a
+     * declaração XML à frente.
+     */
+    protected static function payloadXml(DOMElement $payload): string
+    {
+        $xml = (string) $payload->ownerDocument->saveXML($payload);
+
+        if (! str_starts_with($xml, '<?xml')) {
+            $xml = '<?xml version="1.0" encoding="UTF-8"?>'.$xml;
+        }
+
+        return $xml;
     }
 
     /**

@@ -4,6 +4,7 @@ namespace Tests\Feature\Services;
 
 use App\Enums\CteDocumentStatusEnum;
 use App\Enums\CteEmissionBatchStatusEnum;
+use App\Jobs\EmitCteDirectJob;
 use App\Models\CteDocument;
 use App\Models\CteEmissionBatch;
 use App\Models\Register;
@@ -11,6 +12,7 @@ use App\Models\User;
 use App\Services\Cte\ApproveCteEmissionBatch;
 use App\Services\Cte\CreateCteEmissionBatch;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Queue;
 use Illuminate\Validation\ValidationException;
 use Tests\TestCase;
 
@@ -104,5 +106,44 @@ class ApproveCteEmissionBatchTest extends TestCase
 
         $this->assertSame(CteEmissionBatchStatusEnum::DRAFT, $batch->refresh()->status);
         $this->assertSame(CteDocumentStatusEnum::DRAFT, $batch->documents->first()->refresh()->status);
+    }
+
+    public function test_direct_emitter_dispatches_one_job_per_live_document(): void
+    {
+        Queue::fake();
+        config(['cte.emitter' => 'direct']);
+
+        $user = User::factory()->create();
+        $batch = app(CreateCteEmissionBatch::class)->handle(
+            Register::factory()->count(2)->create(),
+            $user,
+            'live',
+        );
+
+        app(ApproveCteEmissionBatch::class)->handle($batch, $user);
+
+        Queue::assertPushed(EmitCteDirectJob::class, 2);
+        $this->assertTrue($batch->refresh()->documents->every(
+            fn ($document): bool => $document->status === CteDocumentStatusEnum::QUEUED
+                && $document->emitter === 'direct'
+        ));
+    }
+
+    public function test_direct_emitter_completes_dry_run_documents_without_transmitting(): void
+    {
+        Queue::fake();
+        config(['cte.emitter' => 'direct']);
+
+        $user = User::factory()->create();
+        $batch = app(CreateCteEmissionBatch::class)->handle(
+            Register::factory()->count(1)->create(),
+            $user,
+            'dry_run',
+        );
+
+        app(ApproveCteEmissionBatch::class)->handle($batch, $user);
+
+        Queue::assertNotPushed(EmitCteDirectJob::class);
+        $this->assertSame(CteDocumentStatusEnum::DRY_RUN_COMPLETED, $batch->documents->first()->refresh()->status);
     }
 }

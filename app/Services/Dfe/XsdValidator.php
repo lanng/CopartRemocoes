@@ -2,6 +2,7 @@
 
 namespace App\Services\Dfe;
 
+use DomainException;
 use DOMDocument;
 use Throwable;
 
@@ -26,7 +27,7 @@ class XsdValidator
         $schemaPath = rtrim((string) config('dfe.xsd_path'), '/').'/'.$schemaFile;
 
         if (! is_readable($schemaPath)) {
-            throw new SefazException("XSD local não encontrado: {$schemaPath} (config dfe.xsd_path).");
+            throw new DomainException("XSD local não encontrado: {$schemaPath} (config dfe.xsd_path).");
         }
 
         $document = new DOMDocument;
@@ -47,7 +48,7 @@ class XsdValidator
 
             libxml_clear_errors();
 
-            throw new SefazException("XML do CT-e inválido contra {$schemaFile}: ".($errors ?: 'erro desconhecido'));
+            throw new DomainException("XML do CT-e inválido contra {$schemaFile}: ".($errors ?: 'erro desconhecido'));
         }
 
         libxml_clear_errors();
