@@ -6,10 +6,12 @@ use App\Filament\Resources\CiotVehicleResource\Pages\CreateCiotVehicle;
 use App\Filament\Resources\CompanyResource\Pages\CreateCompany;
 use App\Filament\Resources\CompanyResource\Pages\ListCompanies;
 use App\Models\CiotVehicle;
+use App\Models\City;
 use App\Models\Company;
 use App\Models\User;
 use Filament\Facades\Filament;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Http;
 use Livewire\Livewire;
 use Tests\TestCase;
 
@@ -124,5 +126,38 @@ class CiotSupportResourcesTest extends TestCase
             ])
             ->call('create')
             ->assertHasFormErrors(['plate']);
+    }
+
+    public function test_the_company_form_autocompletes_from_the_zipcode(): void
+    {
+        City::query()->create(['ibge_code' => '3523107', 'name' => 'Itaquaquecetuba', 'state' => 'SP']);
+
+        Http::fake([
+            'https://brasilapi.com.br/api/cep/v2/08597230' => Http::response([
+                'cep' => '08597230',
+                'state' => 'SP',
+                'city' => 'Itaquaquecetuba',
+                'street' => 'Estrada Muranaka',
+                'neighborhood' => 'Jd. Novo Horizonte',
+            ], 200),
+        ]);
+
+        Livewire::test(CreateCompany::class)
+            ->fillForm([
+                'name' => 'Copart Itaquaquecetuba',
+                'cnpj' => '14517191000178',
+                'ie' => '379121178113',
+                'number' => '199',
+                'zipcode' => '08597-230',
+            ])
+            ->callFormComponentAction('zipcode', 'buscarCep')
+            ->assertFormSet([
+                'city' => 'Itaquaquecetuba',
+                'state' => 'SP',
+                'street' => 'Estrada Muranaka',
+                'district' => 'Jd. Novo Horizonte',
+                'ibge_code' => '3523107',
+                'number' => '199',
+            ]);
     }
 }

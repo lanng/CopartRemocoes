@@ -8,14 +8,15 @@ use Illuminate\Support\Facades\Log;
 use Throwable;
 
 /**
- * Consulta CEP para preencher cidade/UF/IBGE (e coordenadas quando disponíveis).
- * BrasilAPI CEP v2 (com coordenadas) como primária, ViaCEP como fallback.
- * Falha nunca bloqueia: retorna null e o operador preenche manualmente.
+ * Consulta CEP para preencher cidade/UF/IBGE, logradouro/bairro e coordenadas
+ * quando disponíveis. BrasilAPI CEP v2 (com coordenadas) como primária, ViaCEP
+ * como fallback. Falha nunca bloqueia: retorna null e o operador preenche
+ * manualmente.
  */
 class CepLookup
 {
     /**
-     * @return array{cidade: string, uf: string, ibge: ?string, latitude: ?float, longitude: ?float}|null
+     * @return array{cidade: string, uf: string, ibge: ?string, logradouro: ?string, bairro: ?string, latitude: ?float, longitude: ?float}|null
      */
     public function lookup(string $cep): ?array
     {
@@ -98,6 +99,8 @@ class CepLookup
             'cidade' => $city,
             'uf' => $state,
             'ibge' => filled($ibge) ? (string) $ibge : null,
+            'logradouro' => blank($response->json('street')) ? null : (string) $response->json('street'),
+            'bairro' => blank($response->json('neighborhood')) ? null : (string) $response->json('neighborhood'),
             'latitude' => is_numeric($latitude) ? (float) $latitude : null,
             'longitude' => is_numeric($longitude) ? (float) $longitude : null,
         ];
@@ -133,6 +136,8 @@ class CepLookup
             'cidade' => $city,
             'uf' => $state,
             'ibge' => filled($ibge) ? (string) $ibge : null,
+            'logradouro' => blank($response->json('logradouro')) ? null : (string) $response->json('logradouro'),
+            'bairro' => blank($response->json('bairro')) ? null : (string) $response->json('bairro'),
             'latitude' => null,
             'longitude' => null,
         ];

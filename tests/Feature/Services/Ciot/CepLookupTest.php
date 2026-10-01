@@ -19,6 +19,8 @@ class CepLookupTest extends TestCase
                 'cep' => '12286140',
                 'state' => 'SP',
                 'city' => 'Caçapava',
+                'street' => 'Av Henry Nestle',
+                'neighborhood' => 'Vila Galvao',
                 'location' => [
                     'coordinates' => [
                         'latitude' => '-23.1006',
@@ -33,6 +35,8 @@ class CepLookupTest extends TestCase
         $this->assertSame('Caçapava', $location['cidade']);
         $this->assertSame('SP', $location['uf']);
         $this->assertNull($location['ibge']);
+        $this->assertSame('Av Henry Nestle', $location['logradouro']);
+        $this->assertSame('Vila Galvao', $location['bairro']);
         $this->assertSame(-23.1006, $location['latitude']);
         $this->assertSame(-45.6911, $location['longitude']);
 
