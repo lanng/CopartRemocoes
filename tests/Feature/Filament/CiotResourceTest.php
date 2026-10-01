@@ -99,6 +99,104 @@ class CiotResourceTest extends TestCase
         $this->assertNotNull($ciot->public_id);
     }
 
+    public function test_the_create_form_accepts_brazilian_number_formats(): void
+    {
+        $payer = CiotPayer::factory()->create(['cnpj' => '14517191000925', 'name' => 'Copart Caçapava']);
+        $delivery = CiotPayer::factory()->create(['cnpj' => '14517191000410', 'name' => 'Copart Osasco']);
+        $tractor = CiotVehicle::factory()->create(['plate' => 'PUC8E55', 'type' => 'automotor', 'axles' => 3]);
+
+        Livewire::test(CreateCiot::class)
+            ->fillForm([
+                'line' => 'vehicle_removal',
+                'operation_type' => 'lotation',
+                'payer_id' => $payer->id,
+                'delivery_payer_id' => $delivery->id,
+                'origin.cidade' => 'Osvaldo Cruz',
+                'origin.uf' => 'SP',
+                'origin.cep' => '17700000',
+                'origin.ibge' => '3534609',
+                'destination.cidade' => 'Caçapava',
+                'destination.uf' => 'SP',
+                'destination.cep' => '12286140',
+                'destination.ibge' => '3508504',
+                'distance_km' => '716,5',
+                'freight_value' => '4.132,98',
+                'cargo_weight_kg' => '1.500,50',
+                'vehicle_ids' => [$tractor->id],
+                'travel_start_at' => now()->addDay()->format('Y-m-d'),
+                'travel_end_at' => now()->addDays(2)->format('Y-m-d'),
+            ])
+            ->call('create')
+            ->assertHasNoFormErrors();
+
+        $ciot = Ciot::query()->firstOrFail();
+
+        $this->assertSame(413298, $ciot->freight_value_cents);
+        $this->assertSame('1500.50', (string) $ciot->cargo_weight_kg);
+        $this->assertSame('716.50', (string) $ciot->distance_km);
+    }
+
+    public function test_the_create_form_rejects_ambiguous_number_formats(): void
+    {
+        $payer = CiotPayer::factory()->create(['cnpj' => '14517191000925', 'name' => 'Copart Caçapava']);
+        $tractor = CiotVehicle::factory()->create(['plate' => 'PUC8E55', 'type' => 'automotor', 'axles' => 3]);
+
+        Livewire::test(CreateCiot::class)
+            ->fillForm([
+                'line' => 'vehicle_removal',
+                'operation_type' => 'lotation',
+                'payer_id' => $payer->id,
+                'origin.cidade' => 'Osvaldo Cruz',
+                'origin.uf' => 'SP',
+                'origin.cep' => '17700000',
+                'origin.ibge' => '3534609',
+                'destination.cidade' => 'Caçapava',
+                'destination.uf' => 'SP',
+                'destination.cep' => '12286140',
+                'destination.ibge' => '3508504',
+                'distance_km' => '716',
+                'freight_value' => '4.132.98',
+                'cargo_weight_kg' => '1.500',
+                'vehicle_ids' => [$tractor->id],
+                'travel_start_at' => now()->addDay()->format('Y-m-d'),
+                'travel_end_at' => now()->addDays(2)->format('Y-m-d'),
+            ])
+            ->call('create')
+            ->assertHasFormErrors(['freight_value']);
+
+        $this->assertDatabaseEmpty(Ciot::class);
+    }
+
+    public function test_the_create_form_rejects_a_freight_below_one_cent(): void
+    {
+        $payer = CiotPayer::factory()->create(['cnpj' => '14517191000925', 'name' => 'Copart Caçapava']);
+        $tractor = CiotVehicle::factory()->create(['plate' => 'PUC8E55', 'type' => 'automotor', 'axles' => 3]);
+
+        Livewire::test(CreateCiot::class)
+            ->fillForm([
+                'line' => 'vehicle_removal',
+                'operation_type' => 'lotation',
+                'payer_id' => $payer->id,
+                'origin.cidade' => 'Osvaldo Cruz',
+                'origin.uf' => 'SP',
+                'origin.cep' => '17700000',
+                'origin.ibge' => '3534609',
+                'destination.cidade' => 'Caçapava',
+                'destination.uf' => 'SP',
+                'destination.cep' => '12286140',
+                'destination.ibge' => '3508504',
+                'distance_km' => '716',
+                'freight_value' => '0,00',
+                'vehicle_ids' => [$tractor->id],
+                'travel_start_at' => now()->addDay()->format('Y-m-d'),
+                'travel_end_at' => now()->addDays(2)->format('Y-m-d'),
+            ])
+            ->call('create')
+            ->assertHasFormErrors(['freight_value']);
+
+        $this->assertDatabaseEmpty(Ciot::class);
+    }
+
     public function test_the_emit_action_enqueues_the_emission(): void
     {
         Queue::fake();
@@ -210,7 +308,7 @@ class CiotResourceTest extends TestCase
             ])
             ->callFormComponentAction('distance_km', 'calcularDistancia')
             ->assertHasNoFormComponentActionErrors()
-            ->assertFormSet(['distance_km' => 716]);
+            ->assertFormSet(['distance_km' => '716,00']);
 
         $this->assertDatabaseHas(CityDistance::class, [
             'origin_ibge' => $origin->ibge_code,

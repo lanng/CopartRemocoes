@@ -17,6 +17,8 @@ use App\Services\Ciot\CepLookup;
 use App\Services\Ciot\CityDistanceCalculator;
 use App\Services\Ciot\CloseCiot;
 use App\Services\Ciot\EmitCiotDeclaration;
+use App\Support\PtbrNumeric;
+use App\Support\PtbrNumericRule;
 use DomainException;
 use Filament\Forms;
 use Filament\Forms\Form;
@@ -134,9 +136,11 @@ class CiotResource extends Resource
                             ->schema(self::locationFields('destination.')),
                         Forms\Components\TextInput::make('distance_km')
                             ->label('Distância (km)')
-                            ->numeric()
-                            ->minValue(0.01)
+                            ->inputMode('decimal')
+                            ->formatStateUsing(fn ($state) => PtbrNumeric::format($state))
+                            ->rule(new PtbrNumericRule(min: 0.01))
                             ->required()
+                            ->dehydrateStateUsing(fn ($state) => PtbrNumeric::normalize($state))
                             ->suffixAction(
                                 Forms\Components\Actions\Action::make('calcularDistancia')
                                     ->icon('heroicon-m-calculator')
@@ -152,19 +156,22 @@ class CiotResource extends Resource
                     ->schema([
                         Forms\Components\TextInput::make('freight_value')
                             ->label('Valor do frete (total da viagem)')
-                            ->numeric()
                             ->prefix('R$')
-                            ->minValue(0.01)
+                            ->inputMode('decimal')
+                            ->rule(new PtbrNumericRule(min: 0.01))
                             ->required()
+                            ->dehydrateStateUsing(fn ($state) => PtbrNumeric::normalize($state))
                             ->afterStateHydrated(function (?Ciot $record, Forms\Set $set): void {
                                 if ($record !== null) {
-                                    $set('freight_value', number_format($record->freight_value_cents / 100, 2, '.', ''));
+                                    $set('freight_value', PtbrNumeric::format($record->freight_value_cents / 100));
                                 }
                             }),
                         Forms\Components\TextInput::make('cargo_weight_kg')
                             ->label('Peso da carga (kg)')
-                            ->numeric()
-                            ->minValue(0),
+                            ->inputMode('decimal')
+                            ->formatStateUsing(fn ($state) => PtbrNumeric::format($state))
+                            ->rule(new PtbrNumericRule(min: 0))
+                            ->dehydrateStateUsing(fn ($state) => PtbrNumeric::normalize($state)),
                         Forms\Components\CheckboxList::make('vehicle_ids')
                             ->label('Veículos (1 automotor + reboques)')
                             ->options(fn (): array => self::vehicleOptions())
@@ -295,12 +302,14 @@ class CiotResource extends Resource
                             ->state(fn (Ciot $record): string => self::formatLocation($record->destination ?? [])),
                         TextEntry::make('distance_km')
                             ->label('Distância')
+                            ->numeric(2, ',', '.')
                             ->suffix(' km'),
                         TextEntry::make('freight_value_cents')
                             ->label('Valor do frete')
                             ->money('BRL', divideBy: 100, locale: 'pt_BR'),
                         TextEntry::make('cargo_weight_kg')
                             ->label('Peso da carga')
+                            ->numeric(2, ',', '.')
                             ->suffix(' kg'),
                         TextEntry::make('vehicles')
                             ->label('Veículos')
@@ -525,7 +534,7 @@ class CiotResource extends Resource
         $data['delivery_payer_cnpj'] = $delivery->cnpj;
         $data['delivery_payer_name'] = $delivery->name;
         $data['vehicles'] = $vehicles->map(fn (CiotVehicle $vehicle): array => $vehicle->snapshot())->all();
-        $data['freight_value_cents'] = (int) round(((float) str_replace(',', '.', (string) $data['freight_value'])) * 100);
+        $data['freight_value_cents'] = (int) round(((float) (PtbrNumeric::normalize($data['freight_value'] ?? null) ?? '0')) * 100);
         $data['additional_payers'] = self::withoutPayerCnpjs($data['additional_payers'] ?? [], [$payer->cnpj]);
         unset($data['freight_value'], $data['vehicle_ids']);
 
@@ -760,7 +769,7 @@ class CiotResource extends Resource
             return;
         }
 
-        $set('distance_km', $km);
+        $set('distance_km', PtbrNumeric::format($km));
 
         Notification::make()
             ->title("Distância sugerida: {$km} km")

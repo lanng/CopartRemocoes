@@ -12,6 +12,8 @@ use App\Services\Ciot\CityDistanceCalculator;
 use App\Services\Ciot\CreateCiotForBatch;
 use App\Services\Ciot\EmitCiotDeclaration;
 use App\Services\Ciot\PrefillCiotFromBatch;
+use App\Support\PtbrNumeric;
+use App\Support\PtbrNumericRule;
 use DomainException;
 use Filament\Actions\Action;
 use Filament\Forms\Components\Actions\Action as FormsAction;
@@ -185,10 +187,12 @@ class GenerateCiotForBatchAction
                         ), '/')),
                     TextInput::make('distance_km')
                         ->label('Distância (km)')
-                        ->numeric()
-                        ->minValue(0.01)
+                        ->inputMode('decimal')
+                        ->formatStateUsing(fn ($state) => PtbrNumeric::format($state))
+                        ->rule(new PtbrNumericRule(min: 0.01))
                         ->default($form['distance_km'])
                         ->required()
+                        ->dehydrateStateUsing(fn ($state) => PtbrNumeric::normalize($state))
                         ->suffixAction(
                             FormsAction::make('calcularDistancia')
                                 ->icon('heroicon-m-calculator')
@@ -205,17 +209,21 @@ class GenerateCiotForBatchAction
                 ->schema([
                     TextInput::make('freight_value')
                         ->label('Valor do frete (total da viagem)')
-                        ->numeric()
                         ->prefix('R$')
-                        ->minValue(0.01)
+                        ->inputMode('decimal')
+                        ->formatStateUsing(fn ($state) => PtbrNumeric::format($state))
+                        ->rule(new PtbrNumericRule(min: 0.01))
                         ->default($form['freight_value'])
-                        ->required(),
+                        ->required()
+                        ->dehydrateStateUsing(fn ($state) => PtbrNumeric::normalize($state)),
                     TextInput::make('cargo_weight_kg')
                         ->label('Peso da carga (kg)')
-                        ->numeric()
-                        ->minValue(0)
+                        ->inputMode('decimal')
+                        ->formatStateUsing(fn ($state) => PtbrNumeric::format($state))
+                        ->rule(new PtbrNumericRule(min: 0))
                         ->default($form['cargo_weight_kg'])
-                        ->required(),
+                        ->required()
+                        ->dehydrateStateUsing(fn ($state) => PtbrNumeric::normalize($state)),
                 ]),
 
             CheckboxList::make('vehicle_ids')
@@ -276,7 +284,7 @@ class GenerateCiotForBatchAction
         $km = app(CityDistanceCalculator::class)->calculate($origin, $destination);
 
         if ($km !== null) {
-            $set('distance_km', $km);
+            $set('distance_km', PtbrNumeric::format($km));
         }
     }
 
