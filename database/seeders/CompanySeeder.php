@@ -2,11 +2,11 @@
 
 namespace Database\Seeders;
 
-use App\Models\CiotPayer;
 use App\Models\City;
+use App\Models\Company;
 use Illuminate\Database\Seeder;
 
-class CiotPayerSeeder extends Seeder
+class CompanySeeder extends Seeder
 {
     /**
      * Pátios Copart confirmados (spec, seção 5 — o CNPJ 14.517.191/0001-78
@@ -47,7 +47,7 @@ class CiotPayerSeeder extends Seeder
     public function run(): void
     {
         foreach (self::payers() as $payer) {
-            $patio = CiotPayer::query()->firstOrCreate(
+            $patio = Company::query()->firstOrCreate(
                 ['cnpj' => $payer['cnpj']],
                 [
                     'name' => $payer['name'],
@@ -64,7 +64,7 @@ class CiotPayerSeeder extends Seeder
     /**
      * Resolve o código IBGE na base local de municípios (ciot:seed-cities).
      */
-    protected function resolveIbge(CiotPayer $patio, string $city, string $state): void
+    protected function resolveIbge(Company $patio, string $city, string $state): void
     {
         if (filled($patio->ibge_code)) {
             return;

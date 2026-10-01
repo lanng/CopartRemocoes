@@ -12,10 +12,10 @@ use App\Filament\Resources\CteEmissionBatchResource\Pages\ViewCteEmissionBatch;
 use App\Filament\Resources\CteEmissionBatchResource\RelationManagers\DocumentsRelationManager;
 use App\Filament\Resources\RegisterResource;
 use App\Models\Ciot;
-use App\Models\CiotPayer;
 use App\Models\CiotVehicle;
 use App\Models\City;
 use App\Models\CityDistance;
+use App\Models\Company;
 use App\Models\CteDocument;
 use App\Models\CteEmissionBatch;
 use App\Models\MdfeDocument;
@@ -163,7 +163,7 @@ class CteEmissionBatchResourceTest extends TestCase
             'ibge_code' => '3508504', 'name' => 'Caçapava', 'state' => 'SP',
             'latitude' => -23.1006, 'longitude' => -45.6911,
         ]);
-        $payer = CiotPayer::factory()->create([
+        $payer = Company::factory()->create([
             'name' => 'Copart Caçapava', 'cnpj' => '14517191000925',
             'city' => 'Caçapava', 'state' => 'SP', 'ibge_code' => '3508504',
         ]);
@@ -236,15 +236,15 @@ class CteEmissionBatchResourceTest extends TestCase
             'ibge_code' => '3508504', 'name' => 'Caçapava', 'state' => 'SP',
             'latitude' => -23.1006, 'longitude' => -45.6911,
         ]);
-        $payer = CiotPayer::factory()->create([
+        $payer = Company::factory()->create([
             'name' => 'Copart Caçapava', 'cnpj' => '14517191000925',
             'city' => 'Caçapava', 'state' => 'SP', 'ibge_code' => '3508504',
         ]);
-        CiotPayer::factory()->create([
+        Company::factory()->create([
             'name' => 'Copart Pirapora do Bom Jesus', 'cnpj' => '14517191000330',
             'city' => 'Pirapora do Bom Jesus', 'state' => 'SP', 'ibge_code' => '3539506',
         ]);
-        CiotPayer::factory()->create([
+        Company::factory()->create([
             'name' => 'Copart Osasco', 'cnpj' => '14517191000410',
             'city' => 'Osasco', 'state' => 'SP', 'ibge_code' => '3518800',
         ]);
@@ -325,11 +325,11 @@ class CteEmissionBatchResourceTest extends TestCase
             'ibge_code' => '3508504', 'name' => 'Caçapava', 'state' => 'SP',
             'latitude' => -23.1006, 'longitude' => -45.6911,
         ]);
-        $payer = CiotPayer::factory()->create([
+        $payer = Company::factory()->create([
             'name' => 'Copart Caçapava', 'cnpj' => '14517191000925',
             'city' => 'Caçapava', 'state' => 'SP', 'ibge_code' => '3508504',
         ]);
-        CiotPayer::factory()->create([
+        Company::factory()->create([
             'name' => 'Copart Osasco', 'cnpj' => '14517191000410',
             'city' => 'Osasco', 'state' => 'SP', 'ibge_code' => '3518800',
         ]);

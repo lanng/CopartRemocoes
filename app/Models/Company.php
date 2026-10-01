@@ -6,13 +6,19 @@ use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 
-class CiotPayer extends Model
+/**
+ * Cadastro fiscal neutro de empresas das operações — pátios, seguradoras e
+ * distribuidoras — consumido por CIOT (pagante/destinatário) e CT-e (rem/dest).
+ * A tabela não guarda papel: quem é pagante, remetente ou destinatário é
+ * decisão do fluxo, não do cadastro.
+ */
+class Company extends Model
 {
-    /** @use HasFactory<\Database\Factories\CiotPayerFactory> */
+    /** @use HasFactory<\Database\Factories\CompanyFactory> */
     use HasFactory;
 
     protected $fillable = [
-        'name', 'cnpj', 'street', 'number', 'complement', 'district',
+        'name', 'cnpj', 'ie', 'street', 'number', 'complement', 'district',
         'city', 'state', 'zipcode', 'ibge_code', 'is_active',
     ];
 

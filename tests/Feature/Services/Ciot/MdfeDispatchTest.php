@@ -84,7 +84,7 @@ class MdfeDispatchTest extends TestCase
 
     protected function deliveryPayerWithCep(): void
     {
-        $delivery = \App\Models\CiotPayer::factory()->create([
+        $delivery = \App\Models\Company::factory()->create([
             'cnpj' => '14517191000925',
             'zipcode' => '12286140',
         ]);

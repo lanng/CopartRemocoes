@@ -21,7 +21,7 @@ class DatabaseSeeder extends Seeder
         ]);
 
         $this->call([
-            CiotPayerSeeder::class,
+            CompanySeeder::class,
             CiotVehicleSeeder::class,
         ]);
     }

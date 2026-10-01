@@ -54,12 +54,12 @@ class Ciot extends Model
 
     public function payer(): BelongsTo
     {
-        return $this->belongsTo(CiotPayer::class, 'payer_id');
+        return $this->belongsTo(Company::class, 'payer_id');
     }
 
     public function deliveryPayer(): BelongsTo
     {
-        return $this->belongsTo(CiotPayer::class, 'delivery_payer_id');
+        return $this->belongsTo(Company::class, 'delivery_payer_id');
     }
 
     public function cteEmissionBatch(): BelongsTo

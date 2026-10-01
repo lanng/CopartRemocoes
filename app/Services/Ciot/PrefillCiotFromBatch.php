@@ -3,9 +3,9 @@
 namespace App\Services\Ciot;
 
 use App\Enums\CiotLineEnum;
-use App\Models\CiotPayer;
 use App\Models\CiotVehicle;
 use App\Models\City;
+use App\Models\Company;
 use App\Models\CteEmissionBatch;
 use Illuminate\Support\Collection;
 
@@ -55,7 +55,7 @@ class PrefillCiotFromBatch
             'payer_id' => $best['payer']->id ?? null,
             'delivery_payer_id' => $best['payer']->id ?? null,
             'additional_payers' => $patios
-                ->reject(fn (CiotPayer $patio): bool => $patio->id === ($best['payer']->id ?? null))
+                ->reject(fn (Company $patio): bool => $patio->id === ($best['payer']->id ?? null))
                 ->pluck('cnpj')
                 ->values()
                 ->all(),
@@ -100,8 +100,8 @@ class PrefillCiotFromBatch
 
     /**
      * @param  Collection<int, City>  $origens
-     * @param  Collection<int, CiotPayer>  $patios
-     * @return list<array{origin: City, payer: CiotPayer, km: int}>
+     * @param  Collection<int, Company>  $patios
+     * @return list<array{origin: City, payer: Company, km: int}>
      */
     protected function distancePairs(Collection $origens, Collection $patios): array
     {
@@ -155,14 +155,14 @@ class PrefillCiotFromBatch
      * Cruza as cidades de destino do lote com os pagantes cadastrados.
      *
      * @param  Collection<int, string>  $names
-     * @return Collection<int, CiotPayer>
+     * @return Collection<int, Company>
      */
     protected function resolveDestinationPatios(Collection $names, array &$warnings): Collection
     {
-        return CiotPayer::query()
+        return Company::query()
             ->where('is_active', true)
             ->get()
-            ->filter(fn (CiotPayer $payer): bool => $names->contains(
+            ->filter(fn (Company $payer): bool => $names->contains(
                 fn (string $name): bool => strcasecmp(trim($name), trim($payer->city)) === 0,
             ))
             ->values();

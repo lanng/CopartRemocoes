@@ -4,8 +4,8 @@ namespace Tests\Feature\Services\Ciot;
 
 use App\Enums\CiotStatusEnum;
 use App\Models\Ciot;
-use App\Models\CiotPayer;
 use App\Models\CiotVehicle;
+use App\Models\Company;
 use App\Models\CteEmissionBatch;
 use App\Services\Ciot\CreateCiotForBatch;
 use DomainException;
@@ -21,7 +21,7 @@ class CreateCiotForBatchTest extends TestCase
     /**
      * @return array<string, mixed>
      */
-    protected function formData(CiotPayer $payer, CiotVehicle $tractor): array
+    protected function formData(Company $payer, CiotVehicle $tractor): array
     {
         return [
             'status' => CiotStatusEnum::DRAFT->value,
@@ -42,7 +42,7 @@ class CreateCiotForBatchTest extends TestCase
 
     public function test_it_creates_a_linked_ciot_with_the_form_snapshot(): void
     {
-        $payer = CiotPayer::factory()->create(['cnpj' => '14517191000925', 'name' => 'Copart Caçapava']);
+        $payer = Company::factory()->create(['cnpj' => '14517191000925', 'name' => 'Copart Caçapava']);
         $tractor = CiotVehicle::factory()->create(['plate' => 'PUC8E55', 'type' => 'automotor', 'axles' => 3]);
         $batch = CteEmissionBatch::factory()->create();
 
@@ -69,7 +69,7 @@ class CreateCiotForBatchTest extends TestCase
 
     public function test_it_rejects_a_batch_that_already_has_an_active_ciot(): void
     {
-        $payer = CiotPayer::factory()->create(['cnpj' => '14517191000925', 'name' => 'Copart Caçapava']);
+        $payer = Company::factory()->create(['cnpj' => '14517191000925', 'name' => 'Copart Caçapava']);
         $tractor = CiotVehicle::factory()->create(['plate' => 'PUC8E55', 'type' => 'automotor', 'axles' => 3]);
         $batch = CteEmissionBatch::factory()->create();
         Ciot::factory()->create([
@@ -89,7 +89,7 @@ class CreateCiotForBatchTest extends TestCase
 
     public function test_it_accepts_a_batch_whose_only_ciot_was_canceled(): void
     {
-        $payer = CiotPayer::factory()->create(['cnpj' => '14517191000925', 'name' => 'Copart Caçapava']);
+        $payer = Company::factory()->create(['cnpj' => '14517191000925', 'name' => 'Copart Caçapava']);
         $tractor = CiotVehicle::factory()->create(['plate' => 'PUC8E55', 'type' => 'automotor', 'axles' => 3]);
         $batch = CteEmissionBatch::factory()->create();
         Ciot::factory()->create([

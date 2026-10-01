@@ -8,9 +8,9 @@ use App\Enums\CiotStatusEnum;
 use App\Filament\Resources\CiotResource\Pages;
 use App\Filament\Support\CiotEmissionNotice;
 use App\Models\Ciot;
-use App\Models\CiotPayer;
 use App\Models\CiotVehicle;
 use App\Models\City;
+use App\Models\Company;
 use App\Services\Ciot\AnttCiotException;
 use App\Services\Ciot\CancelCiot;
 use App\Services\Ciot\CepLookup;
@@ -76,7 +76,7 @@ class CiotResource extends Resource
                             ->searchable()
                             ->live()
                             ->afterStateUpdated(function (Forms\Get $get, Forms\Set $set, ?string $state): void {
-                                $cnpj = CiotPayer::query()->find($state)?->cnpj;
+                                $cnpj = Company::query()->find($state)?->cnpj;
 
                                 if (filled($cnpj)) {
                                     $set('additional_payers', self::withoutPayerCnpjs($get('additional_payers') ?? [], [$cnpj]));
@@ -89,7 +89,7 @@ class CiotResource extends Resource
                             ->searchable()
                             ->live()
                             ->afterStateUpdated(function (Forms\Set $set, ?string $state): void {
-                                $payer = CiotPayer::query()->find($state);
+                                $payer = Company::query()->find($state);
 
                                 if ($payer === null) {
                                     return;
@@ -525,8 +525,8 @@ class CiotResource extends Resource
      */
     public static function transformFormData(array $data): array
     {
-        $payer = CiotPayer::query()->findOrFail($data['payer_id']);
-        $delivery = CiotPayer::query()->find($data['delivery_payer_id'] ?? null) ?? $payer;
+        $payer = Company::query()->findOrFail($data['payer_id']);
+        $delivery = Company::query()->find($data['delivery_payer_id'] ?? null) ?? $payer;
         $vehicles = CiotVehicle::query()->whereIn('id', $data['vehicle_ids'] ?? [])->get();
 
         $data['payer_cnpj'] = $payer->cnpj;
@@ -548,7 +548,7 @@ class CiotResource extends Resource
      */
     public static function additionalPayerRule(Forms\Get $get): string
     {
-        $cnpj = CiotPayer::query()->find($get('payer_id'))?->cnpj;
+        $cnpj = Company::query()->find($get('payer_id'))?->cnpj;
 
         return filled($cnpj) ? 'not_in:'.$cnpj : 'nullable';
     }
@@ -607,11 +607,11 @@ class CiotResource extends Resource
     /** @return array<int, string> */
     protected static function payerOptions(): array
     {
-        return CiotPayer::query()
+        return Company::query()
             ->where('is_active', true)
             ->orderBy('name')
             ->get()
-            ->mapWithKeys(fn (CiotPayer $payer): array => [$payer->id => sprintf('%s — %s/%s', $payer->name, $payer->city, $payer->state)])
+            ->mapWithKeys(fn (Company $payer): array => [$payer->id => sprintf('%s — %s/%s', $payer->name, $payer->city, $payer->state)])
             ->all();
     }
 
@@ -624,12 +624,12 @@ class CiotResource extends Resource
      */
     public static function additionalPayerOptions(?string $payerId = null): array
     {
-        return CiotPayer::query()
+        return Company::query()
             ->where('is_active', true)
             ->orderBy('name')
             ->get()
-            ->reject(fn (CiotPayer $payer): bool => $payer->id === (int) $payerId)
-            ->mapWithKeys(fn (CiotPayer $payer): array => [$payer->cnpj => sprintf('%s — %s/%s', $payer->name, $payer->city, $payer->state)])
+            ->reject(fn (Company $payer): bool => $payer->id === (int) $payerId)
+            ->mapWithKeys(fn (Company $payer): array => [$payer->cnpj => sprintf('%s — %s/%s', $payer->name, $payer->city, $payer->state)])
             ->all();
     }
 
