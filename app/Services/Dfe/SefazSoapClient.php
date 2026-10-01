@@ -41,6 +41,22 @@ class SefazSoapClient
         return $this->send('recepcao_sinc', base64_encode((string) gzencode($signedXml)));
     }
 
+    /**
+     * Consulta de situação (CTeConsultaV4): usada pelo guard de retransmissão
+     * — antes de queimar um novo número, verifica se a chave da tentativa
+     * anterior já foi autorizada (spec dfe F4).
+     */
+    public function consult(string $accessKey): SefazResponse
+    {
+        $payload = '<consSitCTe versao="'.$this->version().'" xmlns="http://www.portalfiscal.inf.br/cte">'
+            .'<tpAmb>'.$this->tpAmb().'</tpAmb>'
+            .'<xServ>CONSULTAR</xServ>'
+            .'<chCTe>'.$accessKey.'</chCTe>'
+            .'</consSitCTe>';
+
+        return $this->send('consulta', $payload);
+    }
+
     protected function send(string $serviceKey, string $payloadXml): SefazResponse
     {
         $service = (string) config("dfe.paths.{$serviceKey}");

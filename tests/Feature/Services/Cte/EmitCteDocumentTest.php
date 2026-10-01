@@ -172,12 +172,12 @@ class EmitCteDocumentTest extends TestCase
     }
 
     /**
-     * Regra do orquestrador: o nCT queima SEMPRE. A gravação roda em
-     * transação própria (rollback na falha de S3), mas a alocação commitou na
-     * transação autocontida do AllocateCteNumber — o retry reemite com o
-     * PRÓXIMO número, jamais o queimado (colisão 539).
+     * Regra do orquestrador: o nCT queima SEMPRE (a alocação não participa do
+     * rollback do registro). E com o guard de retransmissão, o retry RECUPERA
+     * o número queimado quando a consulta prova que a SEFAZ autorizou: S3
+     * falhou → retry consulta → registra sem retransmitir e sem queimar outro.
      */
-    public function test_a_failed_persistence_burns_the_number_and_the_retry_uses_the_next_one(): void
+    public function test_a_failed_persistence_recovers_the_burned_number_from_the_consult_on_retry(): void
     {
         DfeSoapResponses::fakeOnline($this->baseUrl);
         DfeSoapResponses::fakeTransmission($this->baseUrl);
@@ -206,18 +206,146 @@ class EmitCteDocumentTest extends TestCase
             'next_number' => 900000002,
         ]);
 
-        // Retry com o store real: novo número, nova chave — nunca 900000001.
+        // Retry com o store real: consulta a chave queimada → SEFAZ autorizou
+        // → registra o protocolo sem retransmitir e sem queimar outro número.
         $this->app->forgetInstance(DfeDocumentStore::class);
+
+        preg_match('/<DigestValue>([^<]*)<\/DigestValue>/', (string) $document->payload_xml, $digestMatches);
+
+        Http::fake([
+            $this->baseUrl.'/CTeConsultaV4.asmx' => fn ($request) => Http::response(
+                DfeSoapResponses::retConsSitEnvelope(
+                    DfeSoapResponses::accessKeyFromConsult($request->body()),
+                    '100',
+                    '135260007139999',
+                    $digestMatches[1],
+                ),
+                200,
+            ),
+        ]);
+
+        $authorized = app(EmitCteDocument::class)->attempt($document)->refresh();
+
+        $this->assertSame(CteDocumentStatusEnum::AUTHORIZED, $authorized->status);
+        $this->assertSame('900000001', $authorized->cte_number, 'O número queimado é recuperado pela consulta.');
+        $this->assertSame('135260007139999', $authorized->protocol);
+        $this->assertNotNull($authorized->xml_path, 'O cteProc é gravado agora que o S3 voltou.');
+
+        Http::assertSentCount(1);
+        $this->assertDatabaseHas('cte_number_sequences', [
+            'cnpj' => '12563112000130',
+            'serie' => 1,
+            'next_number' => 900000002,
+        ]);
+    }
+
+    /**
+     * Crash pós-transmissão simulado: a primeira tentativa persiste os
+     * artifacts e falha (503); na vida real a SEFAZ pode ter autorizado. O
+     * retry consulta a chave queimada e REGISTRA o protocolo sem retransmitir.
+     */
+    public function test_a_retry_consults_the_burned_key_and_records_without_retransmitting(): void
+    {
+        $document = $this->liveDirectDocument();
+
+        $transmissions = 0;
+
+        Http::fake(function ($request) use ($document, &$transmissions) {
+            if (str_contains($request->url(), 'CTeConsultaV4')) {
+                preg_match('/<DigestValue>([^<]*)<\/DigestValue>/', (string) $document->payload_xml, $digestMatches);
+
+                return Http::response(
+                    DfeSoapResponses::retConsSitEnvelope(
+                        DfeSoapResponses::accessKeyFromConsult($request->body()),
+                        '100',
+                        '135260007139999',
+                        $digestMatches[1],
+                    ),
+                    200,
+                );
+            }
+
+            $transmissions++;
+
+            return $transmissions === 1
+                ? Http::response('boom', 503)
+                : Http::response('NUNCA DEVE RETRANSMITIR', 500);
+        });
+
+        try {
+            app(EmitCteDocument::class)->attempt($document);
+            $this->fail('Expected SefazException.');
+        } catch (SefazException) {
+        }
+
+        $document->refresh();
+
+        $this->assertSame(CteDocumentStatusEnum::AUTHORIZING, $document->status);
+        $this->assertSame('900000001', $document->cte_number);
+        $this->assertNotNull($document->payload_xml);
+
+        $authorized = app(EmitCteDocument::class)->attempt($document)->refresh();
+
+        $this->assertSame(CteDocumentStatusEnum::AUTHORIZED, $authorized->status);
+        $this->assertSame('900000001', $authorized->cte_number, 'O número original é recuperado, não queimado de novo.');
+        $this->assertSame('135260007139999', $authorized->protocol);
+        $this->assertNotNull($authorized->xml_path);
+        $this->assertSame(1, $transmissions, 'O retry NÃO retransmite: registra a partir da consulta.');
+    }
+
+    /**
+     * Chave queimada que a consulta prova NÃO autorizada: nova construção
+     * queima o próximo número (regra "o número queima sempre").
+     */
+    public function test_a_retry_with_an_unauthorized_burned_key_builds_a_new_document(): void
+    {
+        $document = $this->liveDirectDocument();
+
+        $transmissions = 0;
+
+        Http::fake(function ($request) use (&$transmissions) {
+            if (str_contains($request->url(), 'CTeConsultaV4')) {
+                return Http::response(
+                    DfeSoapResponses::retConsSitEnvelope(
+                        DfeSoapResponses::accessKeyFromConsult($request->body()),
+                        '218',
+                        '',
+                        base64_encode('x'),
+                        'Rejeicao: CT-e nao consta na base de dados da SEFAZ',
+                    ),
+                    200,
+                );
+            }
+
+            $transmissions++;
+
+            return $transmissions === 1
+                ? Http::response('boom', 503)
+                : Http::response(
+                    DfeSoapResponses::retCteEnvelope(
+                        DfeSoapResponses::transmittedXml($request->body()),
+                        null,
+                        '100',
+                        'Autorizado o uso do CT-e',
+                        '135260007132708',
+                    ),
+                    200,
+                );
+        });
+
+        try {
+            app(EmitCteDocument::class)->attempt($document);
+        } catch (SefazException) {
+        }
 
         $authorized = app(EmitCteDocument::class)->attempt($document)->refresh();
 
         $this->assertSame(CteDocumentStatusEnum::AUTHORIZED, $authorized->status);
         $this->assertSame('900000002', $authorized->cte_number);
-        $this->assertStringStartsWith('3526101256311200013057001900000002', $authorized->access_key);
-        $this->assertDatabaseHas('cte_number_sequences', [
-            'cnpj' => '12563112000130',
-            'serie' => 1,
-            'next_number' => 900000003,
-        ]);
+
+        $consulted = Http::recorded(fn ($request): bool => str_contains($request->url(), 'CTeConsultaV4'));
+        $this->assertCount(1, $consulted);
+
+        $this->assertNotSame($authorized->access_key, DfeSoapResponses::accessKeyFromConsult($consulted->first()[0]->body()));
     }
 }

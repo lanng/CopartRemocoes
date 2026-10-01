@@ -175,4 +175,40 @@ class CleanupOldRegistersTest extends TestCase
             'approved_at' => Carbon::now(),
         ]);
     }
+
+    public function test_direct_documents_survive_the_cleanup_detached_from_the_register(): void
+    {
+        $register = Register::factory()->create([
+            'status' => RegisterStatusEnum::PAID,
+            'updated_at' => now()->subDays(16),
+        ]);
+        $batch = $this->createBatch();
+
+        $direct = CteDocument::factory()->authorized()->create([
+            'cte_emission_batch_id' => $batch->id,
+            'register_id' => $register->id,
+            'emitter' => 'direct',
+            'status' => CteDocumentStatusEnum::AUTHORIZED,
+        ]);
+
+        $lab = CteDocument::factory()->create([
+            'cte_emission_batch_id' => $batch->id,
+            'register_id' => $register->id,
+            'emitter' => 'lab',
+        ]);
+
+        $this->artisan('app:cleanup-old-registers')->assertSuccessful();
+
+        // Registro purgado, documento do Lab apagado, mas o CT-e do emissor
+        // direto sobrevive — desvinculado do registro, ligado ao lote.
+        $this->assertModelMissing($register);
+        $this->assertModelMissing($lab);
+
+        $direct->refresh();
+
+        $this->assertModelExists($direct);
+        $this->assertNull($direct->register_id);
+        $this->assertNotNull($direct->access_key);
+        $this->assertModelExists($batch->refresh());
+    }
 }

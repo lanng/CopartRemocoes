@@ -84,6 +84,40 @@ class DfeSoapResponses
         return self::envelope('cteRetRecepcaoResult', $ret);
     }
 
+    /**
+     * Resposta do CTeConsultaV4 (guard de retransmissão): retConsSitCTe com o
+     * protCTe quando a chave está autorizada.
+     */
+    public static function retConsSitEnvelope(string $accessKey, string $cStat, string $protocol, string $digVal, string $xMotivo = 'Autorizado o uso do CT-e'): string
+    {
+        $ret = '<retConsSitCTe versao="4.00" xmlns="http://www.portalfiscal.inf.br/cte">'
+            .'<tpAmb>2</tpAmb><verAplic>SP-CTe-2026-08-26-1</verAplic>'
+            .'<cStat>'.$cStat.'</cStat><xMotivo>'.$xMotivo.'</xMotivo><cUF>35</cUF>'
+            .'<protCTe versao="4.00">'
+            .'<infProt>'
+            .'<tpAmb>2</tpAmb><verAplic>SP-CTe-2026-08-26-1</verAplic>'
+            .'<chCTe>'.$accessKey.'</chCTe>'
+            .'<dhRecbto>2026-10-01T12:00:00-03:00</dhRecbto>'
+            .'<nProt>'.$protocol.'</nProt>'
+            .'<digVal>'.$digVal.'</digVal>'
+            .'<cStat>'.$cStat.'</cStat>'
+            .'<xMotivo>'.$xMotivo.'</xMotivo>'
+            .'</infProt>'
+            .'</protCTe></retConsSitCTe>';
+
+        return self::envelope('cteConsultaCTeResult', $ret);
+    }
+
+    /**
+     * Chave de 44 dígitos pedida no corpo de uma consulta.
+     */
+    public static function accessKeyFromConsult(string $requestBody): string
+    {
+        preg_match('/<chCTe>(\d{44})<\/chCTe>/', $requestBody, $matches);
+
+        return $matches[1] ?? str_repeat('0', 44);
+    }
+
     protected static function envelope(string $resultElement, string $retXml): string
     {
         return '<?xml version="1.0" encoding="utf-8"?>'

@@ -69,6 +69,13 @@ class CleanupOldRegisters extends Command
 
                         $batchIds = $lockedRegister->cteDocuments()->pluck('cte_emission_batch_id')->unique();
 
+                        // Persistência desacoplada (decisão F4): documentos do
+                        // emissor direto sobrevivem à purga — desvinculam do
+                        // registro e permanecem com o lote (guarda fiscal).
+                        $lockedRegister->cteDocuments()
+                            ->where('emitter', 'direct')
+                            ->update(['register_id' => null]);
+
                         app(DetachPaymentBatchItemsFromRegister::class)->handle($lockedRegister);
                         $lockedRegister->cteDocuments()->delete();
                         $lockedRegister->delete();

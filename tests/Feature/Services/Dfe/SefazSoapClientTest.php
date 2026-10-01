@@ -255,4 +255,40 @@ class SefazSoapClientTest extends TestCase
             .'<'.$resultElement.' xmlns="http://www.portalfiscal.inf.br/cte/wsdl/CTeStatusServicoV4">'.$content.'</'.$resultElement.'>'
             .'</soap:Body></soap:Envelope>';
     }
+
+    public function test_consult_sends_the_conssitcte_payload_and_parses_the_protocol(): void
+    {
+        $ret = '<retConsSitCTe versao="4.00" xmlns="http://www.portalfiscal.inf.br/cte">'
+            .'<tpAmb>2</tpAmb><verAplic>SP-CTe-2026-08-26-1</verAplic><cStat>100</cStat>'
+            .'<xMotivo>Autorizado o uso do CT-e</xMotivo><cUF>35</cUF>'
+            .'<protCTe versao="4.00"><infProt>'
+            .'<tpAmb>2</tpAmb><verAplic>SP-CTe-2026-08-26-1</verAplic>'
+            .'<chCTe>35260912563112000130570010000000019997761234</chCTe>'
+            .'<dhRecbto>2026-10-01T12:00:00-03:00</dhRecbto>'
+            .'<nProt>135260007132708</nProt>'
+            .'<digVal>Ol5h4Q7LEbxFqervvg2/zUevfiI=</digVal>'
+            .'<cStat>100</cStat><xMotivo>Autorizado o uso do CT-e</xMotivo>'
+            .'</infProt></protCTe></retConsSitCTe>';
+
+        Http::fake([
+            'https://sefaz-hml.test/CTeWS/WS/CTeConsultaV4.asmx' => Http::response($this->soapEnvelope('cteConsultaCTeResult', $ret), 200),
+        ]);
+
+        $response = app(SefazSoapClient::class)->consult('35260912563112000130570010000000019997761234');
+
+        $this->assertTrue($response->isAuthorized());
+        $this->assertSame('135260007132708', $response->protocol);
+        $this->assertSame('Ol5h4Q7LEbxFqervvg2/zUevfiI=', $response->digestValue);
+        $this->assertSame('35260912563112000130570010000000019997761234', $response->accessKey);
+        $this->assertStringContainsString('<retConsSitCTe', (string) $response->rawXml);
+
+        Http::assertSent(function ($request): bool {
+            $body = $request->body();
+
+            return str_contains($request->url(), 'CTeConsultaV4.asmx')
+                && str_contains($body, '<consSitCTe versao="4.00" xmlns="http://www.portalfiscal.inf.br/cte">')
+                && str_contains($body, '<xServ>CONSULTAR</xServ>')
+                && str_contains($body, '<chCTe>35260912563112000130570010000000019997761234</chCTe>');
+        });
+    }
 }

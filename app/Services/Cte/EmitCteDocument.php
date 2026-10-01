@@ -17,6 +17,14 @@ use DomainException;
  * snapshot v2 → BuildCteXml → assinar → validar XSD → transmitir → registrar.
  * Falhas de regra/dados (DomainException) são terminais; erros retryable da
  * SEFAZ sobem para o job re-tentar com o documento em authorizing.
+ *
+ * GUARD DE RETRANSMISSÃO (regra "o número queima sempre"): os artifacts do
+ * documento (chave, número, XML assinado) são persistidos ANTES de transmitir.
+ * Se um retry encontrar artifacts (a tentativa anterior pode ter autorizado na
+ * SEFAZ antes de um crash), o attempt CONSULTA a chave queimada via
+ * CTeConsultaV4: autorizada → registra o protocolo sem retransmitir; não
+ * autorizada → a chave está de fato livre e um novo documento é construído
+ * (queimando o próximo número). Nunca reusar número de tentativa anterior.
  */
 class EmitCteDocument
 {
@@ -42,6 +50,22 @@ class EmitCteDocument
             $document->refresh();
         }
 
+        if ($this->hasArtifactsFromPreviousAttempt($document)) {
+            $consult = $this->client->consult((string) $document->access_key);
+
+            if ($consult->isAuthorized()) {
+                return $this->recorder->handle(
+                    $document,
+                    $this->builtFromArtifacts($document),
+                    (string) $document->payload_xml,
+                    $consult,
+                );
+            }
+
+            // Consulta não autorizada: a chave queimada está de fato livre —
+            // um novo documento é construído abaixo (queimando o próximo número).
+        }
+
         $snapshot = $this->snapshotResolver->handle($document);
 
         $built = $this->builder->handle($snapshot);
@@ -55,9 +79,37 @@ class EmitCteDocument
 
         app(XsdValidator::class)->validateCte($signedXml);
 
+        // Persiste os artifacts ANTES de transmitir: se o processo morrer
+        // depois de a SEFAZ autorizar, o retry consulta esta chave e recupera
+        // o protocolo em vez de queimar um novo número às cegas.
+        $document->forceFill([
+            'cte_number' => (string) $built->number,
+            'access_key' => $built->accessKey,
+            'series' => (string) $built->serie,
+            'payload_xml' => $signedXml,
+            'digest_value' => $this->digestOf($signedXml),
+            'response_xml' => null,
+        ])->save();
+
         $response = $this->client->transmit($signedXml);
 
         return $this->recorder->handle($document, $built, $signedXml, $response);
+    }
+
+    protected function hasArtifactsFromPreviousAttempt(CteDocument $document): bool
+    {
+        return filled($document->access_key) && filled($document->payload_xml);
+    }
+
+    protected function builtFromArtifacts(CteDocument $document): BuiltCte
+    {
+        return new BuiltCte(
+            xml: (string) $document->payload_xml,
+            accessKey: (string) $document->access_key,
+            number: (int) $document->cte_number,
+            serie: (int) $document->series,
+            cct: substr((string) $document->access_key, 34, 8),
+        );
     }
 
     protected function assertEmissionRules(CteDocument $document): void
@@ -84,5 +136,12 @@ class EmitCteDocument
     protected function signer(): XmlSigner
     {
         return new XmlSigner(app(SefazCertificate::class));
+    }
+
+    protected function digestOf(string $signedXml): ?string
+    {
+        return preg_match('/<DigestValue>([^<]*)<\/DigestValue>/', $signedXml, $matches) === 1
+            ? $matches[1]
+            : null;
     }
 }
