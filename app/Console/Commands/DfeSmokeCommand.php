@@ -3,18 +3,24 @@
 namespace App\Console\Commands;
 
 use App\Services\Cte\BuildCteXml;
+use App\Services\Dfe\BuildCteProc;
+use App\Services\Dfe\DfeDocumentStore;
+use App\Services\Dfe\GenerateDactePdf;
 use App\Services\Dfe\SefazCertificate;
 use App\Services\Dfe\SefazException;
+use App\Services\Dfe\SefazResponse;
 use App\Services\Dfe\SefazSoapClient;
 use App\Services\Dfe\XmlSigner;
 use App\Services\Dfe\XsdValidator;
 use Illuminate\Console\Command;
+use Illuminate\Support\Facades\Storage;
 use Throwable;
 
 class DfeSmokeCommand extends Command
 {
     protected $signature = 'dfe:smoke
         {--line=vehicle_removal : Linha do snapshot sintético (vehicle_removal ou tank_alcohol)}
+        {--persist : Grava o cteProc e o DACTE do CT-e autorizado em storage/app/dfe-smoke (local, fora do S3)}
         {--force : Permite rodar mesmo com DFE_TP_AMB=1}';
 
     protected $description = 'Ciclo completo do emissor direto: numeração → build → assinar → validar XSD → transmitir à SEFAZ (aceite F3: cStat 100 na homologação)';
@@ -65,6 +71,10 @@ class DfeSmokeCommand extends Command
             if ($response->isAuthorized()) {
                 $this->info("✔ CT-e AUTORIZADO (protocolo {$response->protocol}) — aceite F3 cumprido.");
 
+                if ($this->option('persist')) {
+                    $this->persistArtifacts($signedXml, $response, $built->accessKey);
+                }
+
                 return self::SUCCESS;
             }
 
@@ -84,6 +94,26 @@ class DfeSmokeCommand extends Command
 
             return self::FAILURE;
         }
+    }
+
+    /**
+     * Validação local (fora do S3): grava o cteProc com protocolo e o DACTE
+     * do CT-e autorizado no smoke em storage/app/dfe-smoke.
+     */
+    protected function persistArtifacts(string $signedXml, SefazResponse $response, string $accessKey): void
+    {
+        config([
+            'filesystems.disks.dfe.driver' => 'local',
+            'filesystems.disks.dfe.root' => storage_path('app/dfe-smoke'),
+            'filesystems.disks.dfe.throw' => true,
+        ]);
+
+        $store = app(DfeDocumentStore::class);
+        $store->storeCteProc($accessKey, app(BuildCteProc::class)->handle($signedXml, (string) $response->rawXml));
+
+        $pdfPath = app(GenerateDactePdf::class)->generateForProc($accessKey, (string) Storage::disk('dfe')->get("cte/{$accessKey}/cte-proc.xml"));
+
+        $this->info("Artifacts: storage/app/dfe-smoke/cte/{$accessKey}/ (cte-proc.xml, ".basename($pdfPath).')');
     }
 
     protected function digestOf(string $signedXml): ?string

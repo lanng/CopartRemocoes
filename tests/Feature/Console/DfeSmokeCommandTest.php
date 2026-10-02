@@ -4,6 +4,7 @@ namespace Tests\Feature\Console;
 
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Storage;
 use Tests\Support\DfeSoapResponses;
 use Tests\Support\DfeTestCertificate;
 use Tests\TestCase;
@@ -89,5 +90,33 @@ class DfeSmokeCommandTest extends TestCase
         $this->artisan('dfe:smoke')
             ->expectsOutputToContain('225')
             ->assertExitCode(1);
+    }
+
+    public function test_persists_the_cte_proc_and_the_dacte_locally_on_demand(): void
+    {
+        DfeSoapResponses::fakeOnline($this->baseUrl);
+        DfeSoapResponses::fakeTransmission($this->baseUrl);
+
+        config([
+            'filesystems.disks.dfe.driver' => 'local',
+            'filesystems.disks.dfe.root' => storage_path('app/dfe-smoke'),
+            'filesystems.disks.dfe.throw' => true,
+        ]);
+
+        Storage::fake('dfe');
+
+        $this->artisan('dfe:smoke', ['--persist' => true])->assertExitCode(0);
+
+        $files = Storage::disk('dfe')->allFiles();
+
+        $this->assertCount(2, $files);
+
+        $xml = collect($files)->first(fn ($file): bool => str_contains($file, 'cte-proc.xml'));
+        $pdf = collect($files)->first(fn ($file): bool => str_contains($file, 'dacte'));
+
+        $this->assertNotNull($xml);
+        $this->assertNotNull($pdf);
+        $this->assertStringStartsWith('<?xml', (string) Storage::disk('dfe')->get($xml));
+        $this->assertStringStartsWith('%PDF', (string) Storage::disk('dfe')->get($pdf));
     }
 }
