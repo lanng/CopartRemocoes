@@ -6,7 +6,7 @@
 <head>
     <meta charset="UTF-8">
     <style>
-        @page { margin: 10mm; }
+        @page { margin: 8mm 12mm 12mm 12mm; }
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body { font-family: 'times', 'Times-Roman', serif; font-size: 9px; color: #000; line-height: 1.25; }
         table { width: 100%; border-collapse: collapse; table-layout: fixed; }
@@ -99,11 +99,11 @@
             <div class="center muted">Documento Auxiliar do Conhecimento de Transporte Eletrônico</div>
             <table style="margin-top: 2px">
                 <tr>
-                    <td style="width: 15%; border-left: none; border-top: none; border-bottom: none"><div class="label">Modelo</div><div class="bold center">57</div></td>
-                    <td style="width: 14%; border-top: none; border-bottom: none"><div class="label">Série</div><div class="center">{{ $dacte->serie }}</div></td>
-                    <td style="width: 26%; border-top: none; border-bottom: none"><div class="label">Número</div><div class="bold center">{{ $numeroDotted }}</div></td>
-                    <td style="width: 13%; border-top: none; border-bottom: none"><div class="label">Folha</div><div class="center">01/01</div></td>
-                    <td style="width: 32%; border-right: none; border-top: none; border-bottom: none"><div class="label">Data e hora de emissão</div><div class="center">{{ $dt($dacte->dhEmi) }}</div></td>
+                    <td style="width: 15%"><div class="label">Modelo</div><div class="bold center">57</div></td>
+                    <td style="width: 14%"><div class="label">Série</div><div class="center">{{ $dacte->serie }}</div></td>
+                    <td style="width: 26%"><div class="label">Número</div><div class="bold center">{{ $numeroDotted }}</div></td>
+                    <td style="width: 13%"><div class="label">Folha</div><div class="center">01/01</div></td>
+                    <td style="width: 32%"><div class="label">Data e hora de emissão</div><div class="center">{{ $dt($dacte->dhEmi) }}</div></td>
                 </tr>
             </table>
             <div style="margin-top: 2px" class="label">Chave de acesso</div>
@@ -114,10 +114,16 @@
             </div>
         </td>
         <td style="width: 23%">
-            <div class="label">Modal</div>
-            <div class="center bold" style="font-size: 10px; line-height: 1.4">RODOVIÁRIO</div>
-            <div class="label" style="margin-top: 1px">Insc. Suframa do destinatário</div>
-            <div>&nbsp;</div>
+            <table>
+                <tr><td>
+                    <div class="label">Modal</div>
+                    <div class="center bold" style="font-size: 10px; line-height: 1.4">RODOVIÁRIO</div>
+                </td></tr>
+                <tr><td>
+                    <div class="label">Insc. Suframa do destinatário</div>
+                    <div>&nbsp;</div>
+                </td></tr>
+            </table>
             <div class="qr center">
                 @if ($qrImage !== null)
                     <img src="{{ $qrImage }}" alt="QR Code">
