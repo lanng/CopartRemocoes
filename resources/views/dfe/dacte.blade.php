@@ -20,7 +20,7 @@
         .gap td { border: none; padding: 0; }
         .homolog { background: #000; color: #fff; font-weight: bold; font-size: 10px; text-align: center; padding: 3px; border: 1px solid #000; }
         .qr img { width: 84px; height: 84px; }
-        .sheet { padding: 10mm 12mm 12mm 12mm; }
+        .sheet { padding: 10mm 9mm 12mm 9mm; }
     </style>
 </head>
 <body>
@@ -62,26 +62,26 @@
         </td>
     </tr>
     <tr>
-        <td style="height: 64px">
-            <div class="label">Nome</div>
-            <div style="height: 16px">&nbsp;</div>
-            <div class="label" style="border-top: 1px solid #000">RG</div>
+        <td style="height: 52px">
+            <div class="label" style="font-size: 7.5px">Nome</div>
+            <div style="height: 14px">&nbsp;</div>
+            <div class="label" style="border-top: 1px solid #000; font-size: 7.5px">RG</div>
             <div>&nbsp;</div>
         </td>
         <td style="vertical-align: bottom">
             <div class="center label" style="font-size: 7.5px; padding-bottom: 3px">Assinatura / Carimbo</div>
         </td>
         <td class="center">
-            <div class="label">Chegada &nbsp; Data/Hora</div>
-            <div>___/___/___ &nbsp; ___:___</div>
-            <div class="label">Saída &nbsp; Data/Hora</div>
-            <div>___/___/___ &nbsp; ___:___</div>
+            <div class="label" style="font-size: 7px">Chegada &nbsp; Data/Hora</div>
+            <div style="font-size: 10px">___/___/___ &nbsp; ___:___</div>
+            <div class="label" style="font-size: 7px">Saída &nbsp; Data/Hora</div>
+            <div style="font-size: 10px">___/___/___ &nbsp; ___:___</div>
         </td>
-        <td>
-            <div class="right bold" style="font-size: 10px">CT-E</div>
-            <div class="right label">N.</div>
-            <div class="right big" style="font-size: 12px">{{ $numeroDotted }}</div>
-            <div class="right" style="font-size: 7.5px">SÉRIE: <span class="bold" style="font-size: 10px">{{ $dacte->serie }}</span></div>
+        <td class="center">
+            <div class="center bold" style="font-size: 10px">CT-E</div>
+            <div class="center label">N.</div>
+            <div class="center big" style="font-size: 12px">{{ $numeroDotted }}</div>
+            <div class="center" style="font-size: 7.5px">SÉRIE: <span class="bold" style="font-size: 10px">{{ $dacte->serie }}</span></div>
         </td>
     </tr>
 </table>
@@ -291,10 +291,10 @@
         <td>
             <table>
                 <tr>
-                    <td style="width: 30%; border: none; padding-left: 0"><div class="label">Base de cálculo</div><div>&nbsp;</div></td>
-                    <td style="width: 20%; border: none"><div class="label">Alíq. ICMS</div><div>&nbsp;</div></td>
-                    <td style="width: 28%; border: none"><div class="label">Valor ICMS</div><div>&nbsp;</div></td>
-                    <td style="width: 22%; border: none; padding-right: 0"><div class="label">% Red.BC.Calc.</div><div>&nbsp;</div></td>
+                    <td style="width: 30%"><div class="label">Base de cálculo</div><div>&nbsp;</div></td>
+                    <td style="width: 20%"><div class="label">Alíq. ICMS</div><div>&nbsp;</div></td>
+                    <td style="width: 28%"><div class="label">Valor ICMS</div><div>&nbsp;</div></td>
+                    <td style="width: 22%"><div class="label">% Red.BC.Calc.</div><div>&nbsp;</div></td>
                 </tr>
             </table>
         </td>
@@ -353,20 +353,23 @@
 
 {{-- ============================ DADOS ESPECÍFICOS DO MODAL ============================ --}}
 <table style="margin-top: 2px">
-    <tr><td colspan="2" class="section">DADOS ESPECÍFICOS DO MODAL RODOVIÁRIO</td></tr>
+    <colgroup>
+        <col style="width: 26%">
+        <col style="width: 22%">
+        <col style="width: 52%">
+    </colgroup>
+    <tr><td colspan="3" class="section">DADOS ESPECÍFICOS DO MODAL RODOVIÁRIO</td></tr>
     <tr>
-        <td style="width: 28%"><div class="label">RNTRC da empresa</div><div>{{ $dacte->rntrc ?? ' ' }}</div></td>
-        <td style="width: 72%">
-            <div class="label">Data prevista de entrega</div>
-            <div>ESTE CONHECIMENTO DE TRANSPORTE ATENDE À LEGISLAÇÃO DE TRANSPORTE RODOVIÁRIO EM VIGOR</div>
-        </td>
+        <td><div class="label">RNTRC da empresa</div><div>{{ $dacte->rntrc ?? ' ' }}</div></td>
+        <td><div class="label">Data prevista de entrega</div><div>&nbsp;</div></td>
+        <td><div>ESTE CONHECIMENTO DE TRANSPORTE ATENDE À LEGISLAÇÃO DE TRANSPORTE RODOVIÁRIO EM VIGOR</div></td>
     </tr>
 </table>
 
 {{-- ============================ FECHO ============================ --}}
 <table style="margin-top: 2px">
     <tr>
-        <td style="width: 55%"><div class="label">Uso exclusivo do emissor do CT-e</div><div>&nbsp;</div></td>
+        <td style="width: 55%; height: 26px"><div class="label">Uso exclusivo do emissor do CT-e</div><div>&nbsp;</div></td>
         <td style="width: 45%"><div class="label">Reservado ao fisco</div><div>&nbsp;</div></td>
     </tr>
 </table>
