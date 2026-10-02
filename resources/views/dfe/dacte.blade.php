@@ -9,7 +9,7 @@
         @page { margin: 0; }        * { margin: 0; padding: 0; box-sizing: border-box; }
         body { font-family: 'times', 'Times-Roman', serif; font-size: 9px; color: #000; line-height: 1.25; }
         table { width: 100%; border-collapse: collapse; table-layout: fixed; }
-        td, th { border: 1px solid #000; padding: 1.5px 3px; vertical-align: top; }
+        td, th { border: 0.5px solid #000; padding: 1.5px 3px; vertical-align: top; }
         .label { font-size: 6px; color: #333; text-transform: uppercase; }
         .bold { font-weight: bold; }
         .big { font-size: 14px; font-weight: bold; }
@@ -18,9 +18,9 @@
         .right { text-align: right; }
         .muted { font-size: 7.5px; color: #333; }
         .gap td { border: none; padding: 0; }
-        .homolog { background: #000; color: #fff; font-weight: bold; font-size: 10px; text-align: center; padding: 3px; border: 1px solid #000; }
+        .homolog { background: #000; color: #fff; font-weight: bold; font-size: 10px; text-align: center; padding: 3px; border: 0.5px solid #000; }
         .qr img { width: 84px; height: 84px; }
-        .sheet { padding: 10mm 7mm 12mm 7mm; }
+        .sheet { padding: 10mm 5mm 12mm 5mm; }
     </style>
 </head>
 <body>
@@ -65,7 +65,7 @@
         <td style="height: 52px">
             <div class="label" style="font-size: 7.5px">Nome</div>
             <div style="height: 14px">&nbsp;</div>
-            <div class="label" style="border-top: 1px solid #000; font-size: 7.5px">RG</div>
+            <div class="label" style="border-top: 0.5px solid #000; font-size: 7.5px">RG</div>
             <div>&nbsp;</div>
         </td>
         <td style="vertical-align: bottom">
@@ -101,7 +101,7 @@
         </td>
         <td style="width: 45%; padding: 0">
             <div class="center bold" style="font-size: 12px; padding-top: 2px">DACTE</div>
-            <div class="center muted" style="border-bottom: 1px solid #000; padding-bottom: 2px">Documento Auxiliar do Conhecimento de Transporte Eletrônico</div>
+            <div class="center muted" style="border-bottom: 0.5px solid #000; padding-bottom: 2px">Documento Auxiliar do Conhecimento de Transporte Eletrônico</div>
             <table style="margin-top: 0">
                 <tr>
                     <td style="width: 15%"><div class="label">Modelo</div><div class="bold center">57</div></td>
