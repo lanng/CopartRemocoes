@@ -29,6 +29,10 @@ class DacteData
         public readonly string $dhEmi,
         public readonly string $tpAmb,
         public readonly string $natOp,
+        public readonly string $tpCte,
+        public readonly string $tpServ,
+        public readonly string $cst,
+        public readonly string $indSn,
         public readonly string $protocol,
         public readonly ?string $receivedAt,
         public readonly string $cStat,
@@ -45,6 +49,8 @@ class DacteData
         public readonly ?string $qrUrl,
         public readonly ?string $originCity,
         public readonly ?string $destinationCity,
+        public readonly ?string $originIbge,
+        public readonly ?string $destinationIbge,
     ) {}
 
     public static function fromProc(string $cteProcXml): self
@@ -83,6 +89,8 @@ class DacteData
         $infDoc = $infCteNorm !== null ? self::first($infCteNorm, 'infDoc') : null;
         $infModal = $infCteNorm !== null ? self::first($infCteNorm, 'infModal') : null;
         $rodo = $infModal !== null ? self::first($infModal, 'rodo') : null;
+        $imp = self::first($infCte, 'imp');
+        $icmsSn = $imp !== null ? self::first(self::first($imp, 'ICMS') ?? $imp, 'ICMSSN') : null;
 
         $components = [];
 
@@ -108,6 +116,10 @@ class DacteData
             dhEmi: (string) ($ide !== null ? self::textOf($ide, 'dhEmi') : ''),
             tpAmb: (string) ($ide !== null ? self::textOf($ide, 'tpAmb') : ''),
             natOp: (string) ($ide !== null ? self::textOf($ide, 'natOp') : ''),
+            tpCte: (string) ($ide !== null ? self::textOf($ide, 'tpCTe') : ''),
+            tpServ: (string) ($ide !== null ? self::textOf($ide, 'tpServ') : ''),
+            cst: $icmsSn !== null ? (string) self::textOf($icmsSn, 'CST') : '',
+            indSn: $icmsSn !== null ? (string) self::textOf($icmsSn, 'indSN') : '1',
             protocol: (string) self::protText($root, 'nProt'),
             receivedAt: self::protText($root, 'dhRecbto'),
             cStat: (string) self::protText($root, 'cStat'),
@@ -147,6 +159,8 @@ class DacteData
             qrUrl: self::qrUrl($cte),
             originCity: $originMun !== null ? trim((string) $originMun->textContent) : null,
             destinationCity: $destinationMun !== null ? trim((string) $destinationMun->textContent) : null,
+            originIbge: $ide !== null ? self::optional($ide, 'cMunIni') : null,
+            destinationIbge: $ide !== null ? self::optional($ide, 'cMunFim') : null,
         );
     }
 

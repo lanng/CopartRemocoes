@@ -8,6 +8,7 @@
     "require": {
         "php": "^8.2",
         "bezhansalleh/filament-language-switch": "^3.1",
+        "chillerlan/php-qrcode": "^6.0",
         "doctrine/dbal": "^4.2",
         "dompdf/dompdf": "^3.1",
         "filament/filament": "^3.3",

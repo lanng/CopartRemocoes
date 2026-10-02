@@ -36,6 +36,12 @@ class DacteDataTest extends TestCase
         $this->assertSame('CARTA DE REMOCAO', $dacte->document['descOutros']);
 
         $this->assertSame('45963122', $dacte->rntrc);
+        $this->assertSame('0', $dacte->tpCte);
+        $this->assertSame('0', $dacte->tpServ);
+        $this->assertSame('90', $dacte->cst);
+        $this->assertSame('1', $dacte->indSn);
+        $this->assertSame('3504008', $dacte->originIbge);
+        $this->assertSame('3523107', $dacte->destinationIbge);
         $this->assertStringContainsString('nfe.fazenda.sp.gov.br/CTeConsulta/qrCode', (string) $dacte->qrUrl);
         $this->assertSame('Assis', $dacte->originCity);
         $this->assertSame('Itaquaquecetuba', $dacte->destinationCity);
