@@ -6,21 +6,21 @@
 <head>
     <meta charset="UTF-8">
     <style>
-        @page { margin: 9mm 8mm; }
+        @page { margin: 10mm; }
         * { margin: 0; padding: 0; box-sizing: border-box; }
-        body { font-family: 'DejaVu Serif', serif; font-size: 9.5px; color: #000; }
+        body { font-family: 'times', 'Times-Roman', serif; font-size: 9px; color: #000; line-height: 1.25; }
         table { width: 100%; border-collapse: collapse; table-layout: fixed; }
-        td, th { border: 1px solid #000; padding: 2px 4px; vertical-align: top; }
-        .label { font-size: 6.5px; color: #333; text-transform: uppercase; }
+        td, th { border: 1px solid #000; padding: 1.5px 3px; vertical-align: top; }
+        .label { font-size: 6px; color: #333; text-transform: uppercase; }
         .bold { font-weight: bold; }
-        .big { font-size: 15px; font-weight: bold; }
-        .value-big { font-size: 11px; }
+        .big { font-size: 14px; font-weight: bold; }
+        .section { font-size: 8.5px; text-align: center; }
         .center { text-align: center; }
         .right { text-align: right; }
-        .muted { font-size: 8px; color: #333; }
+        .muted { font-size: 7.5px; color: #333; }
         .gap td { border: none; padding: 0; }
-        .homolog { background: #000; color: #fff; font-weight: bold; font-size: 11px; text-align: center; padding: 4px; border: 1px solid #000; }
-        .qr img { width: 88px; height: 88px; }
+        .homolog { background: #000; color: #fff; font-weight: bold; font-size: 10px; text-align: center; padding: 3px; border: 1px solid #000; }
+        .qr img { width: 84px; height: 84px; }
     </style>
 </head>
 <body>
@@ -68,10 +68,10 @@
             <div>___/___/___ &nbsp;&nbsp; ___:___</div>
         </td>
         <td style="width: 22%">
-            <div class="right bold" style="font-size: 11px">CT-E</div>
+            <div class="right bold" style="font-size: 10px">CT-E</div>
             <div class="right label">N.</div>
-            <div class="right big">{{ $numeroDotted }}</div>
-            <div class="right" style="font-size: 8px">SÉRIE: <span class="bold" style="font-size: 11px">{{ $dacte->serie }}</span></div>
+            <div class="right big" style="font-size: 13px">{{ $numeroDotted }}</div>
+            <div class="right" style="font-size: 7.5px">SÉRIE: <span class="bold" style="font-size: 11px">{{ $dacte->serie }}</span></div>
         </td>
     </tr>
     <tr>
@@ -81,7 +81,7 @@
 </table>
 
 {{-- ============================ CABEÇALHO ============================ --}}
-<div class="gap" style="height: 4px"></div>
+<div class="gap" style="height: 3px"></div>
 
 <table>
     <tr>
@@ -95,19 +95,19 @@
             <div class="muted">TELEFONE:</div>
         </td>
         <td style="width: 45%">
-            <div class="center bold" style="font-size: 13px">DACTE</div>
+            <div class="center bold" style="font-size: 12px">DACTE</div>
             <div class="center muted">Documento Auxiliar do Conhecimento de Transporte Eletrônico</div>
             <table style="margin-top: 2px">
                 <tr>
                     <td style="width: 15%; border-left: none; border-top: none; border-bottom: none"><div class="label">Modelo</div><div class="bold center">57</div></td>
-                    <td style="width: 14%; border-top: none; border-bottom: none"><div class="label">Série</div><div class="bold center">{{ $dacte->serie }}</div></td>
+                    <td style="width: 14%; border-top: none; border-bottom: none"><div class="label">Série</div><div class="center">{{ $dacte->serie }}</div></td>
                     <td style="width: 26%; border-top: none; border-bottom: none"><div class="label">Número</div><div class="bold center">{{ $numeroDotted }}</div></td>
-                    <td style="width: 13%; border-top: none; border-bottom: none"><div class="label">Folha</div><div class="bold center">01/01</div></td>
-                    <td style="width: 32%; border-right: none; border-top: none; border-bottom: none"><div class="label">Data e hora de emissão</div><div class="bold center">{{ $dt($dacte->dhEmi) }}</div></td>
+                    <td style="width: 13%; border-top: none; border-bottom: none"><div class="label">Folha</div><div class="center">01/01</div></td>
+                    <td style="width: 32%; border-right: none; border-top: none; border-bottom: none"><div class="label">Data e hora de emissão</div><div class="center">{{ $dt($dacte->dhEmi) }}</div></td>
                 </tr>
             </table>
             <div style="margin-top: 2px" class="label">Chave de acesso</div>
-            <div class="bold" style="font-size: 10px; letter-spacing: 0.4px; line-height: 1.4">{{ implode(' ', $dacte->groupedAccessKey()) }}</div>
+            <div class="bold" style="font-size: 10.5px; line-height: 1.35">{{ implode(' ', $dacte->groupedAccessKey()) }}</div>
             <div class="center muted" style="margin-top: 2px">
                 Consulta de autenticidade no portal nacional do CT-e, no site da Sefaz
                 Autorizadora, ou em http://www.cte.fazenda.gov.br/portal
@@ -115,7 +115,7 @@
         </td>
         <td style="width: 23%">
             <div class="label">Modal</div>
-            <div class="center bold" style="font-size: 11px; line-height: 1.5">RODOVIÁRIO</div>
+            <div class="center bold" style="font-size: 10px; line-height: 1.4">RODOVIÁRIO</div>
             <div class="label" style="margin-top: 1px">Insc. Suframa do destinatário</div>
             <div>&nbsp;</div>
             <div class="qr center">
@@ -134,11 +134,11 @@
 @endif
 
 {{-- ============================ TIPOS + PROTOCOLO ============================ --}}
-<table style="margin-top: 3px">
+<table style="margin-top: 2px">
     <tr>
-        <td style="width: 17%"><div class="label">Tipo do CT-e</div><div class="bold">{{ ($dacte->tpCte === '0' || $dacte->tpCte === '') ? 'NORMAL' : $dacte->tpCte }}</div></td>
-        <td style="width: 17%"><div class="label">Tipo do serviço</div><div class="bold">{{ ($dacte->tpServ === '0' || $dacte->tpServ === '') ? 'NORMAL' : $dacte->tpServ }}</div></td>
-        <td style="width: 15%"><div class="label">Indicador do CT-e globalizado</div><div class="bold">NÃO</div></td>
+        <td style="width: 17%"><div class="label">Tipo do CT-e</div><div>{{ ($dacte->tpCte === '0' || $dacte->tpCte === '') ? 'NORMAL' : $dacte->tpCte }}</div></td>
+        <td style="width: 17%"><div class="label">Tipo do serviço</div><div>{{ ($dacte->tpServ === '0' || $dacte->tpServ === '') ? 'NORMAL' : $dacte->tpServ }}</div></td>
+        <td style="width: 15%"><div class="label">Indicador do CT-e globalizado</div><div>NÃO</div></td>
         <td style="width: 14%"><div class="label">Informações do CT-e globalizado</div></td>
         <td style="width: 37%">
             <div class="label">Protocolo de autorização de uso</div>
@@ -148,9 +148,9 @@
 </table>
 
 {{-- ============================ CFOP + PRESTAÇÃO ============================ --}}
-<table style="margin-top: 3px">
+<table style="margin-top: 2px">
     <tr>
-        <td colspan="2"><div class="label">CFOP - Natureza da operação</div><div class="bold">5353 - {{ $dacte->natOp }}</div></td>
+        <td colspan="2"><div class="label">CFOP - Natureza da operação</div><div>5353 - {{ $dacte->natOp }}</div></td>
     </tr>
     <tr>
         <td style="width: 50%"><div class="label">Origem da prestação</div><div>{{ $origin }}</div></td>
@@ -159,7 +159,7 @@
 </table>
 
 {{-- ============================ REMETENTE / DESTINATÁRIO ============================ --}}
-<table style="margin-top: 3px">
+<table style="margin-top: 2px">
     <tr>
         <td style="width: 50%">
             <div class="label">Remetente</div>
@@ -235,24 +235,24 @@
 </table>
 
 {{-- ============================ CARGA ============================ --}}
-<table style="margin-top: 3px">
+<table style="margin-top: 2px">
     <tr>
-        <td colspan="2"><div class="label">Produto predominante</div><div class="bold">{{ $dacte->cargo['proPred'] ?? ' ' }}</div></td>
-        <td colspan="2"><div class="label">Outras características da carga</div><div class="bold">{{ $dacte->cargo['xOutCat'] ?? ' ' }}</div></td>
+        <td colspan="2"><div class="label">Produto predominante</div><div>{{ $dacte->cargo['proPred'] ?? ' ' }}</div></td>
+        <td colspan="2"><div class="label">Outras características da carga</div><div>{{ $dacte->cargo['xOutCat'] ?? ' ' }}</div></td>
         <td><div class="label">Valor total da mercadoria</div><div class="right value-big">{{ isset($dacte->cargo['vCarga']) ? $money($dacte->cargo['vCarga']) : ' ' }}</div></td>
     </tr>
     <tr>
-        <td><div class="label">Peso bruto (Kg)</div><div class="bold">{{ (($dacte->cargo['cUnid'] ?? '') === '01') ? $money4($dacte->cargo['qCarga'] ?? null) : ' ' }}</div></td>
+        <td><div class="label">Peso bruto (Kg)</div><div>{{ (($dacte->cargo['cUnid'] ?? '') === '01') ? $money4($dacte->cargo['qCarga'] ?? null) : ' ' }}</div></td>
         <td><div class="label">Peso base cálc. (Kg)</div><div>&nbsp;</div></td>
         <td><div class="label">Peso aferido (Kg)</div><div>&nbsp;</div></td>
         <td><div class="label">Cubagem (M3)</div><div>&nbsp;</div></td>
-        <td><div class="label">Qtde. volumes (Unid)</div><div class="right bold">{{ ($dacte->cargo['tpMed'] ?? '') !== '' ? ($dacte->cargo['tpMed'].': '.$money4($dacte->cargo['qCarga'] ?? null).' '.$unit) : ' ' }}</div></td>
+        <td><div class="label">Qtde. volumes (Unid)</div><div class="right">{{ ($dacte->cargo['tpMed'] ?? '') !== '' ? ($dacte->cargo['tpMed'].': '.$money4($dacte->cargo['qCarga'] ?? null).' '.$unit) : ' ' }}</div></td>
     </tr>
 </table>
 
 {{-- ============================ PRESTAÇÃO DO SERVIÇO ============================ --}}
-<table style="margin-top: 3px">
-    <tr><td colspan="4" class="center bold" style="font-size: 9px">COMPONENTES DO VALOR DA PRESTAÇÃO DE SERVIÇO</td></tr>
+<table style="margin-top: 2px">
+    <tr><td colspan="4" class="section">COMPONENTES DO VALOR DA PRESTAÇÃO DE SERVIÇO</td></tr>
     <tr>
         @for ($i = 0; $i < 3; $i++)
             <td style="width: 18%">
@@ -264,16 +264,16 @@
         @endfor
         <td style="width: 46%">
             <div class="label">Valor total do serviço</div>
-            <div class="right value-big">{{ $money($dacte->vTPrest) }}</div>
+            <div class="right" style="font-size: 10px">{{ $money($dacte->vTPrest) }}</div>
             <div class="label" style="margin-top: 2px">Valor a receber</div>
-            <div class="right value-big">{{ $money($dacte->vRec) }}</div>
+            <div class="right" style="font-size: 10px">{{ $money($dacte->vRec) }}</div>
         </td>
     </tr>
 </table>
 
 {{-- ============================ IMPOSTO ============================ --}}
-<table style="margin-top: 3px">
-    <tr><td colspan="2" class="center bold" style="font-size: 9px">INFORMAÇÕES RELATIVAS AO IMPOSTO</td></tr>
+<table style="margin-top: 2px">
+    <tr><td colspan="2" class="section">INFORMAÇÕES RELATIVAS AO IMPOSTO</td></tr>
     <tr>
         <td style="width: 45%"><div class="label">Situação tributária</div><div class="bold">{{ $dacte->cst !== '' ? $dacte->cst.' - SIMPLES NACIONAL' : ' ' }}</div></td>
         <td>
@@ -290,8 +290,8 @@
 </table>
 
 {{-- ============================ DOCUMENTOS ORIGINÁRIOS ============================ --}}
-<table style="margin-top: 3px">
-    <tr><td colspan="2" class="center bold" style="font-size: 9px">DOCUMENTOS ORIGINÁRIOS</td></tr>
+<table style="margin-top: 2px">
+    <tr><td colspan="2" class="section">DOCUMENTOS ORIGINÁRIOS</td></tr>
     <tr>
         <td style="width: 50%">
             <table>
@@ -310,9 +310,9 @@
                     <td style="border: none">
                         @if (($doc['kind'] ?? null) === 'nfe')
                             <span class="bold">{{ substr((string) $doc['chave'], 25, 9) }}</span>
-                            <div class="bold" style="letter-spacing: 0.3px; line-height: 1.5">{{ implode(' ', str_split((string) $doc['chave'], 4)) }}</div>
+                            <div style="line-height: 1.4">{{ implode(' ', str_split((string) $doc['chave'], 4)) }}</div>
                         @elseif (($doc['kind'] ?? null) === 'outros')
-                            <span class="bold">{{ $doc['descOutros'] }}</span>
+                            <span>{{ $doc['descOutros'] }}</span>
                             <div class="muted">Emissão: {{ $doc['dEmi'] }} — nDoc {{ $doc['nDoc'] }}</div>
                         @else
                             &nbsp;
@@ -334,16 +334,16 @@
 </table>
 
 {{-- ============================ OBSERVAÇÕES ============================ --}}
-<table style="margin-top: 3px">
+<table style="margin-top: 2px">
     <tr><td class="center bold" style="font-size: 9px">OBSERVAÇÕES</td></tr>
     <tr><td style="height: 26px">&nbsp;</td></tr>
 </table>
 
 {{-- ============================ DADOS ESPECÍFICOS DO MODAL ============================ --}}
-<table style="margin-top: 3px">
-    <tr><td colspan="2" class="center bold" style="font-size: 9px">DADOS ESPECÍFICOS DO MODAL RODOVIÁRIO</td></tr>
+<table style="margin-top: 2px">
+    <tr><td colspan="2" class="section">DADOS ESPECÍFICOS DO MODAL RODOVIÁRIO</td></tr>
     <tr>
-        <td style="width: 28%"><div class="label">RNTRC da empresa</div><div class="bold">{{ $dacte->rntrc ?? ' ' }}</div></td>
+        <td style="width: 28%"><div class="label">RNTRC da empresa</div><div>{{ $dacte->rntrc ?? ' ' }}</div></td>
         <td style="width: 72%">
             <div class="label">Data prevista de entrega</div>
             <div>ESTE CONHECIMENTO DE TRANSPORTE ATENDE À LEGISLAÇÃO DE TRANSPORTE RODOVIÁRIO EM VIGOR</div>
@@ -352,7 +352,7 @@
 </table>
 
 {{-- ============================ FECHO ============================ --}}
-<table style="margin-top: 3px">
+<table style="margin-top: 2px">
     <tr>
         <td style="width: 55%"><div class="label">Uso exclusivo do emissor do CT-e</div><div>&nbsp;</div></td>
         <td style="width: 45%"><div class="label">Reservado ao fisco</div><div>&nbsp;</div></td>
