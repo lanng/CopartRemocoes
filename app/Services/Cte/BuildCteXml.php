@@ -37,7 +37,7 @@ class BuildCteXml
 
         $serie = (int) config('dfe.cte.serie');
         $number = $this->allocator->handle();
-        $cct = (string) random_int(0, 99999999);
+        $cct = str_pad((string) random_int(0, 99999999), 8, '0', STR_PAD_LEFT);
 
         $accessKey = $this->accessKey->build(
             cnpj: (string) config('dfe.emit.cnpj'),
