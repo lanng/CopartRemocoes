@@ -6,10 +6,12 @@ use App\Enums\CteDocumentStatusEnum;
 use App\Models\CteDocument;
 use App\Services\Dfe\BuildCteProc;
 use App\Services\Dfe\DfeDocumentStore;
+use App\Services\Dfe\GenerateDactePdf;
 use App\Services\Dfe\SefazResponse;
 use DomainException;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
+use Throwable;
 
 /**
  * Resultado da transmissão direta (spec dfe §4.3) — irmão do
@@ -23,6 +25,7 @@ class RecordDirectCteResult
         protected DirectCteDocumentWorkflow $workflow,
         protected BuildCteProc $procBuilder,
         protected DfeDocumentStore $store,
+        protected GenerateDactePdf $dacteGenerator,
     ) {}
 
     public function handle(CteDocument $document, BuiltCte $built, string $signedXml, SefazResponse $response): CteDocument
@@ -67,6 +70,8 @@ class RecordDirectCteResult
         $proc = $this->procBuilder->handle($signedXml, (string) $response->rawXml);
         $stored = $this->store->storeCteProc((string) $built->accessKey, $proc);
 
+        $dactePath = $this->generateDacte((string) $built->accessKey, $proc);
+
         $this->workflow->transition($document, CteDocumentStatusEnum::AUTHORIZED);
 
         $document->forceFill([
@@ -82,6 +87,7 @@ class RecordDirectCteResult
             'response_xml' => $response->rawXml,
             'digest_value' => $digest,
             'xml_path' => $stored['path'],
+            'pdf_path' => $dactePath,
             'sha256' => $stored['sha256'],
             'error_stage' => null,
             'error_code' => null,
@@ -92,7 +98,27 @@ class RecordDirectCteResult
             'document' => $document->public_id,
             'access_key' => $built->accessKey,
             'protocol' => $response->protocol,
+            'dacte' => $dactePath,
         ]);
+    }
+
+    /**
+     * DACTE na autorização (spec §5.1, linha tanque crítica) — mas a
+     * autorização é sagrada: falha de PDF só loga (pdf_path fica null e a
+     * listagem regenera sob demanda a partir do cteProc do S3).
+     */
+    protected function generateDacte(string $accessKey, string $proc): ?string
+    {
+        try {
+            return $this->dacteGenerator->generateForProc($accessKey, $proc);
+        } catch (Throwable $exception) {
+            $this->log('warning', 'Falha ao gerar o DACTE (regenerável sob demanda).', [
+                'access_key' => $accessKey,
+                'error' => $exception->getMessage(),
+            ]);
+
+            return null;
+        }
     }
 
     /**

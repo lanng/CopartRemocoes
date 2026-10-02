@@ -5,6 +5,9 @@ namespace App\Filament\Resources;
 use App\Enums\CteDocumentStatusEnum;
 use App\Filament\Resources\CteEmissionResource\Pages;
 use App\Models\CteDocument;
+use App\Services\Dfe\DfeDocumentStore;
+use App\Services\Dfe\GenerateDactePdf;
+use Filament\Notifications\Notification;
 use Filament\Resources\Resource;
 use Filament\Tables\Actions\Action;
 use Filament\Tables\Columns\TextColumn;
@@ -83,6 +86,27 @@ class CteEmissionResource extends Resource
                     )->all()),
             ])
             ->actions([
+                Action::make('regenerateDacte')
+                    ->label('Regenerar DACTE')
+                    ->icon('heroicon-o-arrow-path')
+                    ->color('warning')
+                    ->requiresConfirmation()
+                    ->visible(fn (CteDocument $record): bool => filled($record->xml_path))
+                    ->action(function (CteDocument $record): void {
+                        $proc = app(DfeDocumentStore::class)->read((string) $record->xml_path);
+
+                        $record->forceFill([
+                            'pdf_path' => app(GenerateDactePdf::class)->generateForProc(
+                                (string) $record->access_key,
+                                $proc,
+                            ),
+                        ])->save();
+
+                        Notification::make()
+                            ->title('DACTE regenerado (nova versão no S3).')
+                            ->success()
+                            ->send();
+                    }),
                 self::downloadAction('downloadXml', 'XML', 'xml_path', '-cte.xml'),
                 self::downloadAction('downloadPdf', 'PDF', 'pdf_path', '-dacte.pdf'),
             ])

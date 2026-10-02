@@ -73,6 +73,11 @@ class EmitCteDocumentTest extends TestCase
         Storage::disk('dfe')->assertExists($authorized->xml_path);
         $this->assertSame(hash('sha256', (string) Storage::disk('dfe')->get($authorized->xml_path)), $authorized->sha256);
 
+        // DACTE gerado na autorização (spec §5.1).
+        $this->assertSame('cte/'.$authorized->access_key.'/dacte.pdf', $authorized->pdf_path);
+        Storage::disk('dfe')->assertExists($authorized->pdf_path);
+        $this->assertStringStartsWith('%PDF', (string) Storage::disk('dfe')->get($authorized->pdf_path));
+
         // Lote com um único documento autorizado fecha como completed.
         $this->assertSame('completed', $authorized->batch->refresh()->status->value);
         $this->assertNotNull($authorized->batch->completed_at);
@@ -347,5 +352,27 @@ class EmitCteDocumentTest extends TestCase
         $this->assertCount(1, $consulted);
 
         $this->assertNotSame($authorized->access_key, DfeSoapResponses::accessKeyFromConsult($consulted->first()[0]->body()));
+    }
+
+    /**
+     * A autorização é sagrada: falha na geração do DACTE não derruba o
+     * registro — pdf_path fica null e a listagem regenera sob demanda.
+     */
+    public function test_a_dacte_generation_failure_does_not_lose_the_authorization(): void
+    {
+        DfeSoapResponses::fakeOnline($this->baseUrl);
+        DfeSoapResponses::fakeTransmission($this->baseUrl);
+
+        $document = $this->liveDirectDocument();
+
+        $this->mock(\App\Services\Dfe\GenerateDactePdf::class, fn ($mock) => $mock
+            ->shouldReceive('generateForProc')
+            ->andThrow(new RuntimeException('fonte do PDF explodiu')));
+
+        $authorized = app(EmitCteDocument::class)->attempt($document)->refresh();
+
+        $this->assertSame(CteDocumentStatusEnum::AUTHORIZED, $authorized->status);
+        $this->assertNotNull($authorized->xml_path);
+        $this->assertNull($authorized->pdf_path);
     }
 }

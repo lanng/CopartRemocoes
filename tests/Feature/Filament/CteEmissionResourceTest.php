@@ -64,4 +64,26 @@ class CteEmissionResourceTest extends TestCase
     {
         $this->assertFalse(CteEmissionResource::canCreate());
     }
+
+    public function test_regenerates_the_dacte_from_the_stored_proc(): void
+    {
+        $accessKey = str_repeat('3', 44);
+
+        Storage::disk('dfe')->put("cte/{$accessKey}/cte-proc.xml", (string) file_get_contents(__DIR__.'/../../Fixtures/Dfe/cte-2962.xml'));
+
+        $document = CteDocument::factory()->authorized()->create([
+            'emitter' => 'direct',
+            'access_key' => $accessKey,
+            'xml_path' => "cte/{$accessKey}/cte-proc.xml",
+        ]);
+
+        Livewire::test(ListCteEmissions::class)
+            ->callTableAction('regenerateDacte', $document);
+
+        $document->refresh();
+
+        $this->assertNotNull($document->pdf_path);
+        Storage::disk('dfe')->assertExists($document->pdf_path);
+        $this->assertStringStartsWith('%PDF', (string) Storage::disk('dfe')->get($document->pdf_path));
+    }
 }

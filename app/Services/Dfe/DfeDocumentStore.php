@@ -38,6 +38,26 @@ class DfeDocumentStore
         return $this->store("cte/{$accessKey}/cte-proc.xml", $cteProcXml);
     }
 
+    /**
+     * DACTE com versionamento (spec dfe §5.1): regeneração NUNCA sobrescreve —
+     * dacte.pdf vira dacte-2.pdf, dacte-3.pdf…
+     */
+    public function storeDacte(string $accessKey, string $pdf): string
+    {
+        $base = "cte/{$accessKey}";
+        $path = "{$base}/dacte.pdf";
+        $version = 2;
+
+        while ($this->exists($path)) {
+            $path = "{$base}/dacte-{$version}.pdf";
+            $version++;
+        }
+
+        $this->store($path, $pdf);
+
+        return $path;
+    }
+
     public function read(string $path): string
     {
         return (string) Storage::disk(self::DISK)->get($path);
