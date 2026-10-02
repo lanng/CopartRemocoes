@@ -20,7 +20,7 @@
         .gap td { border: none; padding: 0; }
         .homolog { background: #000; color: #fff; font-weight: bold; font-size: 10px; text-align: center; padding: 3px; border: 1px solid #000; }
         .qr img { width: 84px; height: 84px; }
-        .sheet { padding: 10mm 9mm 12mm 9mm; }
+        .sheet { padding: 10mm 7mm 12mm 7mm; }
     </style>
 </head>
 <body>
@@ -77,11 +77,10 @@
             <div class="label" style="font-size: 7px">Saída &nbsp; Data/Hora</div>
             <div style="font-size: 10px">___/___/___ &nbsp; ___:___</div>
         </td>
-        <td class="center">
+        <td>
             <div class="center bold" style="font-size: 10px">CT-E</div>
-            <div class="center label">N.</div>
-            <div class="center big" style="font-size: 12px">{{ $numeroDotted }}</div>
-            <div class="center" style="font-size: 7.5px">SÉRIE: <span class="bold" style="font-size: 10px">{{ $dacte->serie }}</span></div>
+            <div><span class="label">N.</span> <span class="big" style="font-size: 12px">{{ $numeroDotted }}</span></div>
+            <div><span class="label" style="font-size: 7.5px">SÉRIE:</span> <span class="bold" style="font-size: 10px">{{ $dacte->serie }}</span></div>
         </td>
     </tr>
 </table>
@@ -92,7 +91,7 @@
 <table>
     <tr>
         <td style="width: 32%">
-            <div class="center bold" style="font-size: 11px">{{ $dacte->emit['xNome'] }}</div>
+            <div class="center bold" style="font-size: 11px; margin-bottom: 7px">{{ $dacte->emit['xNome'] }}</div>
             <div>{{ $dacte->emit['xLgr'] }}, {{ $dacte->emit['nro'] }}</div>
             <div>{{ $dacte->emit['xBairro'] }}</div>
             <div>CEP: {{ $cep((string) $dacte->emit['CEP']) }} - {{ $dacte->emit['xMun'] }} - {{ $dacte->emit['UF'] }}</div>
@@ -100,10 +99,10 @@
             <div class="muted">INSCRIÇÃO ESTADUAL: {{ $dacte->emit['IE'] }}</div>
             <div class="muted">TELEFONE:</div>
         </td>
-        <td style="width: 45%">
-            <div class="center bold" style="font-size: 12px">DACTE</div>
-            <div class="center muted">Documento Auxiliar do Conhecimento de Transporte Eletrônico</div>
-            <table style="margin-top: 2px">
+        <td style="width: 45%; padding: 0">
+            <div class="center bold" style="font-size: 12px; padding-top: 2px">DACTE</div>
+            <div class="center muted" style="border-bottom: 1px solid #000; padding-bottom: 2px">Documento Auxiliar do Conhecimento de Transporte Eletrônico</div>
+            <table style="margin-top: 0">
                 <tr>
                     <td style="width: 15%"><div class="label">Modelo</div><div class="bold center">57</div></td>
                     <td style="width: 14%"><div class="label">Série</div><div class="center">{{ $dacte->serie }}</div></td>
