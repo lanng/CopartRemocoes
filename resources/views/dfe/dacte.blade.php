@@ -6,8 +6,7 @@
 <head>
     <meta charset="UTF-8">
     <style>
-        @page { margin: 8mm 12mm 12mm 12mm; }
-        * { margin: 0; padding: 0; box-sizing: border-box; }
+        @page { margin: 0; }        * { margin: 0; padding: 0; box-sizing: border-box; }
         body { font-family: 'times', 'Times-Roman', serif; font-size: 9px; color: #000; line-height: 1.25; }
         table { width: 100%; border-collapse: collapse; table-layout: fixed; }
         td, th { border: 1px solid #000; padding: 1.5px 3px; vertical-align: top; }
@@ -21,9 +20,11 @@
         .gap td { border: none; padding: 0; }
         .homolog { background: #000; color: #fff; font-weight: bold; font-size: 10px; text-align: center; padding: 3px; border: 1px solid #000; }
         .qr img { width: 84px; height: 84px; }
+        .sheet { padding: 10mm 12mm 12mm 12mm; }
     </style>
 </head>
 <body>
+<div class="sheet">
 @php
     $money = fn (?string $v): string => number_format((float) str_replace(',', '.', (string) $v), 2, ',', '.');
     $brl = fn (?string $v): string => 'R$ ' . number_format((float) str_replace(',', '.', (string) $v), 2, ',', '.');
@@ -49,34 +50,39 @@
 
 {{-- ============================ CANHOTO ============================ --}}
 <table>
+    <colgroup>
+        <col style="width: 24%">
+        <col style="width: 36%">
+        <col style="width: 22%">
+        <col style="width: 18%">
+    </colgroup>
     <tr>
-        <td colspan="3" class="center bold" style="font-size: 8px">
+        <td colspan="4" class="center bold" style="font-size: 8px">
             DECLARO QUE RECEBI OS VOLUMES DESTE CONHECIMENTO EM PERFEITO ESTADO PELO QUE DOU POR CUMPRIDO O PRESENTE CONTRATO DE TRANSPORTE
         </td>
     </tr>
     <tr>
-        <td style="width: 48%">
+        <td style="height: 64px">
             <div class="label">Nome</div>
-            <div>&nbsp;</div>
-            <div class="label">RG</div>
+            <div style="height: 16px">&nbsp;</div>
+            <div class="label" style="border-top: 1px solid #000">RG</div>
             <div>&nbsp;</div>
         </td>
-        <td style="width: 30%" class="center">
-            <div class="label">Chegada &nbsp;&nbsp;&nbsp;&nbsp;&nbsp; Data/Hora</div>
-            <div>___/___/___ &nbsp;&nbsp; ___:___</div>
-            <div class="label">Saída &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; Data/Hora</div>
-            <div>___/___/___ &nbsp;&nbsp; ___:___</div>
+        <td style="vertical-align: bottom">
+            <div class="center label" style="font-size: 7.5px; padding-bottom: 3px">Assinatura / Carimbo</div>
         </td>
-        <td style="width: 22%">
+        <td class="center">
+            <div class="label">Chegada &nbsp; Data/Hora</div>
+            <div>___/___/___ &nbsp; ___:___</div>
+            <div class="label">Saída &nbsp; Data/Hora</div>
+            <div>___/___/___ &nbsp; ___:___</div>
+        </td>
+        <td>
             <div class="right bold" style="font-size: 10px">CT-E</div>
             <div class="right label">N.</div>
-            <div class="right big" style="font-size: 13px">{{ $numeroDotted }}</div>
-            <div class="right" style="font-size: 7.5px">SÉRIE: <span class="bold" style="font-size: 11px">{{ $dacte->serie }}</span></div>
+            <div class="right big" style="font-size: 12px">{{ $numeroDotted }}</div>
+            <div class="right" style="font-size: 7.5px">SÉRIE: <span class="bold" style="font-size: 10px">{{ $dacte->serie }}</span></div>
         </td>
-    </tr>
-    <tr>
-        <td colspan="2" class="center label">Assinatura / Carimbo</td>
-        <td class="gap"></td>
     </tr>
 </table>
 
@@ -367,5 +373,6 @@
 
 <div class="right muted" style="margin-top: 2px">Emitido por {{ config('dfe.cte.verProc') }}</div>
 
+</div>
 </body>
 </html>
