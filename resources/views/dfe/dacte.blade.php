@@ -20,7 +20,7 @@
         .gap td { border: none; padding: 0; }
         .homolog { background: #000; color: #fff; font-weight: bold; font-size: 10px; text-align: center; padding: 3px; border: 0.5px solid #000; }
         .qr img { width: 84px; height: 84px; }
-        .sheet { padding: 10mm 5mm 12mm 5mm; }
+        .sheet { padding: 7mm 12mm 12mm 12mm; }
     </style>
 </head>
 <body>
@@ -111,7 +111,8 @@
                     <td style="width: 32%"><div class="label">Data e hora de emissão</div><div class="center">{{ $dt($dacte->dhEmi) }}</div></td>
                 </tr>
             </table>
-            <div style="margin-top: 2px" class="label">Chave de acesso</div>
+            <div style="height: 20px">&nbsp;</div>
+            <div class="label">Chave de acesso</div>
             <div class="bold" style="font-size: 10.5px; line-height: 1.35">{{ implode(' ', $dacte->groupedAccessKey()) }}</div>
             <div class="center muted" style="margin-top: 2px">
                 Consulta de autenticidade no portal nacional do CT-e, no site da Sefaz
@@ -146,15 +147,23 @@
 
 {{-- ============================ TIPOS + PROTOCOLO ============================ --}}
 <table style="margin-top: 2px">
+    <colgroup>
+        <col style="width: 22%">
+        <col style="width: 22%">
+        <col style="width: 19%">
+        <col style="width: 37%">
+    </colgroup>
     <tr>
-        <td style="width: 17%"><div class="label">Tipo do CT-e</div><div>{{ ($dacte->tpCte === '0' || $dacte->tpCte === '') ? 'NORMAL' : $dacte->tpCte }}</div></td>
-        <td style="width: 17%"><div class="label">Tipo do serviço</div><div>{{ ($dacte->tpServ === '0' || $dacte->tpServ === '') ? 'NORMAL' : $dacte->tpServ }}</div></td>
-        <td style="width: 15%"><div class="label">Indicador do CT-e globalizado</div><div>NÃO</div></td>
-        <td style="width: 14%"><div class="label">Informações do CT-e globalizado</div></td>
-        <td style="width: 37%">
+        <td><div class="label">Tipo do CT-e</div><div>{{ ($dacte->tpCte === '0' || $dacte->tpCte === '') ? 'NORMAL' : $dacte->tpCte }}</div></td>
+        <td><div class="label">Tipo do serviço</div><div>{{ ($dacte->tpServ === '0' || $dacte->tpServ === '') ? 'NORMAL' : $dacte->tpServ }}</div></td>
+        <td rowspan="2" colspan="2">
             <div class="label">Protocolo de autorização de uso</div>
-            <div class="bold">{!! $dacte->protocol !== '' ? e($dacte->protocol.'  '.$dt($dacte->receivedAt)) : '&nbsp;' !!}</div>
+            <div>{!! $dacte->protocol !== '' ? e($dacte->protocol.'  '.$dt($dacte->receivedAt)) : '&nbsp;' !!}</div>
         </td>
+    </tr>
+    <tr>
+        <td><div class="label">Indicador do CT-e globalizado</div><div>NÃO</div></td>
+        <td><div class="label">Informações do CT-e globalizado</div><div>&nbsp;</div></td>
     </tr>
 </table>
 
@@ -347,7 +356,7 @@
 {{-- ============================ OBSERVAÇÕES ============================ --}}
 <table style="margin-top: 2px">
     <tr><td class="center bold" style="font-size: 9px">OBSERVAÇÕES</td></tr>
-    <tr><td style="height: 26px">&nbsp;</td></tr>
+    <tr><td style="height: 40px">&nbsp;</td></tr>
 </table>
 
 {{-- ============================ DADOS ESPECÍFICOS DO MODAL ============================ --}}
@@ -368,7 +377,7 @@
 {{-- ============================ FECHO ============================ --}}
 <table style="margin-top: 2px">
     <tr>
-        <td style="width: 55%; height: 26px"><div class="label">Uso exclusivo do emissor do CT-e</div><div>&nbsp;</div></td>
+        <td style="width: 55%; height: 70px"><div class="label">Uso exclusivo do emissor do CT-e</div><div>&nbsp;</div></td>
         <td style="width: 45%"><div class="label">Reservado ao fisco</div><div>&nbsp;</div></td>
     </tr>
 </table>
