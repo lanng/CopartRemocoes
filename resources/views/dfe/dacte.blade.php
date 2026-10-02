@@ -124,7 +124,7 @@
                     <div class="label">Modal</div>
                     <div class="center bold" style="font-size: 10px; line-height: 1.4">RODOVIÁRIO</div>
                 </td></tr>
-                <tr><td>
+                <tr><td style="border-bottom: 1px solid #000">
                     <div class="label">Insc. Suframa do destinatário</div>
                     <div>&nbsp;</div>
                 </td></tr>
