@@ -2,7 +2,12 @@
 
 namespace Tests\Feature\Services\Dfe;
 
+use App\Services\Dfe\DacteData;
 use App\Services\Dfe\GenerateDactePdf;
+use DOMElement;
+use Dompdf\Dompdf;
+use Dompdf\Frame;
+use DOMText;
 use Illuminate\Support\Facades\Storage;
 use PHPUnit\Framework\Attributes\DataProvider;
 use Tests\TestCase;
@@ -21,6 +26,7 @@ class GenerateDactePdfTest extends TestCase
         return [
             'veículos (2962)' => ['cte-2962.xml'],
             'tanque (2963)' => ['cte-2963.xml'],
+            'homologação' => ['cte-homolog-autorizado.xml'],
         ];
     }
 
@@ -59,5 +65,55 @@ class GenerateDactePdfTest extends TestCase
         Storage::disk('dfe')->assertExists($first);
         Storage::disk('dfe')->assertExists($second);
         Storage::disk('dfe')->assertExists($third);
+    }
+
+    #[DataProvider('gabaritoProvider')]
+    public function test_printed_frames_match_the_reference_without_moving_for_homologation(string $fixture): void
+    {
+        $data = DacteData::fromProc(file_get_contents(__DIR__.'/../../../Fixtures/Dfe/'.$fixture));
+        $pdf = new Dompdf;
+        $frames = [];
+        $textFrames = [];
+        $pdf->setCallbacks([[
+            'event' => 'end_frame',
+            'f' => function (Frame $frame) use (&$frames, &$textFrames): void {
+                $node = $frame->get_node();
+                if ($node instanceof DOMElement && $node->hasAttribute('id')) {
+                    $frames[$node->getAttribute('id')] = $frame->get_border_box();
+                }
+                if ($node instanceof DOMText && trim($node->textContent) !== '') {
+                    $textFrames[] = [$node->textContent, $frame->get_border_box()];
+                }
+            },
+        ]]);
+        $html = view('dfe.dacte', ['dacte' => $data, 'qrImage' => null])->render();
+        $pdf->loadHtml($html);
+        $pdf->setPaper('a4');
+        $pdf->render();
+
+        $this->assertSame(1, $pdf->getCanvas()->get_page_count());
+        $expected = [
+            'receipt' => [17.5, 22.5, 563, 52.5],
+            'header' => [17.5, 85.5, 563, 138],
+            'parties' => [17.5, 261.75, 563, 87],
+            'cargo' => [17.5, 375, 563, 39],
+            'service' => [17.5, 414, 563, 58.5],
+            'documents' => [17.5, 501.75, 563, 63],
+            'observations' => [17.5, 564.75, 563, 33],
+            'closing' => [17.5, 630.75, 563, 51],
+        ];
+        foreach ($expected as $id => $box) {
+            $this->assertArrayHasKey($id, $frames);
+            foreach ($box as $axis => $value) {
+                $this->assertEqualsWithDelta($value, $frames[$id][$axis], 0.75, "{$id}: axis {$axis}");
+            }
+        }
+        $this->assertSame($data->isHomolog(), str_contains($html, 'AMBIENTE DE HOMOLOGAÇÃO'));
+        $this->assertStringContainsString(implode(' ', $data->groupedAccessKey()), $html);
+        foreach ($textFrames as [$text, $box]) {
+            $this->assertGreaterThanOrEqual(17.5, $box[0], $text);
+            $this->assertLessThanOrEqual(580.5, $box[0] + $box[2], $text);
+            $this->assertLessThanOrEqual(695, $box[1] + $box[3], $text);
+        }
     }
 }

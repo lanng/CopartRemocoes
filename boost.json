@@ -1,8 +1,10 @@
 {
     "agents": [
+        "codex",
         "opencode"
     ],
     "editors": [
+        "codex",
         "opencode"
     ],
     "guidelines": [
