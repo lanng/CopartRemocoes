@@ -104,6 +104,9 @@ class CiotSupportResourcesTest extends TestCase
                 'rntrc' => '045963122',
                 'axles' => 3,
                 'type' => 'automotor',
+                'tare_kg' => 8000,
+                'type_rod' => '03',
+                'body_type' => '00',
             ])
             ->call('create')
             ->assertHasNoFormErrors();
@@ -111,6 +114,35 @@ class CiotSupportResourcesTest extends TestCase
         $this->assertDatabaseHas(CiotVehicle::class, [
             'plate' => 'PUC8E55',
             'axles' => 3,
+        ]);
+    }
+
+    public function test_creates_a_fleet_vehicle_with_mdfe_technical_data(): void
+    {
+        Livewire::test(CreateCiotVehicle::class)
+            ->fillForm([
+                'plate' => 'PUC8E56',
+                'rntrc' => '045963122',
+                'axles' => 3,
+                'type' => 'automotor',
+                'renavam' => '12345678901',
+                'tare_kg' => 8000,
+                'capacity_kg' => 12000,
+                'type_rod' => '03',
+                'body_type' => '00',
+                'uf' => 'SP',
+            ])
+            ->call('create')
+            ->assertHasNoFormErrors();
+
+        $this->assertDatabaseHas(CiotVehicle::class, [
+            'plate' => 'PUC8E56',
+            'renavam' => '12345678901',
+            'tare_kg' => 8000,
+            'capacity_kg' => 12000,
+            'type_rod' => '03',
+            'body_type' => '00',
+            'uf' => 'SP',
         ]);
     }
 

@@ -19,6 +19,7 @@ use App\Models\Company;
 use App\Models\CteDocument;
 use App\Models\CteEmissionBatch;
 use App\Models\MdfeDocument;
+use App\Models\MdfeEvent;
 use App\Models\Register;
 use App\Models\User;
 use Filament\Facades\Filament;
@@ -74,6 +75,110 @@ class CteEmissionBatchResourceTest extends TestCase
             ->assertSuccessful()
             ->assertSee('MDF-e da viagem')
             ->assertSee('sem número');
+    }
+
+    public function test_the_damdfe_download_action_is_available_for_an_authorized_mdfe_with_stored_xml(): void
+    {
+        $batch = CteEmissionBatch::factory()->create([
+            'status' => CteEmissionBatchStatusEnum::COMPLETED,
+        ]);
+
+        MdfeDocument::factory()->create([
+            'cte_emission_batch_id' => $batch->id,
+            'status' => CteDocumentStatusEnum::AUTHORIZED,
+            'access_key' => str_repeat('1', 44),
+            'xml_path' => 'mdfe/'.str_repeat('1', 44).'/mdfe-proc.xml',
+        ]);
+
+        Livewire::test(ViewCteEmissionBatch::class, ['record' => $batch->id])
+            ->assertSuccessful()
+            ->assertActionVisible('downloadDamdfe');
+    }
+
+    public function test_the_close_mdfe_action_is_available_for_a_new_attempt_or_a_confirmed_correctable_rejection(): void
+    {
+        $batch = CteEmissionBatch::factory()->create([
+            'status' => CteEmissionBatchStatusEnum::COMPLETED,
+        ]);
+        $mdfe = MdfeDocument::factory()->create([
+            'cte_emission_batch_id' => $batch->id,
+            'status' => CteDocumentStatusEnum::AUTHORIZED,
+            'emitter' => 'direct',
+            'access_key' => str_repeat('1', 44),
+            'protocol' => '935260000000001',
+        ]);
+
+        Livewire::test(ViewCteEmissionBatch::class, ['record' => $batch->id])
+            ->assertSuccessful()
+            ->assertActionVisible('closeMdfe');
+
+        MdfeEvent::factory()->create([
+            'mdfe_document_id' => $mdfe->id,
+            'event_type' => '110112',
+            'sequence' => 1,
+            'attempt' => 1,
+            'event_id' => 'ID110112'.str_repeat('1', 44).'01',
+            'status' => 'rejected_retryable',
+            'error_code' => '614',
+        ]);
+
+        Livewire::test(ViewCteEmissionBatch::class, ['record' => $batch->id])
+            ->assertSuccessful()
+            ->assertActionVisible('closeMdfe');
+
+        $mdfe->events()->firstOrFail()->forceFill(['status' => 'registered', 'error_code' => null])->save();
+
+        Livewire::test(ViewCteEmissionBatch::class, ['record' => $batch->id])
+            ->assertSuccessful()
+            ->assertActionHidden('closeMdfe');
+    }
+
+    public function test_the_direct_mdfe_action_is_shown_only_when_direct_emission_is_selected_and_ctes_are_authorized(): void
+    {
+        config(['dfe.mdfe.emitter' => 'direct']);
+        $batch = CteEmissionBatch::factory()->create([
+            'status' => CteEmissionBatchStatusEnum::COMPLETED,
+        ]);
+        Ciot::factory()->issued()->create(['cte_emission_batch_id' => $batch->id]);
+        CteDocument::factory()->authorized()->create(['cte_emission_batch_id' => $batch->id]);
+
+        Livewire::test(ViewCteEmissionBatch::class, ['record' => $batch->id])
+            ->assertSuccessful()
+            ->assertActionVisible('emitMdfeDirect')
+            ->assertActionHidden('emitMdfe')
+            ->mountAction('emitMdfeDirect')
+            ->assertFormFieldDoesNotExist('route_ufs', 'mountedActionForm')
+            ->assertFormFieldDoesNotExist('loading_cep', 'mountedActionForm')
+            ->assertFormFieldDoesNotExist('unloading_cep', 'mountedActionForm')
+            ->assertFormFieldDoesNotExist('payment_method', 'mountedActionForm');
+    }
+
+    public function test_the_direct_mdfe_action_allows_the_known_ciots_homologation_217_fixture_only_in_homologation(): void
+    {
+        config([
+            'dfe.mdfe.emitter' => 'direct',
+            'dfe.tp_amb' => '2',
+        ]);
+        $batch = CteEmissionBatch::factory()->create([
+            'status' => CteEmissionBatchStatusEnum::COMPLETED,
+        ]);
+        Ciot::factory()->create([
+            'cte_emission_batch_id' => $batch->id,
+            'status' => CiotStatusEnum::FAILED,
+            'error_code' => '217',
+            'payload' => ['DadosCarga' => ['CodigoNaturezaCarga' => 1, 'CodigoTipoCarga' => 5]],
+        ]);
+        CteDocument::factory()->authorized()->create(['cte_emission_batch_id' => $batch->id]);
+
+        Livewire::test(ViewCteEmissionBatch::class, ['record' => $batch->id])
+            ->assertSuccessful()
+            ->assertActionVisible('emitMdfeDirect');
+
+        config(['dfe.tp_amb' => '1']);
+
+        Livewire::test(ViewCteEmissionBatch::class, ['record' => $batch->id])
+            ->assertSuccessful()
+            ->assertActionHidden('emitMdfeDirect');
     }
 
     public function test_the_requeue_mdfe_action_covers_a_document_stuck_with_an_expired_lease(): void
