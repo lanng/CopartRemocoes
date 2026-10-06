@@ -85,4 +85,31 @@ return [
     // o AllocateCteNumber recusa criar a linha sem a env explícita.
     'numbering_start' => env('DFE_CTE_NUMBER_START'),
 
+    'mdfe' => [
+        'emitter' => env('DFE_MDFE_EMITTER', 'agent'),
+        'version' => env('DFE_MDFE_VERSION', '3.00'),
+        'series' => (int) env('DFE_MDFE_SERIE', 1),
+        'tp_emit' => env('DFE_MDFE_TP_EMIT', '1'),
+        'tp_emis' => env('DFE_MDFE_TP_EMIS', '1'),
+        'rntrc' => env('DFE_MDFE_RNTRC', '45963122'),
+        'numbering_start' => env('DFE_MDFE_NUMBER_START'),
+        'xsd_path' => env('DFE_MDFE_XSD_PATH') ?: resource_path('xsds/mdfe'),
+        'qr_base_url' => env('DFE_MDFE_QR_BASE_URL', 'https://dfe-portal.svrs.rs.gov.br/mdfe/qrCode'),
+        'insurer_name' => env('DFE_MDFE_INSURER_NAME'),
+        'insurer_cnpj' => env('DFE_MDFE_INSURER_CNPJ'),
+        'policy_number' => env('DFE_MDFE_POLICY_NUMBER'),
+        'ncm_vehicle_removal' => env('DFE_MDFE_NCM_VEHICLE_REMOVAL', '8703.32.10'),
+        'ncm_tank_alcohol' => env('DFE_MDFE_NCM_TANK_ALCOHOL', '2207.10.90'),
+        'production_enabled' => (bool) env('DFE_MDFE_PRODUCTION_ENABLED', false),
+        'base_url' => env('DFE_MDFE_BASE_URL', match ((string) env('DFE_TP_AMB', '2')) {
+            '1' => 'https://mdfe.svrs.rs.gov.br',
+            default => 'https://mdfe-homologacao.svrs.rs.gov.br',
+        }),
+        'paths' => [
+            'recepcao_sinc' => env('DFE_MDFE_PATH_RECEPCAO_SINC', '/ws/MDFeRecepcaoSinc/MDFeRecepcaoSinc.asmx'),
+            'consulta' => env('DFE_MDFE_PATH_CONSULTA', '/ws/MDFeConsulta/MDFeConsulta.asmx'),
+            'evento' => env('DFE_MDFE_PATH_EVENTO', '/ws/MDFeRecepcaoEvento/MDFeRecepcaoEvento.asmx'),
+        ],
+    ],
+
 ];

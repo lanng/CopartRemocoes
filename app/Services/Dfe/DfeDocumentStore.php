@@ -39,6 +39,26 @@ class DfeDocumentStore
     }
 
     /**
+     * mdfeProc completo (MDFe assinado + protMDFe) por chave de acesso.
+     *
+     * @return array{path: string, sha256: string}
+     */
+    public function storeMdfeProc(string $accessKey, string $mdfeProcXml): array
+    {
+        return $this->store("mdfe/{$accessKey}/mdfe-proc.xml", $mdfeProcXml);
+    }
+
+    /**
+     * procEventoMDFe processado, guardado individualmente pelo Id do evento.
+     *
+     * @return array{path: string, sha256: string}
+     */
+    public function storeMdfeEventProc(string $accessKey, string $eventId, string $procEventoXml): array
+    {
+        return $this->store("mdfe/{$accessKey}/eventos/{$eventId}-proc.xml", $procEventoXml);
+    }
+
+    /**
      * DACTE com versionamento (spec dfe §5.1): regeneração NUNCA sobrescreve —
      * dacte.pdf vira dacte-2.pdf, dacte-3.pdf…
      */
@@ -50,6 +70,25 @@ class DfeDocumentStore
 
         while ($this->exists($path)) {
             $path = "{$base}/dacte-{$version}.pdf";
+            $version++;
+        }
+
+        $this->store($path, $pdf);
+
+        return $path;
+    }
+
+    /**
+     * DAMDFE com versionamento: regeneração não sobrescreve a representação já emitida.
+     */
+    public function storeDamdfe(string $accessKey, string $pdf): string
+    {
+        $base = "mdfe/{$accessKey}";
+        $path = "{$base}/damdfe.pdf";
+        $version = 2;
+
+        while ($this->exists($path)) {
+            $path = "{$base}/damdfe-{$version}.pdf";
             $version++;
         }
 

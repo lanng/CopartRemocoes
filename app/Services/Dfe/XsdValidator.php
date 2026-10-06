@@ -14,17 +14,45 @@ class XsdValidator
 {
     public function validateCte(string $xml): void
     {
-        $this->validate($xml, 'cte_v4.00.xsd');
+        $this->validate($xml, 'cte_v4.00.xsd', (string) config('dfe.xsd_path'));
     }
 
     public function validateProcCte(string $xml): void
     {
-        $this->validate($xml, 'procCTe_v4.00.xsd');
+        $this->validate($xml, 'procCTe_v4.00.xsd', (string) config('dfe.xsd_path'));
     }
 
-    protected function validate(string $xml, string $schemaFile): void
+    public function validateMdfe(string $xml): void
     {
-        $schemaPath = rtrim((string) config('dfe.xsd_path'), '/').'/'.$schemaFile;
+        $xsdPath = (string) config('dfe.mdfe.xsd_path');
+
+        $this->validate($xml, 'mdfe_v3.00.xsd', $xsdPath);
+        $this->validateRoadModal($xml, $xsdPath);
+    }
+
+    public function validateProcMdfe(string $xml): void
+    {
+        $this->validate($xml, 'procMDFe_v3.00.xsd', (string) config('dfe.mdfe.xsd_path'));
+    }
+
+    public function validateMdfeEvent(string $xml): void
+    {
+        $this->validate($xml, 'eventoMDFe_v3.00.xsd', (string) config('dfe.mdfe.xsd_path'));
+    }
+
+    public function validateMdfeClosureDetail(string $xml): void
+    {
+        $this->validate($xml, 'evEncMDFe_v3.00.xsd', (string) config('dfe.mdfe.xsd_path'));
+    }
+
+    public function validateProcMdfeEvent(string $xml): void
+    {
+        $this->validate($xml, 'procEventoMDFe_v3.00.xsd', (string) config('dfe.mdfe.xsd_path'));
+    }
+
+    protected function validate(string $xml, string $schemaFile, string $xsdPath): void
+    {
+        $schemaPath = rtrim($xsdPath, '/').'/'.$schemaFile;
 
         if (! is_readable($schemaPath)) {
             throw new DomainException("XSD local não encontrado: {$schemaPath} (config dfe.xsd_path).");
@@ -48,9 +76,36 @@ class XsdValidator
 
             libxml_clear_errors();
 
-            throw new DomainException("XML do CT-e inválido contra {$schemaFile}: ".($errors ?: 'erro desconhecido'));
+            throw new DomainException("XML inválido contra {$schemaFile}: ".($errors ?: 'erro desconhecido'));
         }
 
         libxml_clear_errors();
+    }
+
+    protected function validateRoadModal(string $xml, string $xsdPath): void
+    {
+        $document = new DOMDocument;
+
+        if (! $document->loadXML($xml)) {
+            throw new DomainException('XML inválido antes da validação específica do modal rodoviário.');
+        }
+
+        $xpath = new \DOMXPath($document);
+        $xpath->registerNamespace('mdfe', 'http://www.portalfiscal.inf.br/mdfe');
+        $rodo = $xpath->query('/mdfe:MDFe/mdfe:infMDFe/mdfe:infModal/mdfe:rodo')?->item(0);
+
+        if ($rodo === null) {
+            throw new DomainException('XML MDF-e rodoviário não contém infModal/rodo para validar contra o XSD específico.');
+        }
+
+        $modalDocument = new DOMDocument;
+        $modalDocument->appendChild($modalDocument->importNode($rodo, true));
+        $modalXml = $modalDocument->saveXML();
+
+        if (! is_string($modalXml)) {
+            throw new DomainException('Não foi possível preparar o XML do modal rodoviário para validação específica.');
+        }
+
+        $this->validate($modalXml, 'mdfeModalRodoviario_v3.00.xsd', $xsdPath);
     }
 }

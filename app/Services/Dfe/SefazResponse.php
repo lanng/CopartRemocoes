@@ -24,6 +24,7 @@ class SefazResponse
         public readonly ?string $rawXml = null,
         public readonly ?string $faultCode = null,
         public readonly ?string $faultString = null,
+        public readonly ?bool $hasMdfeClosureEvent = null,
     ) {}
 
     public function isAuthorized(): bool
@@ -90,18 +91,28 @@ class SefazResponse
         }
 
         $infProt = self::firstByLocalName($payload, 'infProt');
+        $eventInfo = self::firstByLocalName($payload, 'infEvento');
+        $isMdfeConsultation = $payload->localName === 'retConsSitMDFe';
+        $statusInfo = $isMdfeConsultation ? null : ($infProt ?? $eventInfo);
 
         return new self(
-            cStat: $infProt !== null ? self::childText($infProt, 'cStat') : self::childText($payload, 'cStat'),
-            xMotivo: $infProt !== null ? self::childText($infProt, 'xMotivo') : self::childText($payload, 'xMotivo'),
-            protocol: $infProt !== null ? self::childText($infProt, 'nProt') : null,
+            cStat: $statusInfo !== null ? self::childText($statusInfo, 'cStat') : self::childText($payload, 'cStat'),
+            xMotivo: $statusInfo !== null ? self::childText($statusInfo, 'xMotivo') : self::childText($payload, 'xMotivo'),
+            protocol: $infProt !== null
+                ? self::childText($infProt, 'nProt')
+                : ($statusInfo !== null ? self::childText($statusInfo, 'nProt') : null),
             digestValue: $infProt !== null ? self::childText($infProt, 'digVal') : null,
-            accessKey: $infProt !== null ? self::childText($infProt, 'chCTe') : null,
-            receivedAt: $infProt !== null ? self::childText($infProt, 'dhRecbto') : self::childText($payload, 'dhRecbto'),
+            accessKey: $statusInfo !== null
+                ? (self::childText($statusInfo, 'chCTe') ?? self::childText($statusInfo, 'chMDFe'))
+                : null,
+            receivedAt: $statusInfo !== null
+                ? (self::childText($statusInfo, 'dhRecbto') ?? self::childText($statusInfo, 'dhRegEvento'))
+                : self::childText($payload, 'dhRecbto'),
             httpStatus: $httpStatus,
             // Evidência fiscal persistida: o documento ret* extraído (com
             // declaração XML), não o envelope SOAP que o carregou.
             rawXml: self::payloadXml($payload),
+            hasMdfeClosureEvent: $isMdfeConsultation ? self::firstByLocalName($payload, 'procEventoMDFe') !== null : null,
         );
     }
 
