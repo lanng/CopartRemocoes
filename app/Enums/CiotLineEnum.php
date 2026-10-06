@@ -16,10 +16,9 @@ enum CiotLineEnum: string
     }
 
     /**
-     * Natureza da carga (spec §2.1): a API de produção só tem os códigos 1–3
-     * carregados hoje. Remoção = Carga Geral (histórico de produção); tanque =
-     * Granel Líquido, a categoria fisicamente correta disponível. Migrar para
-     * 0013/0008 quando a ANTT publicar os códigos.
+     * Natureza operacional confirmada para a API atual: remoção usa o código 1
+     * e tanque o código 3. A classificação formal 13/8 não deve ser enviada
+     * até que a ANTT confirme que esses códigos estão disponíveis neste endpoint.
      */
     public function naturezaCarga(): string
     {

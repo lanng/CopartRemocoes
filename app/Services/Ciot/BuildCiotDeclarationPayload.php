@@ -164,13 +164,13 @@ class BuildCiotDeclarationPayload
      */
     protected function buildCargo(Ciot $ciot): array
     {
-        // A base de naturezas da homologação só conhece o código 1 (spec §2.1);
-        // em produção vale a tabela oficial por linha (13 remoção / 8 tanque).
+        // O fallback substitui somente a natureza; o tipo de carga continua
+        // pareado à linha operacional (5 remoção, 2 tanque).
         $fallback = (bool) config('ciot.natureza_fallback');
 
         $cargo = [
             'CodigoNaturezaCarga' => $fallback ? 1 : (int) $ciot->line->naturezaCarga(),
-            'CodigoTipoCarga' => $fallback ? 1 : $ciot->line->tipoCarga(),
+            'CodigoTipoCarga' => $ciot->line->tipoCarga(),
         ];
 
         if ($ciot->cargo_weight_kg !== null) {

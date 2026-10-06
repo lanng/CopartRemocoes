@@ -140,6 +140,7 @@ class EmitCiotDeclarationTest extends TestCase
             'https://antt-hml.test/pefServices/api/DeclaracaoOperacaoTransporte' => Http::response([
                 'Codigo' => '999',
                 'Mensagem' => 'Contratante bloqueado',
+                'Detalhe' => 'Campos recebidos e processados',
             ], 200),
         ]);
 
@@ -150,6 +151,11 @@ class EmitCiotDeclarationTest extends TestCase
         $this->assertSame(CiotStatusEnum::FAILED, $ciot->status);
         $this->assertSame('999', $ciot->error_code);
         $this->assertSame('Contratante bloqueado', $ciot->error_message);
+        $this->assertSame([
+            'Codigo' => '999',
+            'Mensagem' => 'Contratante bloqueado',
+            'Detalhe' => 'Campos recebidos e processados',
+        ], $ciot->response);
     }
 
     public function test_job_rethrows_retryable_server_errors(): void

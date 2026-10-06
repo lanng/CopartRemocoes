@@ -72,8 +72,9 @@ return [
         'weight_per_vehicle_kg' => (int) env('CIOT_WEIGHT_PER_VEHICLE_KG', 2000),
     ],
 
-    // A base de naturezas da homologação só tem o código 1 (base defasada).
-    // Ative apenas em homologação; em produção deve ser false (13 remoção / 8 tanque).
+    // O fallback troca somente CodigoNaturezaCarga por 1 e preserva o tipo
+    // operacional (5 remoção, 2 tanque). Deixe desativado sem rejeição que
+    // justifique seu uso e confirmação da regra aplicável ao endpoint.
     'natureza_fallback' => (bool) env('CIOT_NATUREZA_FALLBACK', false),
 
     // Consulta de CEP para preencher cidade/UF/IBGE no formulário.

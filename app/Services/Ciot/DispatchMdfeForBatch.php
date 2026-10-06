@@ -79,6 +79,7 @@ class DispatchMdfeForBatch
             'snapshot' => $snapshot,
             'idempotency_key' => (string) Str::uuid(),
             'execution_mode' => $batch->execution_mode,
+            'emitter' => 'agent',
         ]);
 
         activity()

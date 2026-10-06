@@ -55,9 +55,9 @@ class CteBatchStatusUpdater
             'completed_at' => now(),
         ])->save();
 
-        // Gatilho do MDF-e: viagem completa (último CT-e autorizado) — o serviço
-        // só despacha se já houver CIOT emitido (spec mdfe-agent-payload).
-        app(\App\Services\Ciot\DispatchMdfeForBatch::class)->handle($batch->refresh());
+        if ((string) config('dfe.mdfe.emitter', 'agent') === 'agent') {
+            app(\App\Services\Ciot\DispatchMdfeForBatch::class)->handle($batch->refresh());
+        }
 
         return $batch->refresh();
     }
