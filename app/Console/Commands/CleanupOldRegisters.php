@@ -2,8 +2,11 @@
 
 namespace App\Console\Commands;
 
+use App\Enums\CteDocumentStatusEnum;
+use App\Models\CteDocument;
 use App\Models\CteEmissionBatch;
 use App\Models\Register;
+use App\Services\Cte\RemoveDraftCteDocument;
 use App\Services\Payments\DetachPaymentBatchItemsFromRegister;
 use Carbon\Carbon;
 use Exception;
@@ -69,15 +72,19 @@ class CleanupOldRegisters extends Command
 
                         $batchIds = $lockedRegister->cteDocuments()->pluck('cte_emission_batch_id')->unique();
 
-                        // Persistência desacoplada (decisão F4): documentos do
-                        // emissor direto sobrevivem à purga — desvinculam do
-                        // registro e permanecem com o lote (guarda fiscal).
+                        $removeDraftCteDocument = app(RemoveDraftCteDocument::class);
+
                         $lockedRegister->cteDocuments()
-                            ->where('emitter', 'direct')
-                            ->update(['register_id' => null]);
+                            ->where('status', CteDocumentStatusEnum::DRAFT->value)
+                            ->get()
+                            ->each(function (CteDocument $document) use ($removeDraftCteDocument): void {
+                                if ($removeDraftCteDocument->canRemove($document)) {
+                                    $removeDraftCteDocument->handle($document);
+                                }
+                            });
 
                         app(DetachPaymentBatchItemsFromRegister::class)->handle($lockedRegister);
-                        $lockedRegister->cteDocuments()->delete();
+                        $lockedRegister->cteDocuments()->update(['register_id' => null]);
                         $lockedRegister->delete();
 
                         CteEmissionBatch::query()

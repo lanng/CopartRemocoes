@@ -4,8 +4,10 @@ namespace Tests\Feature\Console;
 
 use App\Enums\CteDocumentStatusEnum;
 use App\Enums\CteEmissionBatchStatusEnum;
+use App\Enums\FiscalDocumentStatusEnum;
 use App\Enums\RegisterStatusEnum;
 use App\Models\CteDocument;
+use App\Models\CteDocumentNfe;
 use App\Models\CteEmissionBatch;
 use App\Models\PaymentBatch;
 use App\Models\PaymentBatchItem;
@@ -20,7 +22,7 @@ class CleanupOldRegistersTest extends TestCase
 {
     use RefreshDatabase;
 
-    public function test_it_deletes_old_registers_and_their_cte_documents_and_empty_batches(): void
+    public function test_it_preserves_authorized_documents_after_old_register_cleanup(): void
     {
         $register = Register::factory()->create([
             'status' => RegisterStatusEnum::PAID,
@@ -28,10 +30,11 @@ class CleanupOldRegistersTest extends TestCase
         ]);
         $batch = $this->createBatch();
 
-        CteDocument::factory()->create([
+        $document = CteDocument::factory()->create([
             'cte_emission_batch_id' => $batch->id,
             'register_id' => $register->id,
             'status' => CteDocumentStatusEnum::AUTHORIZED,
+            'fiscal_status' => FiscalDocumentStatusEnum::AUTHORIZED,
         ]);
 
         $this->artisan('app:cleanup-old-registers')
@@ -39,7 +42,9 @@ class CleanupOldRegistersTest extends TestCase
 
         $this->assertModelMissing($register);
         $this->assertDatabaseMissing('cte_documents', ['register_id' => $register->id]);
-        $this->assertModelMissing($batch);
+        $this->assertModelExists($document->refresh());
+        $this->assertNull($document->register_id);
+        $this->assertModelExists($batch->refresh());
     }
 
     public function test_it_deletes_both_register_pdfs_when_an_old_register_is_cleaned_up(): void
@@ -72,12 +77,12 @@ class CleanupOldRegistersTest extends TestCase
         $currentRegister = Register::factory()->create();
         $batch = $this->createBatch();
 
-        CteDocument::factory()->create([
+        $oldDocument = CteDocument::factory()->create([
             'cte_emission_batch_id' => $batch->id,
             'register_id' => $oldRegister->id,
             'status' => CteDocumentStatusEnum::AUTHORIZED,
         ]);
-        CteDocument::factory()->create([
+        $currentDocument = CteDocument::factory()->create([
             'cte_emission_batch_id' => $batch->id,
             'register_id' => $currentRegister->id,
             'status' => CteDocumentStatusEnum::QUEUED,
@@ -89,7 +94,9 @@ class CleanupOldRegistersTest extends TestCase
         $this->assertModelMissing($oldRegister);
         $this->assertModelExists($currentRegister);
         $this->assertModelExists($batch);
-        $this->assertDatabaseCount('cte_documents', 1);
+        $this->assertDatabaseCount('cte_documents', 2);
+        $this->assertNull($oldDocument->refresh()->register_id);
+        $this->assertSame($currentRegister->id, $currentDocument->refresh()->register_id);
     }
 
     public function test_it_does_not_delete_recent_or_non_cleanup_registers(): void
@@ -176,7 +183,7 @@ class CleanupOldRegistersTest extends TestCase
         ]);
     }
 
-    public function test_direct_documents_survive_the_cleanup_detached_from_the_register(): void
+    public function test_all_non_draft_documents_survive_cleanup_detached_from_the_register(): void
     {
         $register = Register::factory()->create([
             'status' => RegisterStatusEnum::PAID,
@@ -199,16 +206,49 @@ class CleanupOldRegistersTest extends TestCase
 
         $this->artisan('app:cleanup-old-registers')->assertSuccessful();
 
-        // Registro purgado, documento do Lab apagado, mas o CT-e do emissor
-        // direto sobrevive — desvinculado do registro, ligado ao lote.
         $this->assertModelMissing($register);
-        $this->assertModelMissing($lab);
+        $this->assertModelExists($lab->refresh());
+        $this->assertNull($lab->register_id);
 
         $direct->refresh();
 
         $this->assertModelExists($direct);
         $this->assertNull($direct->register_id);
         $this->assertNotNull($direct->access_key);
+        $this->assertModelExists($batch->refresh());
+    }
+
+    public function test_cleanup_deletes_drafts_but_keeps_and_detaches_authorized_documents(): void
+    {
+        $register = Register::factory()->create([
+            'status' => RegisterStatusEnum::PAID,
+            'updated_at' => now()->subDays(16),
+        ]);
+        $batch = $this->createBatch();
+        $authorized = CteDocument::factory()->authorized()->create([
+            'cte_emission_batch_id' => $batch->id,
+            'register_id' => $register->id,
+            'fiscal_status' => FiscalDocumentStatusEnum::AUTHORIZED,
+        ]);
+        $draft = CteDocument::factory()->create([
+            'cte_emission_batch_id' => $batch->id,
+            'register_id' => $register->id,
+            'status' => CteDocumentStatusEnum::DRAFT,
+        ]);
+        $nfe = CteDocumentNfe::query()->create([
+            'cte_document_id' => $draft->id,
+            'access_key' => str_repeat('1', 44),
+            'xml_path' => 'nfe/'.str_repeat('1', 44).'/original.xml',
+            'sha256' => str_repeat('a', 64),
+            'extracted_data' => [],
+        ]);
+
+        $this->artisan('app:cleanup-old-registers')->assertSuccessful();
+
+        $this->assertModelExists($authorized->refresh());
+        $this->assertNull($authorized->register_id);
+        $this->assertModelMissing($draft);
+        $this->assertModelMissing($nfe);
         $this->assertModelExists($batch->refresh());
     }
 }
