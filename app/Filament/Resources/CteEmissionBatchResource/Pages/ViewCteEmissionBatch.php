@@ -7,19 +7,22 @@ use App\Enums\CiotStatusEnum;
 use App\Enums\CteDocumentStatusEnum;
 use App\Filament\Actions\GenerateCiotForBatchAction;
 use App\Filament\Resources\CteEmissionBatchResource;
+use App\Filament\Resources\MdfeDocumentResource;
 use App\Filament\Support\CiotEmissionNotice;
-use App\Jobs\EmitMdfeDirectJob;
 use App\Models\Ciot;
 use App\Models\City;
 use App\Models\MdfeDocument;
 use App\Models\MdfeDriver;
 use App\Services\Ciot\DispatchMdfeForBatch;
 use App\Services\Ciot\EmitCiotDeclaration;
+use App\Services\Ciot\IssueSyntheticCiotForHomologation;
 use App\Services\Ciot\QueueDirectMdfeEmission;
 use App\Services\Cte\ApproveCteEmissionBatch;
+use App\Services\Cte\CheckCteBatchParties;
 use App\Services\Cte\DeleteDraftCteEmissionBatch;
 use App\Services\Cte\ReconcileMdfeDocument;
-use App\Services\Dfe\CloseMdfeDocument;
+use App\Services\Dfe\CloseTransportOperation;
+use App\Services\Dfe\CloseTransportOperationResult;
 use App\Services\Dfe\DfeDocumentStore;
 use App\Services\Dfe\GenerateDamdfePdf;
 use DomainException;
@@ -28,43 +31,95 @@ use Filament\Forms\Components\Repeater;
 use Filament\Forms\Components\Select;
 use Filament\Forms\Components\TextInput;
 use Filament\Forms\Components\Toggle;
+use Filament\Forms\Get;
+use Filament\Forms\Set;
 use Filament\Notifications\Notification;
 use Filament\Resources\Pages\ViewRecord;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Support\Facades\Storage;
+use Livewire\Attributes\On;
 
 class ViewCteEmissionBatch extends ViewRecord
 {
     protected static string $resource = CteEmissionBatchResource::class;
 
+    #[On('fiscal-parties-resolved')]
     public function refreshBatch(): void
     {
         $this->authorizeAccess();
         $this->getRecord()->refresh();
     }
 
-    protected function issuedCiot(): ?Ciot
+    /** @return array<int, string> */
+    protected function directMdfeCiotOptions(): array
     {
-        return $this->record->ciots()
-            ->where('status', CiotStatusEnum::ISSUED->value)
+        $query = $this->record->ciots()
+            ->where(function ($query): void {
+                $query->where('status', CiotStatusEnum::ISSUED->value);
+
+                if ((string) config('dfe.tp_amb') === '2') {
+                    $query->orWhere(function ($query): void {
+                        $query->where('status', CiotStatusEnum::FAILED->value)
+                            ->where('error_code', '217')
+                            ->whereNotNull('payload');
+                    });
+                }
+            });
+
+        return $query
             ->latest('id')
-            ->first();
+            ->get()
+            ->reject(fn (Ciot $ciot): bool => $ciot->isSyntheticHomologation()
+                && ! app(IssueSyntheticCiotForHomologation::class)->isEnabled())
+            ->mapWithKeys(fn (Ciot $ciot): array => [
+                $ciot->id => sprintf(
+                    '#%d · %s · %s%s',
+                    $ciot->id,
+                    $ciot->line->label(),
+                    $ciot->status->label(),
+                    $ciot->isSyntheticHomologation() ? ' (sintético de homologação)' : '',
+                ),
+            ])
+            ->all();
     }
 
-    protected function ciotForDirectMdfe(): ?Ciot
+    private function directMdfeBlockReason(): ?string
     {
-        $issuedCiot = $this->issuedCiot();
-
-        if ($issuedCiot !== null || (string) config('dfe.tp_amb') !== '2') {
-            return $issuedCiot;
+        if ($this->record->documents()
+            ->where('status', '!=', CteDocumentStatusEnum::AUTHORIZED->value)
+            ->exists()
+            || $this->record->documents()->whereNull('access_key')->exists()) {
+            return 'Há CT-e não autorizado ou sem chave no lote. Consulte o motivo na lista e use “Preparar MDF-e” para selecionar apenas os CT-es autorizados.';
         }
 
-        return $this->record->ciots()
-            ->where('status', CiotStatusEnum::FAILED->value)
-            ->where('error_code', '217')
-            ->whereNotNull('payload')
-            ->latest('id')
-            ->first();
+        $eligibleDocumentsCount = $this->record->documents()->eligibleForNewMdfe()->count();
+        $documentsCount = $this->record->documents()->count();
+
+        if ($eligibleDocumentsCount !== $documentsCount) {
+            return 'Há CT-e fora do fluxo fiscal controlado, sem elegibilidade para emissão direta de MDF-e.';
+        }
+
+        return null;
+    }
+
+    private function defaultDirectMdfeDriverId(mixed $ciotId): ?int
+    {
+        if ($this->selectedDirectMdfeCiot($ciotId)?->line !== CiotLineEnum::TankAlcohol) {
+            return null;
+        }
+
+        $drivers = MdfeDriver::query()
+            ->where('line', CiotLineEnum::TankAlcohol->value)
+            ->where('is_active', true)
+            ->orderBy('name')
+            ->get(['id']);
+
+        return $drivers->count() === 1 ? (int) $drivers->first()->id : null;
+    }
+
+    protected function selectedDirectMdfeCiot(mixed $id): ?Ciot
+    {
+        return blank($id) ? null : $this->record->ciots()->whereKey($id)->first();
     }
 
     protected function mdfeAvailableForClosure(): ?MdfeDocument
@@ -77,6 +132,19 @@ class ViewCteEmissionBatch extends ViewRecord
             ->latest('id')
             ->get()
             ->first(fn (MdfeDocument $document): bool => $document->isClosureAvailable());
+    }
+
+    protected function mdfePendingCiotClosure(): ?MdfeDocument
+    {
+        return $this->record->mdfeDocuments()
+            ->where('status', CteDocumentStatusEnum::AUTHORIZED->value)
+            ->where('emitter', 'direct')
+            ->where('fiscal_status_code', '132')
+            ->whereHas('ciot', fn ($query) => $query->where('status', CiotStatusEnum::ISSUED->value))
+            ->with('ciot')
+            ->latest('id')
+            ->get()
+            ->first(fn (MdfeDocument $document): bool => ! $document->ciot?->isSyntheticHomologation());
     }
 
     /**
@@ -106,10 +174,49 @@ class ViewCteEmissionBatch extends ViewRecord
             });
     }
 
+    private function runTransportClosure(MdfeDocument $mdfe, ?City $city = null): void
+    {
+        try {
+            $result = app(CloseTransportOperation::class)->handle($mdfe, $city);
+        } catch (DomainException $exception) {
+            Notification::make()
+                ->title('Não foi possível encerrar a operação de transporte.')
+                ->body($exception->getMessage())
+                ->danger()
+                ->send();
+
+            return;
+        }
+
+        Notification::make()
+            ->title(match ($result->status) {
+                CloseTransportOperationResult::COMPLETED => match (true) {
+                    $result->mdfe->ciot?->isSyntheticHomologation() => 'MDF-e encerrado; CIOT sintético mantido para testes.',
+                    $result->mdfe->ciot_id === null => 'MDF-e encerrado pela SEFAZ.',
+                    default => 'MDF-e e CIOT encerrados.',
+                },
+                CloseTransportOperationResult::MDFE_PENDING => 'Aguardando confirmação do encerramento pela SEFAZ.',
+                default => 'MDF-e encerrado; encerramento do CIOT pendente na ANTT.',
+            })
+            ->body($result->message)
+            ->color($result->status === CloseTransportOperationResult::COMPLETED ? 'success' : 'warning')
+            ->send();
+    }
+
     protected function getHeaderActions(): array
     {
         return [
             GenerateCiotForBatchAction::make($this->getRecord()),
+            Actions\Action::make('prepareMdfe')
+                ->label('Preparar MDF-e')
+                ->icon('heroicon-m-document-plus')
+                ->color('primary')
+                ->url(fn (): string => MdfeDocumentResource::getUrl('create', ['batch' => $this->record->id]))
+                ->visible(fn (): bool => $this->record->documents()
+                    ->eligibleForNewMdfe()
+                    ->where('status', CteDocumentStatusEnum::AUTHORIZED->value)
+                    ->whereNotNull('access_key')
+                    ->exists()),
             Actions\Action::make('downloadDamdfe')
                 ->label('Baixar DAMDFE')
                 ->icon('heroicon-o-arrow-down-tray')
@@ -142,7 +249,10 @@ class ViewCteEmissionBatch extends ViewRecord
                     return Storage::disk('dfe')->download((string) $pdfPath, $filename);
                 }),
             Actions\Action::make('closeMdfe')
-                ->label('Encerrar MDF-e')
+                ->label(fn (): string => $this->mdfeAvailableForClosure()?->events
+                    ->where('event_type', '110112')
+                    ->whereIn('status', ['pending', 'registered', 'reconciliation_required', 'duplicate_reconciliation'])
+                    ->isNotEmpty() ? 'Reconciliar encerramento' : 'Encerrar operação de transporte')
                 ->icon('heroicon-o-lock-closed')
                 ->color('warning')
                 ->visible(fn (): bool => $this->mdfeAvailableForClosure() !== null)
@@ -180,23 +290,26 @@ class ViewCteEmissionBatch extends ViewRecord
                     }
 
                     $city = City::query()->where('ibge_code', $data['city_code'])->firstOrFail();
-                    $event = app(CloseMdfeDocument::class)->handle($mdfe, $city);
+                    $this->runTransportClosure($mdfe, $city);
+                }),
+            Actions\Action::make('resumeCiotClosure')
+                ->label('Retomar encerramento do CIOT')
+                ->icon('heroicon-o-arrow-path')
+                ->color('warning')
+                ->visible(fn (): bool => $this->mdfePendingCiotClosure() !== null)
+                ->requiresConfirmation()
+                ->modalHeading('Retomar somente o encerramento do CIOT')
+                ->modalDescription('A SEFAZ já confirmou o encerramento do MDF-e. Esta ação tenta somente o encerramento do CIOT na ANTT.')
+                ->action(function (): void {
+                    $mdfe = $this->mdfePendingCiotClosure();
 
-                    Notification::make()
-                        ->title(match ($event->status) {
-                            'registered' => 'Encerramento registrado pela SEFAZ.',
-                            'rejected_retryable' => 'Rejeição confirmada; corrija os dados e reenvie o encerramento.',
-                            'duplicate_reconciliation' => 'Evento duplicado; reconcilie com a SEFAZ antes de qualquer ação.',
-                            'already_closed' => 'A SEFAZ informou que o MDF-e já está encerrado.',
-                            default => 'Resultado inconclusivo; consulte a situação na SEFAZ antes de reenviar.',
-                        })
-                        ->body($event->error_message)
-                        ->color(match ($event->status) {
-                            'registered' => 'success',
-                            'rejected_retryable' => 'warning',
-                            default => 'danger',
-                        })
-                        ->send();
+                    if ($mdfe === null) {
+                        Notification::make()->title('Não há CIOT aberto para retomar.')->warning()->send();
+
+                        return;
+                    }
+
+                    $this->runTransportClosure($mdfe);
                 }),
             Actions\Action::make('reemitCiot')
                 ->label('Reemitir CIOT')
@@ -226,7 +339,7 @@ class ViewCteEmissionBatch extends ViewRecord
 
                     CiotEmissionNotice::reemission()->send($result);
 
-                    $this->redirect(CteEmissionBatchResource::getUrl('view', ['record' => $this->record]));
+                    $this->refreshBatch();
                 }),
             Actions\Action::make('emitMdfe')
                 ->label('Emitir MDF-e pelo agente (legado)')
@@ -263,18 +376,34 @@ class ViewCteEmissionBatch extends ViewRecord
                 ->color('warning')
                 ->visible(fn (): bool => config('dfe.mdfe.emitter') === 'direct'
                     && in_array($this->record->refresh()->status?->value, ['completed', 'completed_with_errors'], true)
-                    && $this->ciotForDirectMdfe() !== null
+                    && $this->directMdfeCiotOptions() !== []
                     && $this->record->documents()->exists()
-                    && ! $this->record->documents()->where('status', '!=', CteDocumentStatusEnum::AUTHORIZED->value)->exists()
                     && ! $this->record->mdfeDocuments()
                         ->whereNotIn('status', ['rejected', 'failed_before_authorization', 'cancelled'])
                         ->exists())
+                ->disabled(fn (): bool => $this->directMdfeBlockReason() !== null)
+                ->tooltip(fn (): ?string => $this->directMdfeBlockReason())
                 ->form([
+                    Select::make('ciot_id')
+                        ->label('CIOT emitido para esta operação')
+                        ->options(fn (): array => $this->directMdfeCiotOptions())
+                        ->default(fn (): int|string|null => array_key_first($this->directMdfeCiotOptions()))
+                        ->placeholder('Selecione o CIOT')
+                        ->live()
+                        ->afterStateUpdated(function (Set $set, ?string $state): void {
+                            $set('driver_id', $this->defaultDirectMdfeDriverId($state));
+                        })
+                        ->required(),
                     Repeater::make('endorsements')
                         ->label('Averbações desta operação')
+                        ->defaultItems(1)
+                        ->helperText(filled(config('dfe.mdfe.default_endorsement'))
+                            ? 'A averbação padrão está preenchida e pode ser alterada para esta operação.'
+                            : 'Informe ao menos uma averbação para continuar.')
                         ->schema([
                             TextInput::make('number')
                                 ->label('Número da averbação')
+                                ->default(trim((string) config('dfe.mdfe.default_endorsement', '')))
                                 ->maxLength(40)
                                 ->required(),
                         ])
@@ -288,9 +417,10 @@ class ViewCteEmissionBatch extends ViewRecord
                             ->orderBy('name')
                             ->pluck('name', 'id')
                             ->all())
+                        ->default(fn (Get $get): ?int => $this->defaultDirectMdfeDriverId($get('ciot_id')))
                         ->searchable()
-                        ->required(fn (): bool => $this->ciotForDirectMdfe()?->line === CiotLineEnum::TankAlcohol)
-                        ->visible(fn (): bool => $this->ciotForDirectMdfe()?->line === CiotLineEnum::TankAlcohol),
+                        ->required(fn (\Filament\Forms\Get $get): bool => $this->selectedDirectMdfeCiot($get('ciot_id'))?->line === CiotLineEnum::TankAlcohol)
+                        ->visible(fn (\Filament\Forms\Get $get): bool => $this->selectedDirectMdfeCiot($get('ciot_id'))?->line === CiotLineEnum::TankAlcohol),
                     Toggle::make('homologation_fixture')
                         ->label('Usar dados sintéticos de seguro para homologação')
                         ->helperText('Disponível apenas no ambiente de homologação; não salva esses dados na configuração.')
@@ -298,9 +428,8 @@ class ViewCteEmissionBatch extends ViewRecord
                     Toggle::make('homologation_ciot_fixture')
                         ->label('Usar CIOT sintético para homologação')
                         ->helperText('A tentativa ANTT rejeitada com código 217 será preservada. O número sintético será usado somente no XML de homologação do MDF-e.')
-                        ->visible(fn (): bool => (string) config('dfe.tp_amb') === '2'
-                            && $this->issuedCiot() === null
-                            && $this->ciotForDirectMdfe() !== null),
+                        ->visible(fn (\Filament\Forms\Get $get): bool => (string) config('dfe.tp_amb') === '2'
+                            && $this->selectedDirectMdfeCiot($get('ciot_id'))?->status === CiotStatusEnum::FAILED),
                     TextInput::make('fixture_ciot_number')
                         ->label('CIOT sintético (12 dígitos)')
                         ->default('999999999999')
@@ -327,7 +456,7 @@ class ViewCteEmissionBatch extends ViewRecord
                 ->modalHeading('Emitir MDF-e direto na SEFAZ')
                 ->modalDescription('O XML será assinado, validado e transmitido ao ambiente '.((string) config('dfe.tp_amb') === '1' ? 'de produção' : 'de homologação').'.')
                 ->action(function (array $data): void {
-                    $ciot = $this->ciotForDirectMdfe();
+                    $ciot = $this->selectedDirectMdfeCiot($data['ciot_id'] ?? null);
 
                     if ($ciot === null) {
                         Notification::make()->title('CIOT emitido não encontrado para esta viagem.')->danger()->send();
@@ -342,10 +471,12 @@ class ViewCteEmissionBatch extends ViewRecord
                     ] : null;
 
                     try {
-                        $document = app(QueueDirectMdfeEmission::class)->handle(
-                            batch: $this->record,
+                        $document = app(QueueDirectMdfeEmission::class)->handleForDocuments(
+                            documents: $this->record->documents()->get(),
+                            ciot: $ciot,
                             endorsements: collect($data['endorsements'] ?? [])->pluck('number')->all(),
                             routeUfs: [],
+                            batch: $this->record,
                             driver: isset($data['driver_id']) ? MdfeDriver::query()->findOrFail($data['driver_id']) : null,
                             homologationFixture: $fixture,
                             homologationCiotNumber: ($data['homologation_ciot_fixture'] ?? false)
@@ -357,8 +488,6 @@ class ViewCteEmissionBatch extends ViewRecord
 
                         return;
                     }
-
-                    EmitMdfeDirectJob::dispatch($document->id);
 
                     Notification::make()->title('MDF-e enviado à fila de emissão direta.')->success()->send();
                     $this->redirect(CteEmissionBatchResource::getUrl('view', ['record' => $this->record]));
@@ -464,10 +593,10 @@ class ViewCteEmissionBatch extends ViewRecord
                 ->label('Excluir lote')
                 ->icon('heroicon-o-trash')
                 ->color('danger')
-                ->visible(fn (): bool => $this->record->status?->value === 'draft')
+                ->visible(fn (): bool => app(DeleteDraftCteEmissionBatch::class)->canDelete($this->record))
                 ->requiresConfirmation()
                 ->modalHeading('Excluir lote')
-                ->modalDescription('Os documentos deste lote serão removidos. Os registros originais permanecerão disponíveis.')
+                ->modalDescription('CT-es rascunho sem evidência de comunicação serão removidos. Os demais permanecerão como documentos avulsos; os XMLs originais das NF-es serão preservados.')
                 ->action(function (): void {
                     app(DeleteDraftCteEmissionBatch::class)->handle($this->record);
                     $this->redirect(CteEmissionBatchResource::getUrl('index'));
@@ -478,11 +607,13 @@ class ViewCteEmissionBatch extends ViewRecord
                 ->icon('heroicon-o-check-circle')
                 ->color('success')
                 ->visible(fn (): bool => $this->record->status?->value === 'draft')
+                ->disabled(fn (): bool => ! app(CheckCteBatchParties::class)->isReady($this->record))
+                ->tooltip('Todas as associações e os dados fiscais precisam estar conferidos antes da aprovação.')
                 ->requiresConfirmation()
                 ->action(function (): void {
                     app(ApproveCteEmissionBatch::class)->handle($this->record, auth()->user());
                 })
-                ->successNotificationTitle('Lote aprovado e enviado para o agente.'),
+                ->successNotificationTitle('Lote aprovado e encaminhado para emissão.'),
         ];
     }
 }

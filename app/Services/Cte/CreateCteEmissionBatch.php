@@ -4,6 +4,7 @@ namespace App\Services\Cte;
 
 use App\Enums\CteDocumentStatusEnum;
 use App\Enums\CteEmissionBatchStatusEnum;
+use App\Enums\FiscalDocumentWorkflowOriginEnum;
 use App\Models\CteEmissionBatch;
 use App\Models\Register;
 use App\Models\User;
@@ -44,6 +45,7 @@ class CreateCteEmissionBatch
                 ->lockForUpdate()
                 ->get()
                 ->keyBy('id');
+            $emitter = (string) config('cte.emitter', 'lab');
 
             foreach ($registers as $selected) {
                 $register = $lockedRegisters->get($selected->id);
@@ -77,7 +79,10 @@ class CreateCteEmissionBatch
                     'execution_mode' => $executionMode,
                     // O documento nasce com o emissor que vai processá-lo
                     // (spec dfe §1.1): lab (default) ou direct.
-                    'emitter' => (string) config('cte.emitter', 'lab'),
+                    'emitter' => $emitter,
+                    'workflow_origin' => $emitter === 'direct'
+                        ? FiscalDocumentWorkflowOriginEnum::ControlledV1
+                        : null,
                     'replaced_document_id' => $authorizedDocument?->id,
                     'replacement_reason' => $authorizedDocument !== null ? $reemissionReason : null,
                 ]);
