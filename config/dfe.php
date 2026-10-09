@@ -6,6 +6,9 @@ return [
     // regras de ambiente (nomes/CNPJs de teste, indIEToma, QR) daqui — nunca hardcoded.
     'tp_amb' => env('DFE_TP_AMB', '2'),
 
+    // Temporário: habilita CIOTs sintéticos somente para testes em homologação.
+    'ciot_synthetic_homologation_enabled' => (bool) env('DFE_CIOT_SYNTHETIC_HOMOLOGATION_ENABLED', false),
+
     // UF do emissor (SP): cUF do consStatServCTe e da chave de acesso.
     'cuf' => env('DFE_CUF', '35'),
 
@@ -25,6 +28,10 @@ return [
     'ca_bundle' => env('DFE_CA_BUNDLE', storage_path('certs/sefaz-ca.pem')),
 
     'timeout' => (int) env('DFE_TIMEOUT', 30),
+
+    // Limite individual dos XMLs de NF-e lidos pelo importador (10 MiB por arquivo).
+    'nfe_xml_max_file_size_bytes' => (int) env('DFE_NFE_XML_MAX_FILE_SIZE_BYTES', 10 * 1024 * 1024),
+    'nfe_xml_max_files_per_import' => (int) env('DFE_NFE_XML_MAX_FILES_PER_IMPORT', 10),
 
     'cte_version' => env('DFE_CTE_VERSION', '4.00'),
 
@@ -58,6 +65,7 @@ return [
     ],
 
     'cte' => [
+        'production_enabled' => (bool) env('DFE_CTE_PRODUCTION_ENABLED', false),
         'cfop' => env('DFE_CTE_CFOP', '5353'),
         'natOp' => env('DFE_CTE_NATOP', 'PREST SERV TRANSPORTE'),
         'serie' => env('DFE_CTE_SERIE', '1'),
@@ -79,10 +87,8 @@ return [
         'EMBU' => 'Embu das Artes',
     ],
 
-    // Primeiro nCT da sequência própria quando a linha de numeração não existe
-    // ainda. Homologação usa o número livre de teste (spec §2.4); em produção a
-    // seed manual no switch é OBRIGATÓRIA (último nCT do Lab + 1, spec §7) —
-    // o AllocateCteNumber recusa criar a linha sem a env explícita.
+    // Próximo nCT disponível. O valor também funciona como limite mínimo para
+    // recuperar uma sequência local menor após restauração de banco.
     'numbering_start' => env('DFE_CTE_NUMBER_START'),
 
     'mdfe' => [
@@ -92,12 +98,14 @@ return [
         'tp_emit' => env('DFE_MDFE_TP_EMIT', '1'),
         'tp_emis' => env('DFE_MDFE_TP_EMIS', '1'),
         'rntrc' => env('DFE_MDFE_RNTRC', '45963122'),
+        // Próximo nMDF-e disponível; nunca reduz a sequência salva.
         'numbering_start' => env('DFE_MDFE_NUMBER_START'),
         'xsd_path' => env('DFE_MDFE_XSD_PATH') ?: resource_path('xsds/mdfe'),
         'qr_base_url' => env('DFE_MDFE_QR_BASE_URL', 'https://dfe-portal.svrs.rs.gov.br/mdfe/qrCode'),
         'insurer_name' => env('DFE_MDFE_INSURER_NAME'),
         'insurer_cnpj' => env('DFE_MDFE_INSURER_CNPJ'),
         'policy_number' => env('DFE_MDFE_POLICY_NUMBER'),
+        'default_endorsement' => env('DFE_MDFE_DEFAULT_ENDORSEMENT'),
         'ncm_vehicle_removal' => env('DFE_MDFE_NCM_VEHICLE_REMOVAL', '8703.32.10'),
         'ncm_tank_alcohol' => env('DFE_MDFE_NCM_TANK_ALCOHOL', '2207.10.90'),
         'production_enabled' => (bool) env('DFE_MDFE_PRODUCTION_ENABLED', false),

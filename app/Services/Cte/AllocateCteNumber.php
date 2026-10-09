@@ -7,10 +7,9 @@ use DomainException;
 use Illuminate\Support\Facades\DB;
 
 /**
- * Alocação atômica do nCT da série do emissor direto (spec §3): incremento
- * sob lockForUpdate garante continuidade sem salto/duplicidade. Em produção a
- * seed inicial é manual no switch do Lab (último nCT + 1, spec §7) — recusar
- * chutar nunca é opcional.
+ * Alocação atômica do nCT da série do emissor direto (spec §3). O valor do
+ * .env funciona como limite mínimo; ele pode avançar a sequência salva, mas
+ * nunca a reduz.
  *
  * REGRA DO ORQUESTRADOR — o número queima SEMPRE: a transação abaixo é
  * autocontida e commita antes de assinar/transmitir/gravar; um rollback
@@ -27,10 +26,21 @@ class AllocateCteNumber
         $cnpj = (string) ($cnpj ?? config('dfe.emit.cnpj'));
         $serie = (int) ($serie ?? config('dfe.cte.serie'));
 
-        return DB::transaction(function () use ($cnpj, $serie): int {
+        $environment = (string) config('dfe.tp_amb');
+        if (! in_array($environment, ['1', '2'], true)) {
+            throw new DomainException('DFE_TP_AMB deve ser 1 (produção) ou 2 (homologação).');
+        }
+
+        return DB::transaction(function () use ($cnpj, $serie, $environment): int {
+            if (CteNumberSequence::query()->where('cnpj', $cnpj)->where('serie', $serie)->where('tp_amb', 0)->exists()) {
+                throw new DomainException('A sequência antiga de CT-e está sem ambiente definido; confirme se pertence à produção ou homologação antes de emitir.');
+            }
+
+            $configuredStart = $this->configuredStartNumber();
             $sequence = CteNumberSequence::query()
                 ->where('cnpj', $cnpj)
                 ->where('serie', $serie)
+                ->where('tp_amb', $environment)
                 ->lockForUpdate()
                 ->first();
 
@@ -38,8 +48,11 @@ class AllocateCteNumber
                 $sequence = CteNumberSequence::query()->create([
                     'cnpj' => $cnpj,
                     'serie' => $serie,
-                    'next_number' => $this->initialNumber(),
+                    'tp_amb' => $environment,
+                    'next_number' => $this->initialNumber($configuredStart),
                 ]);
+            } elseif ($configuredStart !== null && $configuredStart > (int) $sequence->next_number) {
+                $sequence->forceFill(['next_number' => $configuredStart])->save();
             }
 
             $number = (int) $sequence->next_number;
@@ -50,12 +63,10 @@ class AllocateCteNumber
         });
     }
 
-    protected function initialNumber(): int
+    protected function initialNumber(?int $configuredStart): int
     {
-        $configured = config('dfe.numbering_start');
-
-        if (filled($configured)) {
-            return (int) $configured;
+        if ($configuredStart !== null) {
+            return $configuredStart;
         }
 
         // Homologação usa a sequência livre de teste (spec §2.4). Em produção
@@ -67,5 +78,20 @@ class AllocateCteNumber
         }
 
         return 900000001;
+    }
+
+    private function configuredStartNumber(): ?int
+    {
+        $configured = trim((string) config('dfe.numbering_start'));
+
+        if ($configured === '') {
+            return null;
+        }
+
+        if (! preg_match('/^[1-9]\d{0,8}$/', $configured)) {
+            throw new DomainException('DFE_CTE_NUMBER_START deve ser um inteiro entre 1 e 999999999.');
+        }
+
+        return (int) $configured;
     }
 }

@@ -19,6 +19,7 @@
     </source>
     <php>
         <env name="APP_ENV" value="testing"/>
+        <env name="APP_CONFIG_CACHE" value="bootstrap/cache/config.testing.php" force="true"/>
         <env name="APP_MAINTENANCE_DRIVER" value="file"/>
         <env name="BCRYPT_ROUNDS" value="4"/>
         <env name="CACHE_STORE" value="array"/>
@@ -29,6 +30,11 @@
         <env name="QUEUE_CONNECTION" value="sync"/>
         <env name="CIOT_NATUREZA_FALLBACK" value="false"/>
         <env name="CIOT_ENV" value="homologacao"/>
+        <env name="DFE_TP_AMB" value="2" force="true"/>
+        <env name="DFE_CTE_PRODUCTION_ENABLED" value="false" force="true"/>
+        <env name="DFE_MDFE_PRODUCTION_ENABLED" value="false" force="true"/>
+        <env name="DFE_CTE_NUMBER_START" value="" force="true"/>
+        <env name="DFE_MDFE_NUMBER_START" value="" force="true"/>
         <env name="SESSION_DRIVER" value="array"/>
         <env name="TELESCOPE_ENABLED" value="false"/>
     </php>

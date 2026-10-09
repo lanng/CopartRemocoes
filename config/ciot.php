@@ -64,7 +64,7 @@ return [
     'defaults' => [
         'ind_retorno_vazio' => (bool) env('CIOT_IND_RETORNO_VAZIO', true),
         'ind_alto_desempenho' => (bool) env('CIOT_IND_ALTO_DESEMPENHO', true),
-        'composicao_veicular' => (bool) env('CIOT_COMPOSICAO_VEICULAR', true),
+        'composicao_veicular' => (bool) env('CIOT_COMPOSICAO_VEICULAR', false),
     ],
 
     // Peso estimado por CT-e na linha de remoção (peso total = nº de CT-es × peso).

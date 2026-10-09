@@ -10,11 +10,14 @@ class MdfeNumberSequence extends Model
     /** @use HasFactory<\Database\Factories\MdfeNumberSequenceFactory> */
     use HasFactory;
 
-    protected $fillable = ['cnpj', 'series', 'next_number'];
+    protected $attributes = ['tp_amb' => 2];
+
+    protected $fillable = ['cnpj', 'series', 'tp_amb', 'next_number'];
 
     protected function casts(): array
     {
         return [
+            'tp_amb' => 'integer',
             'series' => 'integer',
             'next_number' => 'integer',
         ];

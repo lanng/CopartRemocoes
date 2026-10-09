@@ -46,6 +46,42 @@ class AllocateCteNumberTest extends TestCase
         $this->assertSame(2965, app(AllocateCteNumber::class)->handle());
     }
 
+    public function test_raises_an_existing_sequence_to_the_configured_minimum(): void
+    {
+        CteNumberSequence::query()->create([
+            'cnpj' => '12563112000130',
+            'serie' => 1,
+            'next_number' => 900000002,
+        ]);
+        config(['dfe.numbering_start' => 900000016]);
+
+        $this->assertSame(900000016, app(AllocateCteNumber::class)->handle());
+
+        $this->assertDatabaseHas(CteNumberSequence::class, [
+            'cnpj' => '12563112000130',
+            'serie' => 1,
+            'next_number' => 900000017,
+        ]);
+    }
+
+    public function test_does_not_reduce_an_existing_sequence_to_a_lower_configured_minimum(): void
+    {
+        CteNumberSequence::query()->create([
+            'cnpj' => '12563112000130',
+            'serie' => 1,
+            'next_number' => 900000020,
+        ]);
+        config(['dfe.numbering_start' => 900000016]);
+
+        $this->assertSame(900000020, app(AllocateCteNumber::class)->handle());
+
+        $this->assertDatabaseHas(CteNumberSequence::class, [
+            'cnpj' => '12563112000130',
+            'serie' => 1,
+            'next_number' => 900000021,
+        ]);
+    }
+
     public function test_refuses_to_seed_production_without_the_manual_switch_number(): void
     {
         config(['dfe.tp_amb' => '1']);
@@ -63,6 +99,7 @@ class AllocateCteNumberTest extends TestCase
         CteNumberSequence::query()->create([
             'cnpj' => '12563112000130',
             'serie' => 1,
+            'tp_amb' => 1,
             'next_number' => 2964,
         ]);
 

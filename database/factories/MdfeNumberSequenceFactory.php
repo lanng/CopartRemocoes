@@ -19,6 +19,7 @@ class MdfeNumberSequenceFactory extends Factory
         return [
             'cnpj' => '12563112000130',
             'series' => 1,
+            'tp_amb' => 2,
             'next_number' => 900000001,
         ];
     }
