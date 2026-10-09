@@ -3,15 +3,21 @@
 namespace Tests\Feature\Services\Cte;
 
 use App\Enums\CteDocumentStatusEnum;
+use App\Jobs\EmitMdfeDirectJob;
 use App\Models\CteEmissionBatch;
+use App\Models\DfeDocumentReservation;
 use App\Models\MdfeDocument;
+use App\Models\MdfeNumberSequence;
 use App\Services\Cte\EmitMdfeDocument;
+use App\Services\Dfe\AccessKey;
+use App\Services\Dfe\DfeDocumentStore;
 use App\Services\Dfe\MdfeSoapClient;
 use App\Services\Dfe\SefazCertificate;
 use App\Services\Dfe\SefazResponse;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Storage;
 use Mockery;
+use RuntimeException;
 use Tests\Support\DfeTestCertificate;
 use Tests\TestCase;
 
@@ -76,6 +82,7 @@ class EmitMdfeDocumentTest extends TestCase
         $result = app(EmitMdfeDocument::class)->attempt($document);
 
         $this->assertSame(CteDocumentStatusEnum::AUTHORIZED, $result->status);
+        $this->assertSame('authorized', $result->fiscal_status->value);
         $this->assertSame('135260000000021', $result->protocol);
         $this->assertSame('100', $result->fiscal_status_code);
         $this->assertNotNull($result->payload_xml);
@@ -98,6 +105,181 @@ class EmitMdfeDocumentTest extends TestCase
         $this->expectExceptionMessage('produção está bloqueada');
 
         app(EmitMdfeDocument::class)->attempt($document);
+    }
+
+    public function test_corrected_attempt_reuses_number_series_and_numeric_code_without_advancing_sequence(): void
+    {
+        $key = app(AccessKey::class)->build('12563112000130', '2610', 1, 280, '58', '1', '12345678');
+        $snapshot = $this->snapshot();
+        $snapshot['vehicle']['plate'] = 'DEF1G23';
+        $document = MdfeDocument::factory()->create([
+            'status' => CteDocumentStatusEnum::QUEUED,
+            'execution_mode' => 'live', 'emitter' => 'direct',
+            'snapshot' => $snapshot, 'mdfe_number' => '280', 'series' => '1',
+            'access_key' => $key, 'payload_xml' => null,
+        ]);
+        $sequence = MdfeNumberSequence::factory()->create([
+            'cnpj' => '12563112000130', 'series' => 1, 'tp_amb' => 2, 'next_number' => 281,
+        ]);
+        config(['dfe.mdfe.series' => '7', 'dfe.mdfe.numbering_start' => 900000100]);
+        $client = Mockery::mock(MdfeSoapClient::class);
+        $client->shouldReceive('consult')->never();
+        $client->shouldReceive('transmit')->once()->andReturnUsing(function (string $xml): SefazResponse {
+            $this->assertStringContainsString('<nMDF>280</nMDF>', $xml);
+            $this->assertStringContainsString('<serie>1</serie>', $xml);
+            $this->assertStringContainsString('<cMDF>12345678</cMDF>', $xml);
+            $this->assertStringContainsString('<placa>DEF1G23</placa>', $xml);
+
+            return new SefazResponse(cStat: '611', xMotivo: 'Rejeição confirmada', rawXml: '<retMDFe><tpAmb>2</tpAmb><cStat>611</cStat></retMDFe>');
+        });
+        app()->instance(MdfeSoapClient::class, $client);
+        $result = app(EmitMdfeDocument::class)->attempt($document);
+
+        $this->assertSame('280', $result->mdfe_number);
+        $this->assertSame('1', $result->series);
+        $this->assertSame($key, $result->access_key);
+        $this->assertSame(CteDocumentStatusEnum::REJECTED, $result->status);
+        $this->assertSame(281, $sequence->refresh()->next_number);
+    }
+
+    public function test_exhausted_transmission_keeps_reservation_for_reconciliation(): void
+    {
+        $document = MdfeDocument::factory()->create([
+            'status' => CteDocumentStatusEnum::AUTHORIZING,
+            'execution_mode' => 'live',
+            'emitter' => 'direct',
+            'snapshot' => $this->snapshot(),
+            'access_key' => '35261012563112000130580010090000021123456788',
+            'payload_xml' => '<MDFe/>',
+        ]);
+        DfeDocumentReservation::query()->create([
+            'resource_type' => 'ciot',
+            'resource_id' => 123,
+            'mdfe_document_id' => $document->id,
+        ]);
+
+        (new EmitMdfeDirectJob($document->id))->failed(new RuntimeException('resultado de transmissão desconhecido'));
+
+        $this->assertSame(CteDocumentStatusEnum::RECONCILIATION_REQUIRED, $document->refresh()->status);
+        $this->assertSame(1, $document->reservations()->count());
+        $this->assertSame('35261012563112000130580010090000021123456788', $document->access_key);
+        $this->assertSame('transmission_outcome_unknown', $document->error_code);
+    }
+
+    public function test_pre_transmission_failure_releases_the_mdfe_reservation(): void
+    {
+        $document = MdfeDocument::factory()->create([
+            'status' => CteDocumentStatusEnum::QUEUED,
+            'execution_mode' => 'live',
+            'emitter' => 'direct',
+            'snapshot' => $this->snapshot(),
+        ]);
+        DfeDocumentReservation::query()->create([
+            'resource_type' => 'ciot',
+            'resource_id' => 125,
+            'mdfe_document_id' => $document->id,
+        ]);
+
+        (new EmitMdfeDirectJob($document->id))->failed(new RuntimeException('falha local antes do envio'));
+
+        $document->refresh();
+
+        $this->assertSame(CteDocumentStatusEnum::FAILED_BEFORE_AUTHORIZATION, $document->status);
+        $this->assertSame('pre_transmission', $document->error_stage);
+        $this->assertSame(0, $document->reservations()->count());
+    }
+
+    public function test_duplicate_job_does_not_attempt_an_authorized_mdfe_again(): void
+    {
+        $document = MdfeDocument::factory()->create([
+            'status' => CteDocumentStatusEnum::AUTHORIZED,
+            'fiscal_status' => 'authorized',
+            'execution_mode' => 'live',
+            'emitter' => 'direct',
+            'snapshot' => $this->snapshot(),
+        ]);
+        $emitter = Mockery::mock(EmitMdfeDocument::class);
+        $emitter->shouldNotReceive('attempt');
+        $job = new EmitMdfeDirectJob($document->id);
+
+        $job->handle($emitter);
+        $job->handle($emitter);
+
+        $this->assertSame(CteDocumentStatusEnum::AUTHORIZED, $document->refresh()->status);
+    }
+
+    public function test_confirmed_rejection_releases_the_mdfe_reservation(): void
+    {
+        $document = MdfeDocument::factory()->create([
+            'status' => CteDocumentStatusEnum::QUEUED,
+            'execution_mode' => 'live',
+            'emitter' => 'direct',
+            'snapshot' => $this->snapshot(),
+        ]);
+        DfeDocumentReservation::query()->create([
+            'resource_type' => 'ciot',
+            'resource_id' => 124,
+            'mdfe_document_id' => $document->id,
+        ]);
+        $client = Mockery::mock(MdfeSoapClient::class);
+        $client->shouldReceive('consult')->never();
+        $client->shouldReceive('transmit')->once()->andReturn(new SefazResponse(
+            cStat: '225',
+            xMotivo: 'Rejeicao: duplicidade de MDF-e',
+            rawXml: '<retMDFeRecepcaoSinc/>',
+        ));
+        app()->instance(MdfeSoapClient::class, $client);
+
+        $result = app(EmitMdfeDocument::class)->attempt($document);
+
+        $this->assertSame(CteDocumentStatusEnum::REJECTED, $result->status);
+        $this->assertSame(0, $document->reservations()->count());
+    }
+
+    public function test_authorized_mdfe_keeps_fiscal_evidence_when_proc_storage_fails(): void
+    {
+        $document = MdfeDocument::factory()->create([
+            'status' => CteDocumentStatusEnum::QUEUED,
+            'execution_mode' => 'live',
+            'emitter' => 'direct',
+            'snapshot' => $this->snapshot(),
+        ]);
+        $client = Mockery::mock(MdfeSoapClient::class);
+        $client->shouldReceive('consult')->never();
+        $client->shouldReceive('transmit')->once()->andReturn(new SefazResponse(
+            cStat: '100',
+            xMotivo: 'Autorizado o uso do MDF-e',
+            protocol: '135260000000021',
+            rawXml: '<retMDFeRecepcaoSinc xmlns="http://www.portalfiscal.inf.br/mdfe"><protMDFe versao="3.00"><infProt>'
+                .'<tpAmb>2</tpAmb><verAplic>SVRS1</verAplic><chMDFe>35261012563112000130580010090000021123456788</chMDFe>'
+                .'<dhRecbto>2026-10-05T12:00:00-03:00</dhRecbto><nProt>135260000000021</nProt>'
+                .'<cStat>100</cStat><xMotivo>Autorizado o uso do MDF-e</xMotivo>'
+                .'</infProt></protMDFe></retMDFeRecepcaoSinc>',
+        ));
+        app()->instance(MdfeSoapClient::class, $client);
+        $this->mock(DfeDocumentStore::class, fn ($mock) => $mock
+            ->shouldReceive('storeMdfeProc')
+            ->andThrow(new RuntimeException('S3 indisponível')));
+
+        try {
+            app(EmitMdfeDocument::class)->attempt($document);
+            $this->fail('Expected RuntimeException.');
+        } catch (RuntimeException $exception) {
+            $this->assertSame('S3 indisponível', $exception->getMessage());
+        }
+
+        $document->refresh();
+
+        $this->assertSame(CteDocumentStatusEnum::AUTHORIZING, $document->status);
+        $this->assertSame('authorized', $document->fiscal_status->value);
+        $this->assertSame('135260000000021', $document->protocol);
+        $this->assertNotNull($document->response_xml);
+        $this->assertSame('artifact', $document->error_stage);
+        $this->assertSame('archive_pending', $document->error_code);
+
+        (new EmitMdfeDirectJob($document->id))->failed($exception);
+
+        $this->assertSame(CteDocumentStatusEnum::AUTHORIZING, $document->refresh()->status);
     }
 
     /** @return array<string, mixed> */

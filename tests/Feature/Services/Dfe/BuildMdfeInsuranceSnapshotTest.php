@@ -31,12 +31,61 @@ class BuildMdfeInsuranceSnapshotTest extends TestCase
         $this->assertSame('configured', $snapshot['source']);
     }
 
+    public function test_keeps_the_confirmed_operation_endorsement_list_instead_of_replacing_it_with_the_default(): void
+    {
+        config(['dfe.mdfe.default_endorsement' => 'AVERBACAO-PADRAO']);
+
+        $snapshot = app(BuildMdfeInsuranceSnapshot::class)->handle([
+            'AVERBACAO-OVERRIDE-001',
+            'AVERBACAO-OVERRIDE-002',
+        ]);
+
+        $this->assertSame([
+            'AVERBACAO-OVERRIDE-001',
+            'AVERBACAO-OVERRIDE-002',
+        ], $snapshot['endorsements']);
+
+        config(['dfe.mdfe.default_endorsement' => 'AVERBACAO-NOVA']);
+
+        $this->assertSame([
+            'AVERBACAO-OVERRIDE-001',
+            'AVERBACAO-OVERRIDE-002',
+        ], $snapshot['endorsements']);
+    }
+
     public function test_requires_at_least_one_operation_endorsement(): void
     {
         $this->expectException(DomainException::class);
         $this->expectExceptionMessage('nAver');
 
         app(BuildMdfeInsuranceSnapshot::class)->handle([]);
+    }
+
+    public function test_does_not_use_the_configured_default_when_no_operation_value_was_confirmed(): void
+    {
+        config(['dfe.mdfe.default_endorsement' => 'AVERBACAO-PADRAO']);
+
+        $this->expectException(DomainException::class);
+        $this->expectExceptionMessage('nAver');
+
+        app(BuildMdfeInsuranceSnapshot::class)->handle([]);
+    }
+
+    public function test_accepts_an_endorsement_at_the_40_character_limit(): void
+    {
+        $endorsement = str_repeat('A', 40);
+
+        $snapshot = app(BuildMdfeInsuranceSnapshot::class)->handle([$endorsement]);
+
+        $this->assertSame([$endorsement], $snapshot['endorsements']);
+    }
+
+    public function test_rejects_an_endorsement_over_the_40_character_limit(): void
+    {
+        $this->expectException(DomainException::class);
+        $this->expectExceptionMessage('excede 40 caracteres');
+
+        app(BuildMdfeInsuranceSnapshot::class)->handle([str_repeat('A', 41)]);
     }
 
     public function test_requires_real_insurance_configuration_for_the_operational_snapshot(): void

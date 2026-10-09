@@ -3,9 +3,11 @@
 namespace App\Jobs;
 
 use App\Enums\CteDocumentStatusEnum;
+use App\Enums\FiscalDocumentStatusEnum;
 use App\Models\MdfeDocument;
 use App\Services\Cte\DirectMdfeDocumentWorkflow;
 use App\Services\Cte\EmitMdfeDocument;
+use App\Services\Dfe\ReserveMdfeDocuments;
 use DomainException;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldBeUnique;
@@ -75,13 +77,34 @@ class EmitMdfeDirectJob implements ShouldBeUnique, ShouldQueue
 
     protected function failDocument(MdfeDocument $document, string $message, ?string $errorCode = null): void
     {
+        if ($document->fiscal_status === FiscalDocumentStatusEnum::AUTHORIZED) {
+            if (blank($document->xml_path)) {
+                $document->forceFill([
+                    'error_stage' => 'artifact',
+                    'error_code' => 'archive_pending',
+                    'error_message' => $message,
+                ])->save();
+            }
+
+            return;
+        }
+
+        $hasTransmissionArtifacts = filled($document->access_key) && filled($document->payload_xml);
+        $targetStatus = $hasTransmissionArtifacts
+            ? CteDocumentStatusEnum::RECONCILIATION_REQUIRED
+            : CteDocumentStatusEnum::FAILED_BEFORE_AUTHORIZATION;
+
         try {
-            app(DirectMdfeDocumentWorkflow::class)->transition($document, CteDocumentStatusEnum::FAILED_BEFORE_AUTHORIZATION);
+            app(DirectMdfeDocumentWorkflow::class)->transition($document, $targetStatus);
             $document->forceFill([
-                'error_stage' => 'transmission',
-                'error_code' => $errorCode,
+                'error_stage' => $hasTransmissionArtifacts ? 'transmission' : 'pre_transmission',
+                'error_code' => $hasTransmissionArtifacts ? 'transmission_outcome_unknown' : $errorCode,
                 'error_message' => $message,
             ])->save();
+
+            if ($targetStatus === CteDocumentStatusEnum::FAILED_BEFORE_AUTHORIZATION) {
+                app(ReserveMdfeDocuments::class)->releaseIfTerminal($document);
+            }
         } catch (DomainException $exception) {
             Log::channel((string) config('dfe.log_channel'))->warning('Falha ao marcar MDF-e direto como failed_before_authorization.', [
                 'mdfe_id' => $document->public_id,

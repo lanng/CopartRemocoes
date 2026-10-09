@@ -3,10 +3,12 @@
 namespace App\Services\Dfe;
 
 use App\Enums\CteDocumentStatusEnum;
+use App\Enums\FiscalDocumentStatusEnum;
 use App\Models\City;
 use App\Models\MdfeDocument;
 use App\Models\MdfeEvent;
 use DomainException;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Log;
 use Throwable;
 
@@ -46,10 +48,18 @@ class CloseMdfeDocument
             ->orderByDesc('attempt')
             ->first();
 
-        if ($previousAttempt?->status === 'reconciliation_required') {
+        if (in_array($previousAttempt?->status, ['pending', 'reconciliation_required', 'registered', 'duplicate_reconciliation'], true)) {
             $consultation = $this->consultAndRecordStatus($document, (string) $previousAttempt->event_id);
 
-            if ($consultation?->cStat !== '100' || $consultation->hasMdfeClosureEvent !== false) {
+            if ($consultation?->cStat === '132') {
+                return $this->markAsAlreadyClosed($previousAttempt, $consultation);
+            }
+
+            $mayRetryAfterConfirmedAbsence = in_array($previousAttempt->status, ['pending', 'reconciliation_required'], true)
+                && $consultation?->cStat === '100'
+                && $consultation->hasMdfeClosureEvent === false;
+
+            if (! $mayRetryAfterConfirmedAbsence) {
                 throw new DomainException('A consulta não confirmou MDF-e autorizado sem encerramento; o evento não será reenviado.');
             }
         } elseif ($previousAttempt !== null && ! $this->canRetryAfter($previousAttempt)) {
@@ -95,7 +105,11 @@ class CloseMdfeDocument
                 'error_message' => $exception->getMessage(),
             ])->save();
 
-            $this->consultAndRecordStatus($document, $built->eventId);
+            $consultation = $this->consultAndRecordStatus($document, $built->eventId);
+
+            if ($consultation?->cStat === '132') {
+                return $this->markAsAlreadyClosed($event, $consultation);
+            }
 
             throw new DomainException('Resultado do encerramento inconclusivo; consulte a SEFAZ antes de tentar novamente.', previous: $exception);
         }
@@ -144,6 +158,22 @@ class CloseMdfeDocument
         return $event->isRetryableRejection();
     }
 
+    private function markAsAlreadyClosed(MdfeEvent $event, SefazResponse $consultation): MdfeEvent
+    {
+        $event->forceFill([
+            'status' => 'already_closed',
+            'protocol' => $consultation->closureEventProtocol ?? $event->protocol,
+            'response_xml' => $consultation->rawXml ?? $event->response_xml,
+            'event_date' => $consultation->closureEventReceivedAt !== null
+                ? Carbon::parse($consultation->closureEventReceivedAt)->toDateString()
+                : $event->event_date,
+            'error_code' => null,
+            'error_message' => 'A consulta à SEFAZ confirmou que o MDF-e está encerrado.',
+        ])->save();
+
+        return $event->refresh();
+    }
+
     private function statusForResponse(?string $cStat): string
     {
         if (in_array($cStat, self::REGISTERED_CODES, true)) {
@@ -169,10 +199,22 @@ class CloseMdfeDocument
     {
         try {
             $consultation = $this->client->consult((string) $document->access_key);
-            $document->forceFill([
+            $fields = [
                 'fiscal_status_code' => $consultation->cStat,
                 'fiscal_status_message' => $consultation->xMotivo,
-            ])->save();
+            ];
+
+            if ($consultation->cStat === '100') {
+                $fields['fiscal_status'] = FiscalDocumentStatusEnum::AUTHORIZED;
+            } elseif ($consultation->cStat === '132') {
+                $fields['fiscal_status'] = FiscalDocumentStatusEnum::CLOSED;
+            }
+
+            $document->forceFill($fields)->save();
+
+            if ($consultation->cStat === '132') {
+                app(ReserveMdfeDocuments::class)->releaseIfTerminal($document->refresh());
+            }
 
             if ($consultation->cStat !== '132') {
                 Log::channel((string) config('dfe.log_channel'))->warning('A consulta do MDF-e após resposta de evento não confirmou o encerramento.', [

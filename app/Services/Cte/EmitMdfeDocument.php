@@ -3,6 +3,7 @@
 namespace App\Services\Cte;
 
 use App\Enums\CteDocumentStatusEnum;
+use App\Enums\FiscalDocumentStatusEnum;
 use App\Models\MdfeDocument;
 use App\Services\Dfe\BuildMdfeXml;
 use App\Services\Dfe\BuiltMdfe;
@@ -40,9 +41,25 @@ class EmitMdfeDocument
                     $consult,
                 );
             }
+
+            if ($document->fiscal_status === FiscalDocumentStatusEnum::AUTHORIZED) {
+                app(DirectMdfeDocumentWorkflow::class)->transition($document, CteDocumentStatusEnum::RECONCILIATION_REQUIRED);
+                $document->forceFill([
+                    'error_stage' => 'transmission',
+                    'error_code' => 'authorization_consult_conflict',
+                    'error_message' => 'A consulta da chave divergiu da autorização previamente registrada; nova transmissão bloqueada.',
+                ])->save();
+
+                return $document->refresh();
+            }
         }
 
-        $built = $this->builder->handle((array) $document->snapshot);
+        $built = $this->builder->handle(
+            (array) $document->snapshot,
+            filled($document->mdfe_number) ? (int) $document->mdfe_number : null,
+            filled($document->series) ? (int) $document->series : null,
+            filled($document->access_key) ? substr((string) $document->access_key, 35, 8) : null,
+        );
         $signedXml = $this->signer()->sign(
             $built->xml,
             'infMDFe',

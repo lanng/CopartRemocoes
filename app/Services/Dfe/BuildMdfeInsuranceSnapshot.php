@@ -23,6 +23,20 @@ class BuildMdfeInsuranceSnapshot
             'policy_number' => (string) config('dfe.mdfe.policy_number'),
         ];
 
+        return $this->validate($insurance + [
+            'endorsements' => $endorsements,
+            'source' => $homologationFixture === null ? 'configured' : 'homologation_fixture',
+        ]);
+    }
+
+    /** @param array<string, mixed> $insurance @return array<string, mixed> */
+    public function validate(array $insurance): array
+    {
+        if (($insurance['source'] ?? null) === 'homologation_fixture' && (string) config('dfe.tp_amb') === '1') {
+            throw new DomainException('Fixture sintético de seguro pode ser usado somente em homologação.');
+        }
+        $endorsements = (array) ($insurance['endorsements'] ?? []);
+
         $missing = [];
         $requiredKeys = [
             'insurer_name' => 'DFE_MDFE_INSURER_NAME',
@@ -68,7 +82,7 @@ class BuildMdfeInsuranceSnapshot
             'insurer_cnpj' => $insurerCnpj,
             'policy_number' => $policyNumber,
             'endorsements' => $normalizedEndorsements,
-            'source' => $homologationFixture === null ? 'configured' : 'homologation_fixture',
+            'source' => $insurance['source'] ?? 'configured',
         ];
     }
 }

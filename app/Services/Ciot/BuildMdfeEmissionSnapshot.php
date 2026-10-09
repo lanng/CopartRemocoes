@@ -21,6 +21,7 @@ class BuildMdfeEmissionSnapshot
     public function __construct(
         private readonly ResolveCteSnapshot $cteSnapshot,
         private readonly BuildMdfeInsuranceSnapshot $insuranceSnapshot,
+        private readonly ValidateMdfeDocumentSelection $selectionValidator,
     ) {}
 
     /**
@@ -41,7 +42,6 @@ class BuildMdfeEmissionSnapshot
         ?string $paymentBankAgency = null,
     ): array {
         $ciot = $batch->ciots()->where('status', CiotStatusEnum::ISSUED)->latest('id')->first();
-        $ciotSource = 'issued';
 
         if (! $ciot instanceof Ciot) {
             if ($homologationCiotNumber === null) {
@@ -66,14 +66,6 @@ class BuildMdfeEmissionSnapshot
             if (! $ciot instanceof Ciot) {
                 throw new DomainException('A fixture de CIOT só pode substituir uma tentativa rejeitada pela ANTT com código 217.');
             }
-
-            $ciotSource = 'homologation_fixture';
-        }
-
-        $ciotNumber = $ciotSource === 'homologation_fixture' ? $homologationCiotNumber : (string) $ciot->ciot_number;
-
-        if (! preg_match('/^\d{12}$/', (string) $ciotNumber)) {
-            throw new DomainException('CIOT emitido ausente ou inválido; o MDF-e exige os 12 dígitos reais.');
         }
 
         $documents = $batch->documents()
@@ -81,8 +73,51 @@ class BuildMdfeEmissionSnapshot
             ->whereNotNull('access_key')
             ->get();
 
-        if ($documents->isEmpty()) {
-            throw new DomainException('O lote precisa ter CT-e autorizado com chave de acesso para emitir o MDF-e.');
+        return $this->handleForDocuments(
+            documents: $documents,
+            ciot: $ciot,
+            endorsements: $endorsements,
+            routeUfs: $routeUfs,
+            batch: $batch,
+            driver: $driver,
+            homologationFixture: $homologationFixture,
+            homologationCiotNumber: $homologationCiotNumber,
+            paymentMethod: $paymentMethod,
+            paymentBankCode: $paymentBankCode,
+            paymentBankAgency: $paymentBankAgency,
+        );
+    }
+
+    /**
+     * @param  Collection<int, CteDocument>  $documents
+     * @param  array<int, string>  $endorsements
+     * @param  array<int, string>  $routeUfs
+     * @param  array{insurer_name: string, insurer_cnpj: string, policy_number: string}|null  $homologationFixture
+     * @return array<string, mixed>
+     */
+    public function handleForDocuments(
+        Collection $documents,
+        Ciot $ciot,
+        array $endorsements,
+        array $routeUfs,
+        ?CteEmissionBatch $batch = null,
+        ?MdfeDriver $driver = null,
+        ?array $homologationFixture = null,
+        ?string $homologationCiotNumber = null,
+        ?string $paymentMethod = null,
+        ?string $paymentBankCode = null,
+        ?string $paymentBankAgency = null,
+    ): array {
+        $line = $this->selectionValidator->handle($documents, $ciot, $homologationCiotNumber);
+        $ciotSource = match (true) {
+            $ciot->status === CiotStatusEnum::FAILED => 'homologation_fixture',
+            $ciot->isSyntheticHomologation() => 'synthetic_homologation',
+            default => 'issued',
+        };
+        $ciotNumber = $ciotSource === 'homologation_fixture' ? $homologationCiotNumber : (string) $ciot->ciot_number;
+
+        if (! preg_match('/^\d{12}$/', (string) $ciotNumber)) {
+            throw new DomainException('CIOT emitido ausente ou inválido; o MDF-e exige os 12 dígitos reais.');
         }
 
         $cteSnapshots = $documents->map(fn (CteDocument $document): array => $this->cteSnapshot->handle($document));
@@ -94,9 +129,22 @@ class BuildMdfeEmissionSnapshot
         $destinations = $this->destinations($documents, $cteSnapshots);
         $loadingCities = $this->loadingCities($cteSnapshots, $origin);
         $insurance = $this->insuranceSnapshot->handle($endorsements, $homologationFixture);
-        $line = $ciot->line instanceof CiotLineEnum ? $ciot->line : CiotLineEnum::from((string) $ciot->line);
-        $cargoValueCents = $documents->sum(fn (CteDocument $document): int => $this->decimalToCents($document->snapshot['fipe_value'] ?? null));
+        $cargoValueCents = $line === CiotLineEnum::TankAlcohol
+            ? $this->decimalToCents($cteSnapshots->first()['cargo_value'] ?? null)
+            : $documents->sum(fn (CteDocument $document): int => $this->decimalToCents($document->snapshot['fipe_value'] ?? null));
         $contractValueCents = $documents->sum(fn (CteDocument $document): int => $this->decimalToCents($document->snapshot['value'] ?? null));
+        $cargoWeightKg = $line === CiotLineEnum::TankAlcohol
+            ? (float) (int) ($cteSnapshots->first()['cargo_weight_kg'] ?? 0)
+            : (float) $ciot->cargo_weight_kg;
+
+        if ($line === CiotLineEnum::TankAlcohol && $cargoValueCents <= 0) {
+            throw new DomainException('O CT-e de álcool precisa informar o valor real da carga no snapshot.');
+        }
+
+        if ($cargoWeightKg <= 0) {
+            throw new DomainException('O CIOT ou o CT-e selecionado precisa informar o peso real da carga.');
+        }
+
         $cargoType = $this->cargoType($line);
         $ncm = match ($line) {
             CiotLineEnum::VehicleRemoval => (string) config('dfe.mdfe.ncm_vehicle_removal'),
@@ -106,13 +154,17 @@ class BuildMdfeEmissionSnapshot
 
         return [
             'schema_version' => 1,
-            'trip_id' => $batch->id,
+            'trip_id' => $batch?->id,
             'line' => $line->value,
             'issue_at' => now()->toIso8601String(),
             'tp_emit' => (string) config('dfe.mdfe.tp_emit'),
             'ciot' => (string) $ciotNumber,
             'ciot_source' => $ciotSource,
-            'ciot_fixture_reason' => $ciotSource === 'homologation_fixture' ? '217' : null,
+            'ciot_fixture_reason' => match ($ciotSource) {
+                'homologation_fixture' => '217',
+                'synthetic_homologation' => 'synthetic',
+                default => null,
+            },
             'ciot_responsible_cnpj' => preg_replace('/\D/', '', (string) config('dfe.emit.cnpj')),
             'rntrc' => (string) config('dfe.mdfe.rntrc'),
             'origin' => $origin,
@@ -131,7 +183,7 @@ class BuildMdfeEmissionSnapshot
             ),
             'cargo' => [
                 'value' => $this->decimal($cargoValueCents / 100),
-                'weight_kg' => $this->decimal((float) $ciot->cargo_weight_kg, 4),
+                'weight_kg' => $this->decimal($cargoWeightKg, 4),
                 'predominant_product' => match ($line) {
                     CiotLineEnum::VehicleRemoval => 'VEICULOS',
                     CiotLineEnum::TankAlcohol => 'ALCOOL ETILICO',

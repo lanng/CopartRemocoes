@@ -3,6 +3,7 @@
 namespace Tests\Feature\Services;
 
 use App\Enums\CteDocumentStatusEnum;
+use App\Models\DfeDocumentReservation;
 use App\Models\MdfeDocument;
 use App\Services\Cte\ReconcileMdfeDocument;
 use DomainException;
@@ -22,16 +23,23 @@ class ReconcileMdfeDocumentTest extends TestCase
         $mdfe = MdfeDocument::factory()->create([
             'status' => CteDocumentStatusEnum::RECONCILIATION_REQUIRED,
         ]);
+        DfeDocumentReservation::query()->create([
+            'resource_type' => 'ciot',
+            'resource_id' => 456,
+            'mdfe_document_id' => $mdfe->id,
+        ]);
 
         $result = app(ReconcileMdfeDocument::class)->handle($mdfe, self::ACCESS_KEY, '135260000123456');
 
         $this->assertSame(CteDocumentStatusEnum::AUTHORIZED, $result->status);
+        $this->assertSame('authorized', $result->fiscal_status->value);
         $this->assertSame(self::ACCESS_KEY, $result->access_key);
         $this->assertSame('000000123', $result->mdfe_number);
         $this->assertSame('001', $result->series);
         $this->assertSame('135260000123456', $result->protocol);
         $this->assertSame('100', $result->fiscal_status_code);
         $this->assertNotNull($result->authorized_at);
+        $this->assertSame(1, $result->reservations()->count());
     }
 
     public function test_accepts_a_key_with_punctuation(): void

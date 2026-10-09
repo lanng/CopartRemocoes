@@ -4,6 +4,7 @@ namespace Tests\Feature\Services\Dfe;
 
 use App\Enums\CteDocumentStatusEnum;
 use App\Models\City;
+use App\Models\DfeDocumentReservation;
 use App\Models\MdfeDocument;
 use App\Services\Dfe\CloseMdfeDocument;
 use App\Services\Dfe\MdfeSoapClient;
@@ -51,6 +52,16 @@ class CloseMdfeDocumentTest extends TestCase
             'access_key' => $accessKey,
             'protocol' => '135260000000021',
         ]);
+        DfeDocumentReservation::query()->create([
+            'resource_type' => 'cte',
+            'resource_id' => 456,
+            'mdfe_document_id' => $document->id,
+        ]);
+        DfeDocumentReservation::query()->create([
+            'resource_type' => 'ciot',
+            'resource_id' => 789,
+            'mdfe_document_id' => $document->id,
+        ]);
         $city = City::factory()->create(['ibge_code' => '4106902', 'name' => 'Curitiba', 'state' => 'PR']);
         $returnXml = '<retEventoMDFe xmlns="http://www.portalfiscal.inf.br/mdfe" versao="3.00"><infEvento>'
             .'<tpAmb>2</tpAmb><verAplic>SVRS2026</verAplic><cOrgao>35</cOrgao><cStat>135</cStat>'
@@ -73,6 +84,15 @@ class CloseMdfeDocumentTest extends TestCase
         $this->assertSame(hash('sha256', Storage::disk('dfe')->get($event->xml_path)), $event->sha256);
         $this->assertStringContainsString('<evEncMDFe>', Storage::disk('dfe')->get($event->xml_path));
         $this->assertSame('132', $document->refresh()->fiscal_status_code);
+        $this->assertSame('closed', $document->refresh()->fiscal_status->value);
+        $this->assertDatabaseMissing('dfe_document_reservations', [
+            'resource_type' => 'cte',
+            'mdfe_document_id' => $document->id,
+        ]);
+        $this->assertDatabaseHas('dfe_document_reservations', [
+            'resource_type' => 'ciot',
+            'mdfe_document_id' => $document->id,
+        ]);
     }
 
     public function test_blocks_closure_transmission_in_production_until_the_flag_is_enabled(): void
@@ -211,6 +231,81 @@ class CloseMdfeDocumentTest extends TestCase
 
         $this->assertSame('100', $document->refresh()->fiscal_status_code);
         $this->assertSame('reconciliation_required', $document->events()->firstOrFail()->status);
+    }
+
+    public function test_timeout_is_reconciled_as_closed_when_the_follow_up_consult_confirms_cstat_132(): void
+    {
+        $document = MdfeDocument::factory()->create([
+            'status' => CteDocumentStatusEnum::AUTHORIZED,
+            'execution_mode' => 'live',
+            'emitter' => 'direct',
+            'access_key' => fake()->unique()->numerify(str_repeat('#', 44)),
+            'protocol' => '135260000000021',
+        ]);
+        $city = City::factory()->create(['ibge_code' => '4106902', 'state' => 'PR']);
+        $client = Mockery::mock(MdfeSoapClient::class);
+        $client->shouldReceive('transmitEvent')->once()->andThrow(new SefazException('Timeout de transmissão.'));
+        $client->shouldReceive('consult')->once()->andReturn(new SefazResponse(
+            cStat: '132',
+            xMotivo: 'Encerrado',
+            rawXml: '<retConsSitMDFe><cStat>132</cStat><xMotivo>Encerrado</xMotivo></retConsSitMDFe>',
+            closureEventProtocol: '935260000000021',
+            closureEventReceivedAt: '2026-10-07T10:00:00-03:00',
+        ));
+        app()->instance(MdfeSoapClient::class, $client);
+
+        $event = app(CloseMdfeDocument::class)->handle($document, $city);
+
+        $this->assertSame('already_closed', $event->status);
+        $this->assertSame('935260000000021', $event->protocol);
+        $this->assertNull($event->error_code);
+        $this->assertSame('132', $document->refresh()->fiscal_status_code);
+    }
+
+    public function test_reconciles_an_interrupted_pending_event_without_retransmitting_when_sefaz_confirms_closure(): void
+    {
+        $document = MdfeDocument::factory()->create([
+            'status' => CteDocumentStatusEnum::AUTHORIZED,
+            'execution_mode' => 'live',
+            'emitter' => 'direct',
+            'access_key' => fake()->unique()->numerify(str_repeat('#', 44)),
+            'protocol' => '135260000000021',
+        ]);
+        $city = City::factory()->create(['ibge_code' => '4106902', 'state' => 'PR']);
+        $event = $document->events()->create([
+            'event_type' => '110112',
+            'sequence' => 1,
+            'attempt' => 1,
+            'status' => 'pending',
+            'event_id' => 'ID110112'.str_repeat('1', 44).'01',
+            'payload_xml' => '<eventoMDFe/>',
+        ]);
+        DfeDocumentReservation::query()->create([
+            'resource_type' => 'cte',
+            'resource_id' => 456,
+            'mdfe_document_id' => $document->id,
+        ]);
+        $client = Mockery::mock(MdfeSoapClient::class);
+        $client->shouldReceive('consult')->once()->andReturn(new SefazResponse(
+            cStat: '132',
+            xMotivo: 'Encerrado',
+            rawXml: '<retConsSitMDFe><cStat>132</cStat><xMotivo>Encerrado</xMotivo></retConsSitMDFe>',
+            closureEventProtocol: '935260000000021',
+            closureEventReceivedAt: '2026-10-07T10:00:00-03:00',
+        ));
+        $client->shouldNotReceive('transmitEvent');
+        app()->instance(MdfeSoapClient::class, $client);
+
+        $reconciled = app(CloseMdfeDocument::class)->handle($document, $city);
+
+        $this->assertSame($event->id, $reconciled->id);
+        $this->assertSame('already_closed', $reconciled->status);
+        $this->assertSame('935260000000021', $reconciled->protocol);
+        $this->assertSame('132', $document->refresh()->fiscal_status_code);
+        $this->assertDatabaseMissing('dfe_document_reservations', [
+            'resource_type' => 'cte',
+            'mdfe_document_id' => $document->id,
+        ]);
     }
 
     public function test_persists_raw_transport_response_before_parsing_an_unreadable_event_reply(): void

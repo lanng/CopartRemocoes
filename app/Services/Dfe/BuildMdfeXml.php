@@ -2,6 +2,7 @@
 
 namespace App\Services\Dfe;
 
+use App\Services\Ciot\IssueSyntheticCiotForHomologation;
 use Carbon\Carbon;
 use DomainException;
 
@@ -11,19 +12,26 @@ class BuildMdfeXml
         protected AllocateMdfeNumber $allocator,
         protected AccessKey $accessKey,
         protected BuildMdfeInsuranceSnapshot $insuranceSnapshot,
+        protected IssueSyntheticCiotForHomologation $syntheticCiotIssuer,
     ) {}
 
     /**
      * @param  array<string, mixed>  $snapshot
      */
-    public function handle(array $snapshot): BuiltMdfe
+    public function handle(array $snapshot, ?int $number = null, ?int $series = null, ?string $numericCode = null): BuiltMdfe
     {
         $this->assertSnapshotComplete($snapshot);
 
         $date = Carbon::parse((string) $snapshot['issue_at']);
-        $series = (int) config('dfe.mdfe.series');
-        $number = $this->allocator->handle(series: $series);
-        $numericCode = str_pad((string) random_int(0, 99999999), 8, '0', STR_PAD_LEFT);
+        $series ??= (int) config('dfe.mdfe.series');
+        if ($series < 1 || $series > 999 || ($number !== null && ($number < 1 || $number > 999999999))) {
+            throw new DomainException('Número ou série do MDF-e inválidos.');
+        }
+        $number ??= $this->allocator->handle(series: $series);
+        $numericCode ??= str_pad((string) random_int(0, 99999999), 8, '0', STR_PAD_LEFT);
+        if (! preg_match('/^\d{8}$/', $numericCode)) {
+            throw new DomainException('Código numérico do MDF-e inválido.');
+        }
         $accessKey = $this->accessKey->build(
             cnpj: (string) config('dfe.emit.cnpj'),
             aamm: $date->format('ym'),
@@ -62,7 +70,7 @@ class BuildMdfeXml
             .'<ide>'
             .'<cUF>'.e((string) config('dfe.cuf')).'</cUF>'
             .'<tpAmb>'.e((string) config('dfe.tp_amb')).'</tpAmb>'
-            .'<tpEmit>'.e((string) config('dfe.mdfe.tp_emit')).'</tpEmit>'
+            .'<tpEmit>'.e((string) ($snapshot['tp_emit'] ?? config('dfe.mdfe.tp_emit'))).'</tpEmit>'
             .'<mod>58</mod><serie>'.$series.'</serie><nMDF>'.$number.'</nMDF>'
             .'<cMDF>'.$numericCode.'</cMDF><cDV>'.substr($accessKey, -1).'</cDV>'
             .'<modal>1</modal><dhEmi>'.Carbon::parse((string) $snapshot['issue_at'])->format('Y-m-d\TH:i:sP').'</dhEmi>'
@@ -293,6 +301,10 @@ class BuildMdfeXml
      */
     protected function assertSnapshotComplete(array $snapshot): void
     {
+        if (($snapshot['ciot_source'] ?? null) === 'synthetic_homologation' && ! $this->syntheticCiotIssuer->isEnabled()) {
+            throw new DomainException('CIOT sintético de homologação só pode ser usado com o recurso habilitado em homologação.');
+        }
+
         $required = ['issue_at', 'ciot', 'ciot_responsible_cnpj', 'rntrc', 'origin', 'destination', 'loading_cities', 'destinations', 'vehicle', 'cargo', 'insurance'];
         $missing = array_values(array_filter($required, fn (string $key): bool => blank($snapshot[$key] ?? null)));
 
@@ -328,7 +340,7 @@ class BuildMdfeXml
             fn (array $destination): int => count((array) ($destination['cte_access_keys'] ?? [])),
             (array) $snapshot['destinations'],
         ));
-        $requiresLotacao = (string) config('dfe.mdfe.tp_emit') === '1' && $cteCount === 1;
+        $requiresLotacao = (string) ($snapshot['tp_emit'] ?? config('dfe.mdfe.tp_emit')) === '1' && $cteCount === 1;
 
         if ($requiresLotacao && blank($snapshot['inf_lotacao'] ?? null)) {
             throw new DomainException('O grupo infLotacao é obrigatório para MDF-e rodoviário de tpEmit 1 com um único DF-e.');
@@ -346,16 +358,7 @@ class BuildMdfeXml
             throw new DomainException('Fixture sintético de seguro pode ser usado somente em homologação.');
         }
 
-        $this->insuranceSnapshot->handle(
-            (array) ($snapshot['insurance']['endorsements'] ?? []),
-            ($snapshot['insurance']['source'] ?? null) === 'homologation_fixture'
-                ? [
-                    'insurer_name' => (string) ($snapshot['insurance']['insurer_name'] ?? ''),
-                    'insurer_cnpj' => (string) ($snapshot['insurance']['insurer_cnpj'] ?? ''),
-                    'policy_number' => (string) ($snapshot['insurance']['policy_number'] ?? ''),
-                ]
-                : null,
-        );
+        $this->insuranceSnapshot->validate($snapshot['insurance']);
 
         $this->routeUfs($snapshot);
     }

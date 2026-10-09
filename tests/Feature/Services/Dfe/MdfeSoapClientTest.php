@@ -79,8 +79,40 @@ class MdfeSoapClientTest extends TestCase
         $this->assertFalse($response->hasMdfeClosureEvent);
 
         $withEvent = SefazResponse::fromSoapXml('<retConsSitMDFe><cStat>100</cStat><xMotivo>Autorizado</xMotivo>'
-            .'<procEventoMDFe><retEventoMDFe/></procEventoMDFe></retConsSitMDFe>');
+            .'<procEventoMDFe><eventoMDFe><infEvento><tpEvento>110112</tpEvento></infEvento></eventoMDFe>'
+            .'<retEventoMDFe/></procEventoMDFe></retConsSitMDFe>');
 
         $this->assertTrue($withEvent->hasMdfeClosureEvent);
+
+        $cancelled = SefazResponse::fromSoapXml('<retConsSitMDFe><cStat>101</cStat><xMotivo>Cancelamento homologado</xMotivo>'
+            .'<protMDFe><infProt><cStat>100</cStat><nProt>935260000000021</nProt></infProt></protMDFe>'
+            .'<procEventoMDFe><eventoMDFe><infEvento Id="ID110111'.str_repeat('2', 44).'01">'
+            .'<tpEvento>110111</tpEvento><nSeqEvento>1</nSeqEvento><detEvento versaoEvento="3.00">'
+            .'<evCancMDFe><nProt>935260000000021</nProt><xJust>Cancelamento solicitado pelo operador.</xJust>'
+            .'</evCancMDFe></detEvento></infEvento></eventoMDFe>'
+            .'<retEventoMDFe><infEvento><cStat>135</cStat><nProt>935260000000099</nProt>'
+            .'<dhRegEvento>2026-10-07T14:45:00-03:00</dhRegEvento></infEvento></retEventoMDFe>'
+            .'</procEventoMDFe></retConsSitMDFe>');
+
+        $this->assertSame('101', $cancelled->cStat);
+        $this->assertSame('935260000000021', $cancelled->protocol);
+        $this->assertFalse($cancelled->hasMdfeClosureEvent);
+        $this->assertTrue($cancelled->hasMdfeCancellationEvent);
+        $this->assertSame('935260000000099', $cancelled->cancellationEventProtocol);
+        $this->assertSame('2026-10-07T14:45:00-03:00', $cancelled->cancellationEventReceivedAt);
+    }
+
+    public function test_parses_closed_response_metadata_without_treating_it_as_cancellation(): void
+    {
+        $response = SefazResponse::fromSoapXml(
+            '<retEventoMDFe><infEvento><cStat>609</cStat>'
+            .'<xMotivo>MDF-e já encerrado [nProt:935260000000088][dhEnc:2026-10-07T14:45:00-03:00]</xMotivo>'
+            .'</infEvento></retEventoMDFe>',
+        );
+
+        $this->assertSame('609', $response->cStat);
+        $this->assertSame('935260000000088', $response->closureEventProtocol);
+        $this->assertSame('2026-10-07T14:45:00-03:00', $response->closureEventReceivedAt);
+        $this->assertNull($response->hasMdfeCancellationEvent);
     }
 }

@@ -10,6 +10,10 @@ class CancelCiot
 {
     public function handle(Ciot $ciot, string $motivo): Ciot
     {
+        if ($ciot->isSyntheticHomologation()) {
+            throw new DomainException('CIOT sintético de homologação não pode ser cancelado pela ANTT.');
+        }
+
         $fullNumber = $ciot->fullNumber();
 
         if ($ciot->status !== CiotStatusEnum::ISSUED || $fullNumber === null) {
@@ -34,10 +38,14 @@ class CancelCiot
             );
         }
 
-        return $ciot->transitionFrom(CiotStatusEnum::ISSUED, CiotStatusEnum::CANCELED, fn (Ciot $locked): array => [
+        $ciot = $ciot->transitionFrom(CiotStatusEnum::ISSUED, CiotStatusEnum::CANCELED, fn (Ciot $locked): array => [
             'cancel_reason' => $motivo,
             'canceled_at' => now(),
             'response' => array_merge($locked->response ?? [], ['cancelamento' => $response->body]),
         ]) ?? $ciot->refresh();
+
+        app(\App\Services\Dfe\ReserveMdfeDocuments::class)->releaseCiotIfTerminal($ciot);
+
+        return $ciot;
     }
 }

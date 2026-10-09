@@ -4,6 +4,8 @@ namespace Tests\Feature\Services\Ciot;
 
 use App\Enums\CiotStatusEnum;
 use App\Models\Ciot;
+use App\Models\DfeDocumentReservation;
+use App\Models\MdfeDocument;
 use App\Services\Ciot\AnttCiotException;
 use App\Services\Ciot\CancelCiot;
 use App\Services\Ciot\CloseCiot;
@@ -29,6 +31,12 @@ class CiotCancelAndCloseTest extends TestCase
     public function test_cancels_an_issued_ciot_with_a_reason(): void
     {
         $ciot = Ciot::factory()->issued()->create();
+        $mdfe = MdfeDocument::factory()->create();
+        DfeDocumentReservation::query()->create([
+            'resource_type' => 'ciot',
+            'resource_id' => $ciot->id,
+            'mdfe_document_id' => $mdfe->id,
+        ]);
 
         Http::fake([
             'https://antt-hml.test/pefServices/token' => Http::response(['token' => 'tok'], 200),
@@ -45,6 +53,10 @@ class CiotCancelAndCloseTest extends TestCase
         $this->assertSame(CiotStatusEnum::CANCELED, $ciot->status);
         $this->assertSame('Carga cancelada pelo cliente', $ciot->cancel_reason);
         $this->assertNotNull($ciot->canceled_at);
+        $this->assertDatabaseMissing('dfe_document_reservations', [
+            'resource_type' => 'ciot',
+            'resource_id' => $ciot->id,
+        ]);
 
         Http::assertSent(function ($request) use ($ciot): bool {
             return str_contains($request->url(), '/api/CancelamentoOperacaoTransporte')
@@ -69,6 +81,23 @@ class CiotCancelAndCloseTest extends TestCase
         $this->expectException(DomainException::class);
 
         app(CancelCiot::class)->handle($ciot, 'motivo');
+    }
+
+    public function test_refuses_to_cancel_a_synthetic_homologation_ciot_without_calling_antt(): void
+    {
+        $ciot = Ciot::factory()->issued()->create([
+            'response' => ['homologation_fixture' => ['synthetic' => true]],
+        ]);
+        Http::fake();
+
+        try {
+            app(CancelCiot::class)->handle($ciot, 'teste');
+            $this->fail('Expected DomainException.');
+        } catch (DomainException $exception) {
+            $this->assertStringContainsString('sintético', $exception->getMessage());
+        }
+
+        Http::assertNothingSent();
     }
 
     public function test_refuses_an_http_200_rejection_even_with_a_protocol(): void
@@ -121,6 +150,12 @@ class CiotCancelAndCloseTest extends TestCase
     public function test_closes_an_issued_ciot(): void
     {
         $ciot = Ciot::factory()->issued()->create();
+        $mdfe = MdfeDocument::factory()->create();
+        DfeDocumentReservation::query()->create([
+            'resource_type' => 'ciot',
+            'resource_id' => $ciot->id,
+            'mdfe_document_id' => $mdfe->id,
+        ]);
 
         Http::fake([
             'https://antt-hml.test/pefServices/token' => Http::response(['token' => 'tok'], 200),
@@ -137,6 +172,10 @@ class CiotCancelAndCloseTest extends TestCase
 
         $this->assertSame(CiotStatusEnum::CLOSED, $ciot->status);
         $this->assertNotNull($ciot->closed_at);
+        $this->assertDatabaseMissing('dfe_document_reservations', [
+            'resource_type' => 'ciot',
+            'resource_id' => $ciot->id,
+        ]);
 
         Http::assertSent(function ($request) use ($ciot): bool {
             return str_contains($request->url(), '/api/EncerramentoOperacaoTransporte')
@@ -219,6 +258,23 @@ class CiotCancelAndCloseTest extends TestCase
         $this->assertSame(CiotStatusEnum::CLOSED, $ciot->status);
         $this->assertSame('110', $ciot->response['encerramento']['Codigo']);
         $this->assertSame('T98000002282767', $ciot->response['encerramento']['Protocolo']);
+    }
+
+    public function test_refuses_to_close_a_synthetic_homologation_ciot_without_calling_antt(): void
+    {
+        $ciot = Ciot::factory()->issued()->create([
+            'response' => ['homologation_fixture' => ['synthetic' => true]],
+        ]);
+        Http::fake();
+
+        try {
+            app(CloseCiot::class)->handle($ciot);
+            $this->fail('Expected DomainException.');
+        } catch (DomainException $exception) {
+            $this->assertStringContainsString('sintético', $exception->getMessage());
+        }
+
+        Http::assertNothingSent();
     }
 
     public function test_refuses_to_close_a_ciot_that_is_not_issued(): void

@@ -3,6 +3,7 @@
 namespace Tests\Feature\Services\Ciot;
 
 use App\Enums\CiotLineEnum;
+use App\Jobs\EmitMdfeDirectJob;
 use App\Models\Ciot;
 use App\Models\CiotVehicle;
 use App\Models\CteDocument;
@@ -12,6 +13,7 @@ use App\Services\Ciot\BuildMdfeEmissionSnapshot;
 use App\Services\Ciot\QueueDirectMdfeEmission;
 use DomainException;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Queue;
 use Tests\TestCase;
 
 class BuildMdfeEmissionSnapshotTest extends TestCase
@@ -88,6 +90,32 @@ class BuildMdfeEmissionSnapshotTest extends TestCase
             'bank_code' => '033',
             'bank_agency' => '0073',
         ], $snapshot['payment']);
+    }
+
+    public function test_marks_an_issued_synthetic_ciot_in_the_mdfe_snapshot(): void
+    {
+        config(['dfe.ciot_synthetic_homologation_enabled' => true]);
+        [$batch, $ciot] = $this->makeTrip();
+        $ciot->forceFill(['response' => ['homologation_fixture' => ['synthetic' => true]]])->save();
+        CiotVehicle::factory()->forRemoval()->create([
+            'plate' => 'PUC8E55', 'renavam' => '12345678901', 'tare_kg' => 8000,
+            'capacity_kg' => 12000, 'type_rod' => '03', 'body_type' => '00', 'uf' => 'SP',
+        ]);
+        MdfeDriver::factory()->create([
+            'cpf' => '12345678909',
+            'line' => CiotLineEnum::VehicleRemoval->value,
+            'is_default' => true,
+        ]);
+
+        $snapshot = app(BuildMdfeEmissionSnapshot::class)->handle(
+            batch: $batch,
+            endorsements: ['AVERBACAO-OP-001'],
+            routeUfs: [],
+        );
+
+        $this->assertSame($ciot->ciot_number, $snapshot['ciot']);
+        $this->assertSame('synthetic_homologation', $snapshot['ciot_source']);
+        $this->assertSame('synthetic', $snapshot['ciot_fixture_reason']);
     }
 
     public function test_selects_the_configured_ncm_by_line_in_homologation_and_production_snapshots(): void
@@ -291,6 +319,7 @@ class BuildMdfeEmissionSnapshotTest extends TestCase
         CteDocument::factory()->authorized()->create([
             'cte_emission_batch_id' => $singleCteBatch->id,
             'access_key' => '35261012563112000130570019000000061960595781',
+            'workflow_origin' => 'controlled_v1',
             'snapshot' => $document->snapshot,
         ]);
         CiotVehicle::factory()->forRemoval()->create([
@@ -320,6 +349,7 @@ class BuildMdfeEmissionSnapshotTest extends TestCase
         CteDocument::factory()->authorized()->create([
             'cte_emission_batch_id' => $batch->id,
             'access_key' => '35260912563112000130570010000028171839975375',
+            'workflow_origin' => 'controlled_v1',
             'snapshot' => [
                 'schema_version' => 2,
                 'line' => CiotLineEnum::VehicleRemoval->value,
@@ -357,6 +387,8 @@ class BuildMdfeEmissionSnapshotTest extends TestCase
 
     public function test_queues_one_direct_mdfe_only_after_its_snapshot_is_complete(): void
     {
+        Queue::fake();
+
         [$batch] = $this->makeTrip();
         CiotVehicle::factory()->forRemoval()->create([
             'plate' => 'PUC8E55', 'renavam' => '12345678901', 'tare_kg' => 8000,
@@ -378,12 +410,14 @@ class BuildMdfeEmissionSnapshotTest extends TestCase
         );
 
         $this->assertSame('direct', $document->emitter);
+        $this->assertSame('controlled_v1', $document->getRawOriginal('workflow_origin'));
         $this->assertSame('live', $document->execution_mode);
         $this->assertSame('VEICULOS', $document->snapshot['cargo']['predominant_product']);
         $this->assertSame('05', $document->snapshot['cargo']['type']);
+        Queue::assertPushed(EmitMdfeDirectJob::class, fn (EmitMdfeDirectJob $job): bool => $job->afterCommit === true);
 
         $this->expectException(DomainException::class);
-        $this->expectExceptionMessage('já possui um MDF-e ativo');
+        $this->expectExceptionMessage('CIOT já está vinculado a outro MDF-e ativo ou em processamento.');
 
         app(QueueDirectMdfeEmission::class)->handle(
             batch: $batch,
@@ -392,9 +426,38 @@ class BuildMdfeEmissionSnapshotTest extends TestCase
         );
     }
 
-    /** @return array{CteEmissionBatch, Ciot} */
-    private function makeTrip(CiotLineEnum $line = CiotLineEnum::VehicleRemoval, string $destinationUf = 'SP'): array
+    public function test_direct_queue_rejects_authorized_ctes_from_the_legacy_workflow(): void
     {
+        [$batch] = $this->makeTrip(controlledWorkflow: false);
+        CiotVehicle::factory()->forRemoval()->create([
+            'plate' => 'PUC8E55', 'renavam' => '12345678901', 'tare_kg' => 8000,
+            'capacity_kg' => 12000, 'type_rod' => '03', 'body_type' => '00', 'uf' => 'SP',
+        ]);
+        MdfeDriver::factory()->create([
+            'cpf' => '12345678909',
+            'line' => CiotLineEnum::VehicleRemoval->value,
+            'is_default' => true,
+        ]);
+
+        $this->expectException(DomainException::class);
+        $this->expectExceptionMessage('somente CT-es do fluxo controlado pelo emissor direto');
+
+        app(QueueDirectMdfeEmission::class)->handle(
+            batch: $batch,
+            endorsements: ['AVERBACAO-OP-LEGADO'],
+            routeUfs: [],
+            paymentMethod: '0',
+            paymentBankCode: '104',
+            paymentBankAgency: '0276',
+        );
+    }
+
+    /** @return array{CteEmissionBatch, Ciot} */
+    private function makeTrip(
+        CiotLineEnum $line = CiotLineEnum::VehicleRemoval,
+        string $destinationUf = 'SP',
+        bool $controlledWorkflow = true,
+    ): array {
         $batch = CteEmissionBatch::factory()->create();
         $ciot = Ciot::factory()->issued()->create([
             'cte_emission_batch_id' => $batch->id,
@@ -407,11 +470,14 @@ class BuildMdfeEmissionSnapshotTest extends TestCase
         CteDocument::factory()->authorized()->create([
             'cte_emission_batch_id' => $batch->id,
             'access_key' => '35260912563112000130570010000028171839975374',
+            'workflow_origin' => $controlledWorkflow ? 'controlled_v1' : null,
             'snapshot' => [
                 'schema_version' => 2,
                 'line' => $line->value,
                 'value' => '1000.00',
                 'fipe_value' => '50000.00',
+                'cargo_value' => '50000.00',
+                'cargo_weight_kg' => '4000.000',
                 'vehicle_model' => $line === CiotLineEnum::TankAlcohol ? 'ETANOL' : 'VW GOL',
                 'vehicle_plate' => 'ABC1D23',
                 'origin' => ['ibge' => '3534609', 'name' => 'Osvaldo Cruz', 'uf' => 'SP'],

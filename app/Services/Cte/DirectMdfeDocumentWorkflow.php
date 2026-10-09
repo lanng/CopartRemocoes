@@ -10,7 +10,7 @@ class DirectMdfeDocumentWorkflow
 {
     /** @var array<string, list<CteDocumentStatusEnum>> */
     private const TRANSITIONS = [
-        'queued' => [CteDocumentStatusEnum::AUTHORIZING, CteDocumentStatusEnum::FAILED_BEFORE_AUTHORIZATION],
+        'queued' => [CteDocumentStatusEnum::AUTHORIZING, CteDocumentStatusEnum::FAILED_BEFORE_AUTHORIZATION, CteDocumentStatusEnum::RECONCILIATION_REQUIRED],
         'authorizing' => [CteDocumentStatusEnum::AUTHORIZED, CteDocumentStatusEnum::REJECTED, CteDocumentStatusEnum::RECONCILIATION_REQUIRED, CteDocumentStatusEnum::FAILED_BEFORE_AUTHORIZATION],
         'authorized' => [CteDocumentStatusEnum::CANCELLED],
         'failed_before_authorization' => [],
