@@ -3,23 +3,29 @@
 namespace App\Filament\Resources;
 
 use App\Enums\CteDocumentStatusEnum;
+use App\Enums\FiscalDocumentStatusEnum;
 use App\Filament\Resources\CteEmissionResource\Pages;
 use App\Models\CteDocument;
 use App\Services\Dfe\DfeDocumentStore;
 use App\Services\Dfe\GenerateDactePdf;
-use Filament\Notifications\Notification;
+use Filament\Forms\Form;
+use Filament\Infolists\Components\RepeatableEntry;
+use Filament\Infolists\Components\Section;
+use Filament\Infolists\Components\TextEntry;
+use Filament\Infolists\Infolist;
 use Filament\Resources\Resource;
 use Filament\Tables\Actions\Action;
+use Filament\Tables\Actions\ViewAction;
 use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Filters\SelectFilter;
 use Filament\Tables\Table;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Facades\Storage;
+use Symfony\Component\HttpFoundation\StreamedResponse;
 
 /**
- * Relação de CT-es emitidos (decisão F4): registros vivem independentes das
- * remoções — CT-e de tanque nem nasce de registro. Downloads do XML de guarda
- * (disk dfe) e do DACTE quando disponíveis; MDF-e entra aqui na F5.
+ * CT-es emitidos vivem independentes das remoções — CT-e de tanque nem nasce
+ * de registro. Arquivos fiscais disponíveis são servidos do disk dfe.
  */
 class CteEmissionResource extends Resource
 {
@@ -39,7 +45,117 @@ class CteEmissionResource extends Resource
 
     public static function canCreate(): bool
     {
-        return false;
+        return true;
+    }
+
+    public static function form(Form $form): Form
+    {
+        return $form->schema([]);
+    }
+
+    public static function infolist(Infolist $infolist): Infolist
+    {
+        return $infolist
+            ->extraAttributes(['wire:poll.5s' => 'refreshDocument'])
+            ->schema([
+                Section::make('Situação do CT-e')
+                    ->columns(3)
+                    ->schema([
+                        TextEntry::make('cte_number')->label('Número')->placeholder('Aguardando emissão'),
+                        TextEntry::make('series')->label('Série')->placeholder('—'),
+                        TextEntry::make('status')
+                            ->label('Processamento')
+                            ->badge()
+                            ->color(fn (CteDocumentStatusEnum $state): string => $state->color())
+                            ->formatStateUsing(fn (CteDocumentStatusEnum $state): string => $state->label()),
+                        TextEntry::make('access_key')->label('Chave de acesso')->copyable()->placeholder('—')->columnSpanFull(),
+                        TextEntry::make('fiscal_status_code')->label('cStat')->placeholder('—'),
+                        TextEntry::make('fiscal_status_message')->label('Situação fiscal')->placeholder('Aguardando processamento')->columnSpan(2),
+                        TextEntry::make('error_code')->label('Código de erro')->placeholder('—'),
+                        TextEntry::make('error_message')->label('Detalhe do erro')->placeholder('—')->columnSpanFull(),
+                        TextEntry::make('protocol')->label('Protocolo')->placeholder('—'),
+                        TextEntry::make('authorized_at')->label('Autorizado em')->dateTime('d/m/Y H:i')->timezone('America/Sao_Paulo')->placeholder('—'),
+                    ]),
+                Section::make('Origem e destino')
+                    ->columns(2)
+                    ->schema([
+                        TextEntry::make('origin')
+                            ->label('Origem da carga')
+                            ->state(fn (CteDocument $record): string => self::formatCity((array) data_get($record->snapshot, 'origin', []))),
+                        TextEntry::make('destination')
+                            ->label('Destino da carga')
+                            ->state(fn (CteDocument $record): string => self::formatCity((array) data_get($record->snapshot, 'destination', []))),
+                        TextEntry::make('modality')
+                            ->label('Modalidade')
+                            ->state(fn (CteDocument $record): string => self::formatModality(data_get($record->snapshot, 'modal'))),
+                        TextEntry::make('snapshot.dprev')->label('Previsão de entrega')->date('d/m/Y')->placeholder('—'),
+                        TextEntry::make('snapshot.dest.xNome')->label('Tomador fiscal')->placeholder('—'),
+                    ]),
+                Section::make('Entrega física')
+                    ->columns(3)
+                    ->schema([
+                        TextEntry::make('snapshot.delivery_party.xNome')->label('Destinatário físico')->placeholder('—'),
+                        TextEntry::make('snapshot.delivery_party.cnpj')->label('CNPJ')->placeholder('—'),
+                        TextEntry::make('snapshot.delivery_party.cpf')->label('CPF')->placeholder('—'),
+                        TextEntry::make('snapshot.delivery_party.xLgr')->label('Logradouro')->placeholder('—'),
+                        TextEntry::make('snapshot.delivery_party.nro')->label('Número')->placeholder('—'),
+                        TextEntry::make('snapshot.delivery_party.xCpl')->label('Complemento')->placeholder('—'),
+                        TextEntry::make('snapshot.delivery_party.xBairro')->label('Bairro')->placeholder('—'),
+                        TextEntry::make('snapshot.delivery_party.xMun')->label('Município')->placeholder('—'),
+                        TextEntry::make('snapshot.delivery_party.uf')->label('UF')->placeholder('—'),
+                        TextEntry::make('snapshot.delivery_party.cep')->label('CEP')->placeholder('—'),
+                        TextEntry::make('delivery_missing_fields')
+                            ->label('Dados de entrega pendentes')
+                            ->state(fn (CteDocument $record): string => implode(', ', array_map('strval', (array) data_get($record->snapshot, 'delivery_missing_fields', []))))
+                            ->placeholder('Nenhum')
+                            ->columnSpanFull(),
+                    ]),
+                Section::make('Valores e carga')
+                    ->columns(4)
+                    ->schema([
+                        TextEntry::make('snapshot.value')->label('Frete')->money('BRL')->placeholder('—'),
+                        TextEntry::make('snapshot.cargo_value')->label('Valor da carga')->money('BRL')->placeholder('—'),
+                        TextEntry::make('snapshot.cargo_liters')->label('Volume')->suffix(' L')->placeholder('—'),
+                        TextEntry::make('snapshot.cargo_weight_kg')->label('Peso líquido')->suffix(' kg')->placeholder('—'),
+                    ]),
+                Section::make('NF-es vinculadas')
+                    ->schema([
+                        RepeatableEntry::make('nfeDocuments')
+                            ->label('Notas fiscais')
+                            ->columns(4)
+                            ->schema([
+                                TextEntry::make('number')->label('Número'),
+                                TextEntry::make('series')->label('Série'),
+                                TextEntry::make('source_filename')->label('Arquivo original'),
+                                TextEntry::make('access_key')->label('Chave de acesso')->copyable()->columnSpanFull(),
+                                TextEntry::make('extracted_data.cargo_value')->label('Valor')->money('BRL'),
+                                TextEntry::make('extracted_data.cargo_liters')->label('Volume')->suffix(' L'),
+                                TextEntry::make('extracted_data.net_weight_kg')->label('Peso líquido')->suffix(' kg'),
+                            ]),
+                    ]),
+                Section::make('MDF-es vinculados')
+                    ->schema([
+                        RepeatableEntry::make('mdfeDocuments')
+                            ->label('Manifestos')
+                            ->columns(4)
+                            ->schema([
+                                TextEntry::make('mdfe_number')->label('Número')->placeholder('—'),
+                                TextEntry::make('status')
+                                    ->label('Processamento')
+                                    ->formatStateUsing(fn (CteDocumentStatusEnum $state): string => $state->label()),
+                                TextEntry::make('fiscal_status')
+                                    ->label('Situação fiscal')
+                                    ->formatStateUsing(fn (?FiscalDocumentStatusEnum $state): string => match ($state) {
+                                        FiscalDocumentStatusEnum::AUTHORIZED => 'Autorizado',
+                                        FiscalDocumentStatusEnum::CANCELLED => 'Cancelado',
+                                        FiscalDocumentStatusEnum::CLOSED => 'Encerrado',
+                                        default => 'Não autorizado',
+                                    }),
+                                TextEntry::make('fiscal_status_code')->label('cStat SEFAZ')->placeholder('—'),
+                                TextEntry::make('access_key')->label('Chave de acesso')->copyable()->columnSpanFull(),
+                            ]),
+                    ]),
+            ]);
     }
 
     public static function table(Table $table): Table
@@ -66,7 +182,14 @@ class CteEmissionResource extends Resource
                     ->copyable()
                     ->tooltip(fn (CteDocument $record): ?string => $record->access_key),
                 TextColumn::make('register.vehicle_plate')->label('Placa')->placeholder('—'),
-                TextColumn::make('register.destination_city')->label('Destino')->placeholder('—'),
+                TextColumn::make('destination')
+                    ->label('Destino')
+                    ->state(fn (CteDocument $record): string => self::formatCity((array) data_get($record->snapshot, 'destination', [])))
+                    ->placeholder('—'),
+                TextColumn::make('modality')
+                    ->label('Modalidade')
+                    ->state(fn (CteDocument $record): string => self::formatModality(data_get($record->snapshot, 'modal')))
+                    ->placeholder('—'),
                 TextColumn::make('protocol')->label('Protocolo')->placeholder('—'),
                 TextColumn::make('authorized_at')
                     ->label('Autorizado em')
@@ -91,27 +214,31 @@ class CteEmissionResource extends Resource
                     ->icon('heroicon-o-arrow-path')
                     ->color('warning')
                     ->requiresConfirmation()
-                    ->visible(fn (CteDocument $record): bool => filled($record->xml_path))
-                    ->action(function (CteDocument $record): void {
-                        $proc = app(DfeDocumentStore::class)->read((string) $record->xml_path);
+                    ->label('Regenerar e baixar DACTE')
+                    ->visible(fn (CteDocument $record): bool => self::hasArchivedFile($record->xml_path))
+                    ->action(function (CteDocument $record): StreamedResponse {
+                        $store = app(DfeDocumentStore::class);
+                        $proc = $store->read((string) $record->xml_path);
+                        $pdfPath = app(GenerateDactePdf::class)->generateForProc((string) $record->access_key, $proc);
 
-                        $record->forceFill([
-                            'pdf_path' => app(GenerateDactePdf::class)->generateForProc(
-                                (string) $record->access_key,
-                                $proc,
-                            ),
-                        ])->save();
+                        $record->forceFill(['pdf_path' => $pdfPath])->save();
 
-                        Notification::make()
-                            ->title('DACTE regenerado (nova versão no S3).')
-                            ->success()
-                            ->send();
+                        return Storage::disk('dfe')->download(
+                            $pdfPath,
+                            strtolower((string) ($record->access_key ?? $record->id)).'-dacte.pdf',
+                        );
                     }),
                 self::downloadAction('downloadXml', 'XML', 'xml_path', '-cte.xml'),
-                self::downloadAction('downloadPdf', 'PDF', 'pdf_path', '-dacte.pdf'),
+                Action::make('downloadPdf')
+                    ->label('PDF')
+                    ->icon('heroicon-o-arrow-down-tray')
+                    ->color('gray')
+                    ->visible(fn (CteDocument $record): bool => self::hasArchivedFile($record->pdf_path) || self::hasArchivedFile($record->xml_path))
+                    ->action(fn (CteDocument $record): StreamedResponse => self::downloadPdf($record)),
+                ViewAction::make()->label('Ver CT-e'),
             ])
             ->defaultSort('authorized_at', 'desc')
-            ->modifyQueryUsing(fn (Builder $query): Builder => $query->with('register'))
+            ->modifyQueryUsing(fn (Builder $query): Builder => $query->with(['register', 'nfeDocuments', 'mdfeDocuments']))
             ->persistFiltersInSession();
     }
 
@@ -121,18 +248,70 @@ class CteEmissionResource extends Resource
             ->label($label)
             ->icon('heroicon-o-arrow-down-tray')
             ->color('gray')
-            ->visible(fn (CteDocument $record): bool => filled($record->{$pathField}))
-            ->action(function (CteDocument $record) use ($pathField, $filenameSuffix): void {
+            ->visible(fn (CteDocument $record): bool => self::hasArchivedFile($record->{$pathField}))
+            ->action(function (CteDocument $record) use ($pathField, $filenameSuffix): StreamedResponse {
+                $path = (string) $record->{$pathField};
+                abort_unless(self::hasArchivedFile($path), 404);
                 $filename = strtolower((string) ($record->access_key ?? $record->id)).$filenameSuffix;
 
-                Storage::disk('dfe')->download((string) $record->{$pathField}, $filename);
+                return Storage::disk('dfe')->download($path, $filename);
             });
+    }
+
+    private static function downloadPdf(CteDocument $record): StreamedResponse
+    {
+        $store = app(DfeDocumentStore::class);
+        $pdfPath = (string) $record->pdf_path;
+
+        if (! filled($pdfPath) || ! $store->exists($pdfPath)) {
+            abort_unless(self::hasArchivedFile($record->xml_path), 404);
+
+            $pdfPath = app(GenerateDactePdf::class)->generateForProc(
+                (string) $record->access_key,
+                $store->read((string) $record->xml_path),
+            );
+            $record->forceFill(['pdf_path' => $pdfPath])->save();
+        }
+
+        return Storage::disk('dfe')->download(
+            $pdfPath,
+            strtolower((string) ($record->access_key ?? $record->id)).'-dacte.pdf',
+        );
+    }
+
+    private static function hasArchivedFile(?string $path): bool
+    {
+        return filled($path) && app(DfeDocumentStore::class)->exists($path);
+    }
+
+    /** @param array<string, mixed> $city */
+    private static function formatCity(array $city): string
+    {
+        return trim(implode(' / ', array_filter([
+            (string) ($city['name'] ?? ''),
+            (string) ($city['uf'] ?? ''),
+        ])));
+    }
+
+    private static function formatModality(mixed $modality): string
+    {
+        return match ((string) $modality) {
+            '01' => 'Rodoviário',
+            '02' => 'Aéreo',
+            '03' => 'Aquaviário',
+            '04' => 'Ferroviário',
+            '05' => 'Dutoviário',
+            '06' => 'Multimodal',
+            default => '—',
+        };
     }
 
     public static function getPages(): array
     {
         return [
             'index' => Pages\ListCteEmissions::route('/'),
+            'create' => Pages\CreateCteEmission::route('/create'),
+            'view' => Pages\ViewCteEmission::route('/{record}'),
         ];
     }
 }

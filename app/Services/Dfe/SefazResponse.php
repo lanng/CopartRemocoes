@@ -25,6 +25,14 @@ class SefazResponse
         public readonly ?string $faultCode = null,
         public readonly ?string $faultString = null,
         public readonly ?bool $hasMdfeClosureEvent = null,
+        public readonly ?bool $hasCteCancellationEvent = null,
+        public readonly ?bool $hasMdfeCancellationEvent = null,
+        public readonly ?string $cancellationEventProtocol = null,
+        public readonly ?string $cancellationEventReceivedAt = null,
+        public readonly ?string $cancellationEventXml = null,
+        public readonly ?string $cancellationEventId = null,
+        public readonly ?string $closureEventProtocol = null,
+        public readonly ?string $closureEventReceivedAt = null,
     ) {}
 
     public function isAuthorized(): bool
@@ -92,28 +100,132 @@ class SefazResponse
 
         $infProt = self::firstByLocalName($payload, 'infProt');
         $eventInfo = self::firstByLocalName($payload, 'infEvento');
+        $isCteConsultation = $payload->localName === 'retConsSitCTe';
         $isMdfeConsultation = $payload->localName === 'retConsSitMDFe';
-        $statusInfo = $isMdfeConsultation ? null : ($infProt ?? $eventInfo);
+        $isConsultation = $isCteConsultation || $isMdfeConsultation;
+        $statusInfo = $isConsultation ? null : ($infProt ?? $eventInfo);
+        $cteCancellation = self::findCancellationEvent($payload, 'procEventoCTe');
+        $mdfeCancellation = self::findCancellationEvent($payload, 'procEventoMDFe');
+        $cancellationEvent = $cteCancellation ?? $mdfeCancellation;
+        $mdfeClosure = self::findEventOfType($payload, 'procEventoMDFe', '110112');
+        $cancellationReason = self::childText($statusInfo ?? $payload, 'xMotivo');
+        $cancellationDetails = self::cancellationDetailsFromReason($cancellationReason);
+        $closureDetails = self::closureDetailsFromReason($cancellationReason);
+        $cancellationInfo = $cancellationEvent !== null
+            ? self::firstByLocalName($cancellationEvent, 'retEventoCTe')
+                ?? self::firstByLocalName($cancellationEvent, 'retEventoMDFe')
+            : null;
+        $cancellationInfo = $cancellationInfo !== null
+            ? (self::firstByLocalName($cancellationInfo, 'infEvento') ?? $cancellationInfo)
+            : null;
+        $closureInfo = $mdfeClosure !== null
+            ? self::firstByLocalName($mdfeClosure, 'retEventoMDFe')
+            : null;
+        $closureInfo = $closureInfo !== null
+            ? (self::firstByLocalName($closureInfo, 'infEvento') ?? $closureInfo)
+            : null;
+        $cancellationEventId = $cancellationEvent !== null
+            ? self::firstByLocalName($cancellationEvent, 'infEvento')?->getAttribute('Id')
+            : null;
 
         return new self(
-            cStat: $statusInfo !== null ? self::childText($statusInfo, 'cStat') : self::childText($payload, 'cStat'),
-            xMotivo: $statusInfo !== null ? self::childText($statusInfo, 'xMotivo') : self::childText($payload, 'xMotivo'),
+            cStat: $statusInfo !== null && ! $isConsultation
+                ? self::childText($statusInfo, 'cStat')
+                : self::childText($payload, 'cStat'),
+            xMotivo: $statusInfo !== null && ! $isConsultation
+                ? self::childText($statusInfo, 'xMotivo')
+                : self::childText($payload, 'xMotivo'),
             protocol: $infProt !== null
                 ? self::childText($infProt, 'nProt')
                 : ($statusInfo !== null ? self::childText($statusInfo, 'nProt') : null),
             digestValue: $infProt !== null ? self::childText($infProt, 'digVal') : null,
             accessKey: $statusInfo !== null
                 ? (self::childText($statusInfo, 'chCTe') ?? self::childText($statusInfo, 'chMDFe'))
-                : null,
+                : ($infProt !== null
+                    ? (self::childText($infProt, 'chCTe') ?? self::childText($infProt, 'chMDFe'))
+                    : null),
             receivedAt: $statusInfo !== null
                 ? (self::childText($statusInfo, 'dhRecbto') ?? self::childText($statusInfo, 'dhRegEvento'))
-                : self::childText($payload, 'dhRecbto'),
+                : ($infProt !== null ? self::childText($infProt, 'dhRecbto') : self::childText($payload, 'dhRecbto')),
             httpStatus: $httpStatus,
             // Evidência fiscal persistida: o documento ret* extraído (com
             // declaração XML), não o envelope SOAP que o carregou.
             rawXml: self::payloadXml($payload),
-            hasMdfeClosureEvent: $isMdfeConsultation ? self::firstByLocalName($payload, 'procEventoMDFe') !== null : null,
+            hasMdfeClosureEvent: $isMdfeConsultation ? $mdfeClosure !== null : null,
+            hasCteCancellationEvent: $isCteConsultation ? $cteCancellation !== null : null,
+            hasMdfeCancellationEvent: $isMdfeConsultation ? $mdfeCancellation !== null : null,
+            cancellationEventProtocol: $cancellationInfo !== null
+                ? self::childText($cancellationInfo, 'nProt')
+                : $cancellationDetails['protocol'],
+            cancellationEventReceivedAt: $cancellationInfo !== null
+                ? (self::childText($cancellationInfo, 'dhRegEvento') ?? self::childText($cancellationInfo, 'dhRecbto'))
+                : $cancellationDetails['received_at'],
+            cancellationEventXml: $cancellationEvent !== null ? self::payloadXml($cancellationEvent) : null,
+            cancellationEventId: $cancellationEventId !== '' ? $cancellationEventId : null,
+            closureEventProtocol: $closureInfo !== null
+                ? self::childText($closureInfo, 'nProt')
+                : $closureDetails['protocol'],
+            closureEventReceivedAt: $closureInfo !== null
+                ? (self::childText($closureInfo, 'dhRegEvento') ?? self::childText($closureInfo, 'dhEnc'))
+                : $closureDetails['received_at'],
         );
+    }
+
+    protected static function findCancellationEvent(DOMElement $payload, string $eventName): ?DOMElement
+    {
+        return self::findEventOfType($payload, $eventName, '110111');
+    }
+
+    protected static function findEventOfType(DOMElement $payload, string $eventName, string $eventType): ?DOMElement
+    {
+        foreach ($payload->getElementsByTagName('*') as $element) {
+            if ($element->localName !== $eventName) {
+                continue;
+            }
+
+            if (trim((string) self::firstByLocalName($element, 'tpEvento')?->textContent) === $eventType) {
+                return $element;
+            }
+        }
+
+        return null;
+    }
+
+    protected static function hasEventType(DOMElement $payload, string $eventName, string $eventType): bool
+    {
+        return self::findEventOfType($payload, $eventName, $eventType) !== null;
+    }
+
+    /** @return array{protocol: ?string, received_at: ?string} */
+    protected static function cancellationDetailsFromReason(?string $reason): array
+    {
+        if ($reason === null) {
+            return ['protocol' => null, 'received_at' => null];
+        }
+
+        preg_match('/\[nProt:([^\]]+)\]/', $reason, $protocolMatches);
+        preg_match('/\[dhCanc:([^\]]+)\]/', $reason, $dateMatches);
+
+        return [
+            'protocol' => isset($protocolMatches[1]) ? trim($protocolMatches[1]) : null,
+            'received_at' => isset($dateMatches[1]) ? trim($dateMatches[1]) : null,
+        ];
+    }
+
+    /** @return array{protocol: ?string, received_at: ?string} */
+    protected static function closureDetailsFromReason(?string $reason): array
+    {
+        if ($reason === null) {
+            return ['protocol' => null, 'received_at' => null];
+        }
+
+        preg_match('/\[nProt:([^\]]+)\]/', $reason, $protocolMatches);
+        preg_match('/\[dhEnc:([^\]]+)\]/', $reason, $dateMatches);
+
+        return [
+            'protocol' => isset($protocolMatches[1]) ? trim($protocolMatches[1]) : null,
+            'received_at' => isset($dateMatches[1]) ? trim($dateMatches[1]) : null,
+        ];
     }
 
     /**

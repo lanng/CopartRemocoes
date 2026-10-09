@@ -3,6 +3,7 @@
 namespace App\Filament\Resources\CteEmissionResource\Pages;
 
 use App\Filament\Resources\CteEmissionResource;
+use Filament\Actions\CreateAction;
 use Filament\Resources\Pages\ListRecords;
 
 class ListCteEmissions extends ListRecords
@@ -11,6 +12,8 @@ class ListCteEmissions extends ListRecords
 
     protected function getHeaderActions(): array
     {
-        return [];
+        return [
+            CreateAction::make()->label('Novo CT-e de álcool'),
+        ];
     }
 }

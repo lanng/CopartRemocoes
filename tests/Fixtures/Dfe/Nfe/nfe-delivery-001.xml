@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<nfeProc versao="4.00" xmlns="http://www.portalfiscal.inf.br/nfe">
+  <NFe>
+    <infNFe Id="NFe35261011111111111111550010000000011000000011" versao="4.00">
+      <ide><cUF>35</cUF><cNF>1</cNF><natOp>VENDA DE ETANOL - DADOS SINTETICOS</natOp><mod>55</mod><serie>1</serie><nNF>1</nNF><dhEmi>2026-10-06T10:00:00-03:00</dhEmi><tpNF>1</tpNF><idDest>1</idDest><cMunFG>3506003</cMunFG><tpImp>1</tpImp><tpEmis>1</tpEmis><cDV>1</cDV><tpAmb>2</tpAmb><finNFe>1</finNFe><indFinal>0</indFinal><indPres>9</indPres><procEmi>0</procEmi><verProc>Fixture sintetica</verProc></ide>
+      <emit><CNPJ>11111111111111</CNPJ><xNome>Remetente Ficticio Ltda</xNome><enderEmit><xLgr>Rua da Usina</xLgr><nro>100</nro><xCpl></xCpl><xBairro>Industrial</xBairro><cMun>3506003</cMun><xMun>Campinas</xMun><UF>SP</UF><CEP>13000000</CEP><cPais>1058</cPais><xPais>BRASIL</xPais></enderEmit><IE>111111111111</IE><CRT>3</CRT></emit>
+      <dest><CNPJ>22222222222222</CNPJ><xNome>Destinatario Fiscal Ficticio Ltda</xNome><enderDest><xLgr>Rua Fiscal</xLgr><nro>200</nro><xCpl></xCpl><xBairro>Centro</xBairro><cMun>3506003</cMun><xMun>Campinas</xMun><UF>SP</UF><CEP>13000000</CEP><cPais>1058</cPais><xPais>BRASIL</xPais></enderDest><indIEDest>1</indIEDest><IE>222222222222</IE></dest>
+      <entrega><CNPJ>33333333333333</CNPJ><xNome>Recebedor Fisico Ficticio Ltda</xNome><IE>ISENTO</IE><xLgr>Rua da Entrega</xLgr><nro>300</nro><xCpl></xCpl><xBairro>Industrial</xBairro><cMun>3506003</cMun><xMun>Campinas</xMun><UF>SP</UF><CEP>13000000</CEP><cPais>1058</cPais><xPais>BRASIL</xPais></entrega>
+      <det nItem="1"><prod><cProd>ETANOL-TESTE</cProd><cEAN>SEM GTIN</cEAN><xProd>ETANOL HIDRATADO COMBUSTIVEL - TESTE</xProd><NCM>22071090</NCM><CFOP>5652</CFOP><uCom>L</uCom><qCom>100.0000</qCom><vUnCom>10.0000000000</vUnCom><vProd>1000.00</vProd><cEANTrib>SEM GTIN</cEANTrib><uTrib>L</uTrib><qTrib>100.0000</qTrib><vUnTrib>10.0000000000</vUnTrib><indTot>1</indTot><comb><cProdANP>810101001</cProdANP><descANP>ETANOL HIDRATADO FICTICIO</descANP><UFCons>SP</UFCons></comb></prod><infAdProd>Texto livre menciona 999999 litros e outro destino; deve ser ignorado.</infAdProd></det>
+      <total><ICMSTot><vBC>0.00</vBC><vICMS>0.00</vICMS><vICMSDeson>0.00</vICMSDeson><vFCP>0.00</vFCP><vBCST>0.00</vBCST><vST>0.00</vST><vFCPST>0.00</vFCPST><vFCPSTRet>0.00</vFCPSTRet><vProd>1000.00</vProd><vFrete>0.00</vFrete><vSeg>0.00</vSeg><vDesc>0.00</vDesc><vII>0.00</vII><vIPI>0.00</vIPI><vIPIDevol>0.00</vIPIDevol><vPIS>0.00</vPIS><vCOFINS>0.00</vCOFINS><vOutro>0.00</vOutro><vNF>1000.00</vNF></ICMSTot></total>
+      <transp><modFrete>9</modFrete><vol><qVol>1</qVol><esp>LITRO</esp><pesoL>80.000</pesoL><pesoB>80.000</pesoB></vol></transp>
+      <pag><detPag><indPag>0</indPag><tPag>18</tPag><vPag>1000.00</vPag></detPag></pag>
+      <infAdic><infCpl>Observacao sintetica menciona destino diverso e total de viagem de 888888 litros; deve ser ignorada.</infCpl></infAdic>
+    </infNFe>
+  </NFe>
+  <protNFe versao="4.00"><infProt><tpAmb>2</tpAmb><verAplic>fixture</verAplic><chNFe>35261011111111111111550010000000011000000011</chNFe><dhRecbto>2026-10-06T10:01:00-03:00</dhRecbto><nProt>135260000000001</nProt><digVal>AA==</digVal><cStat>100</cStat><xMotivo>Autorizado para uso da NF-e</xMotivo></infProt></protNFe>
+</nfeProc>

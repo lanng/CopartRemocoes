@@ -67,6 +67,47 @@ class GenerateDactePdfTest extends TestCase
         Storage::disk('dfe')->assertExists($third);
     }
 
+    public function test_prints_all_nfe_references_and_the_physical_receiver_without_changing_page_geometry(): void
+    {
+        $proc = (string) file_get_contents(__DIR__.'/../../../Fixtures/Dfe/cte-2963.xml');
+        $firstReference = '<infNFe><chave>35260945483450002164550010004300881365784943</chave><dPrev>2026-09-30</dPrev></infNFe>';
+        $accessKeys = [];
+        $references = '';
+
+        for ($position = 1; $position <= 10; $position++) {
+            $accessKey = str_pad((string) $position, 44, '1', STR_PAD_LEFT);
+            $accessKeys[] = $accessKey;
+            $references .= '<infNFe><chave>'.$accessKey.'</chave><dPrev>2026-10-01</dPrev></infNFe>';
+        }
+
+        $receiver = '<receb><CPF>12345678901</CPF><xNome>Recebedor físico da carga</xNome>'
+            .'<enderReceb><xLgr>Rua da Entrega</xLgr><nro>300</nro><xCpl>Portão 2</xCpl><xBairro>Industrial</xBairro>'
+            .'<cMun>3506003</cMun><xMun>Campinas</xMun><CEP>13000000</CEP><UF>SP</UF></enderReceb></receb>';
+        $proc = str_replace($firstReference, $references, $proc);
+        $proc = str_replace('</rem><dest>', '</rem>'.$receiver.'<dest>', $proc);
+        $data = DacteData::fromProc($proc);
+        $html = view('dfe.dacte', ['dacte' => $data, 'qrImage' => null])->render();
+
+        foreach ($accessKeys as $accessKey) {
+            $this->assertStringContainsString(implode(' ', str_split($accessKey, 4)), $html);
+        }
+
+        $this->assertStringContainsString('RECEBEDOR', $html);
+        $this->assertStringContainsString('Recebedor físico da carga', $html);
+        $this->assertStringContainsString('123.456.789-01', $html);
+        $this->assertStringContainsString('01/10/2026', $html);
+
+        $pdf = new Dompdf;
+        $pdf->loadHtml($html);
+        $pdf->setPaper('a4');
+        $pdf->render();
+
+        $this->assertSame(1, $pdf->getCanvas()->get_page_count());
+
+        $path = app(GenerateDactePdf::class)->generateForProc(str_repeat('4', 44), $proc);
+        $this->assertStringStartsWith('%PDF', (string) Storage::disk('dfe')->get($path));
+    }
+
     #[DataProvider('gabaritoProvider')]
     public function test_printed_frames_match_the_reference_without_moving_for_homologation(string $fixture): void
     {

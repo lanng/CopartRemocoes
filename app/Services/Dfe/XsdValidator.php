@@ -22,6 +22,21 @@ class XsdValidator
         $this->validate($xml, 'procCTe_v4.00.xsd', (string) config('dfe.xsd_path'));
     }
 
+    public function validateCteEvent(string $xml): void
+    {
+        $this->validate($xml, 'eventoCTe_v4.00.xsd', (string) config('dfe.xsd_path'));
+    }
+
+    public function validateCteCancellationDetail(string $xml): void
+    {
+        $this->validate($xml, 'evCancCTe_v4.00.xsd', (string) config('dfe.xsd_path'));
+    }
+
+    public function validateProcCteEvent(string $xml): void
+    {
+        $this->validate($xml, 'procEventoCTe_v4.00.xsd', (string) config('dfe.xsd_path'));
+    }
+
     public function validateMdfe(string $xml): void
     {
         $xsdPath = (string) config('dfe.mdfe.xsd_path');
@@ -43,6 +58,11 @@ class XsdValidator
     public function validateMdfeClosureDetail(string $xml): void
     {
         $this->validate($xml, 'evEncMDFe_v3.00.xsd', (string) config('dfe.mdfe.xsd_path'));
+    }
+
+    public function validateMdfeCancellationDetail(string $xml): void
+    {
+        $this->validate($xml, 'evCancMDFe_v3.00.xsd', (string) config('dfe.mdfe.xsd_path'));
     }
 
     public function validateProcMdfeEvent(string $xml): void

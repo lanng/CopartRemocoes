@@ -3,6 +3,7 @@
 namespace App\Services\Dfe;
 
 use Illuminate\Support\Facades\Storage;
+use RuntimeException;
 
 /**
  * Arquivo fiscal de guarda dos DF-e (spec dfe §5.1): prefixo dfe/ no S3,
@@ -21,7 +22,9 @@ class DfeDocumentStore
      */
     public function store(string $path, string $contents): array
     {
-        Storage::disk(self::DISK)->put($path, $contents);
+        if (! Storage::disk(self::DISK)->put($path, $contents)) {
+            throw new RuntimeException("Falha ao armazenar o arquivo fiscal {$path}.");
+        }
 
         return [
             'path' => $path,
@@ -36,6 +39,18 @@ class DfeDocumentStore
     public function storeCteProc(string $accessKey, string $cteProcXml): array
     {
         return $this->store("cte/{$accessKey}/cte-proc.xml", $cteProcXml);
+    }
+
+    /**
+     * Guarda a NF-e original por chave e hash para preservar cópias diferentes sem sobrescrever arquivos anteriores.
+     *
+     * @return array{path: string, sha256: string}
+     */
+    public function storeNfeOriginal(string $accessKey, string $nfeXml): array
+    {
+        $sha256 = hash('sha256', $nfeXml);
+
+        return $this->store("nfe/{$accessKey}/{$sha256}.xml", $nfeXml);
     }
 
     /**
@@ -56,6 +71,16 @@ class DfeDocumentStore
     public function storeMdfeEventProc(string $accessKey, string $eventId, string $procEventoXml): array
     {
         return $this->store("mdfe/{$accessKey}/eventos/{$eventId}-proc.xml", $procEventoXml);
+    }
+
+    /**
+     * procEventoCTe processado, guardado individualmente pelo Id do evento.
+     *
+     * @return array{path: string, sha256: string}
+     */
+    public function storeCteEventProc(string $accessKey, string $eventId, string $procEventoXml): array
+    {
+        return $this->store("cte/{$accessKey}/eventos/{$eventId}-proc.xml", $procEventoXml);
     }
 
     /**

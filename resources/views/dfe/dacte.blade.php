@@ -35,10 +35,20 @@
     $cnpj = fn (string $value): string => strlen($value) === 14
         ? substr($value, 0, 2).'.'.substr($value, 2, 3).'.'.substr($value, 5, 3).'/'.substr($value, 8, 4).'-'.substr($value, 12)
         : $value;
+    $cpf = fn (string $value): string => strlen($value) === 11
+        ? substr($value, 0, 3).'.'.substr($value, 3, 3).'.'.substr($value, 6, 3).'-'.substr($value, 9)
+        : $value;
+    $taxId = fn (array $party): string => filled($party['CNPJ'] ?? null)
+        ? $cnpj((string) $party['CNPJ'])
+        : $cpf((string) ($party['CPF'] ?? ''));
     $cep = fn (string $value): string => strlen($value) === 8 ? substr($value, 0, 5).'-'.substr($value, 5) : $value;
     $number = implode('.', str_split(str_pad($dacte->cteNumber, 9, '0', STR_PAD_LEFT), 3));
     $unit = match ($dacte->cargo['cUnid'] ?? null) { '01' => 'KG', '04' => 'LT', default => 'UN' };
-    $document = $dacte->document;
+    $documents = $dacte->documents !== [] ? $dacte->documents : ($dacte->document !== null ? [$dacte->document] : []);
+    $documentColumns = $documents !== [] ? array_chunk($documents, (int) ceil(count($documents) / 2)) : [[], []];
+    $documentColumns = array_pad($documentColumns, 2, []);
+    $deliveryDates = collect($documents)->where('kind', 'nfe')->pluck('dPrev')->filter()->unique()->values();
+    $deliveryDate = $deliveryDates->count() === 1 ? $deliveryDates->first() : null;
 @endphp
 
 <div id="receipt" class="section" style="top: 22.5pt; height: 51.5pt">
@@ -126,18 +136,18 @@
 <div id="parties" class="section" style="top: 261.75pt; height: 86pt">
     <div class="divider" style="left: 276.75pt; top: 0; height: 86pt"></div>
     <div class="rule" style="left: 0; top: 43pt; width: 562pt"></div>
-    @foreach ([['REMETENTE', $dacte->rem, 0, 0], ['DESTINATÁRIO', $dacte->dest, 277, 0], ['EXPEDIDOR', [], 0, 43.5], ['RECEBEDOR', [], 277, 43.5]] as [$label, $party, $left, $top])
+    @foreach ([['REMETENTE', $dacte->rem, 0, 0], ['DESTINATÁRIO', $dacte->dest, 277, 0], ['EXPEDIDOR', [], 0, 43.5], ['RECEBEDOR', $dacte->receb, 277, 43.5]] as [$label, $party, $left, $top])
         <div class="party {{ $left > 0 ? 'destination' : '' }}" style="left: {{ $left }}pt; top: {{ $top }}pt">
             <div class="field label" style="left: 3pt; top: 2pt">{{ $label }}</div>
             <div class="field party-name {{ strlen($party['xNome'] ?? '') > 55 ? 'long' : '' }}">{{ $party['xNome'] ?? '' }}</div>
             <div class="field label" style="left: 3pt; top: 9pt">ENDEREÇO</div>
-            <div class="field party-address">{{ isset($party['xLgr']) ? $party['xLgr'].', '.$party['nro'] : '' }}<br>{{ isset($party['xBairro']) ? $party['xBairro'] : '' }}</div>
+            <div class="field party-address">{{ isset($party['xLgr']) ? $party['xLgr'].', '.$party['nro'].(filled($party['xCpl'] ?? null) ? ' - '.$party['xCpl'] : '') : '' }}<br>{{ isset($party['xBairro']) ? $party['xBairro'] : '' }}</div>
             <div class="field label" style="left: 3pt; top: 20pt">MUNICÍPIO</div>
             <div class="field party-value identity" style="left: 36pt; top: 20pt">{{ isset($party['xMun']) ? $party['xMun'].' - '.$party['UF'] : '' }}</div>
             <div class="field label" style="left: 213pt; top: 20pt">CEP</div>
             <div class="field party-value" style="left: 226pt; top: 20pt">{{ $cep($party['CEP'] ?? '') }}</div>
             <div class="field label" style="left: 3pt; top: 27pt">CNPJ/CPF</div>
-            <div class="field party-value identity" style="left: 36pt; top: 27pt">{{ $cnpj($party['CNPJ'] ?? '') }}</div>
+            <div class="field party-value identity" style="left: 36pt; top: 27pt">{{ $taxId($party) }}</div>
             <div class="field label" style="left: 130pt; top: 27pt">INSCRIÇÃO ESTADUAL</div>
             <div class="field party-value" style="left: 192pt; top: 27pt">{{ $party['IE'] ?? '' }}</div>
             <div class="field label" style="left: 3pt; top: 34pt">PAÍS</div>
@@ -159,7 +169,7 @@
     <div class="field label" style="left: 375pt; top: 9pt">PAÍS</div>
     <div class="field" style="left: 390pt; top: 9pt">Brasil</div>
     <div class="field label" style="left: 3pt; top: 16pt">CNPJ/CPF</div>
-    <div class="field" style="left: 30pt; top: 16pt">{{ $cnpj($dacte->dest['CNPJ']) }}</div>
+    <div class="field" style="left: 30pt; top: 16pt">{{ $taxId($dacte->dest) }}</div>
     <div class="field label" style="left: 125pt; top: 16pt">INSCRIÇÃO ESTADUAL</div>
     <div class="field" style="left: 191pt; top: 16pt">{{ $dacte->dest['IE'] }}</div>
     <div class="field label" style="left: 280pt; top: 16pt">FONE</div>
@@ -218,17 +228,21 @@
     <div class="title">DOCUMENTOS ORIGINÁRIOS</div>
     <div class="rule" style="left: 0; top: 10.5pt; width: 562pt"></div>
     <div class="divider" style="left: 276.75pt; top: 11pt; height: 50pt"></div>
-    @foreach ([0, 277] as $left)
+    @foreach ($documentColumns as $column => $columnDocuments)
+        @php($left = $column * 277)
         <div class="field label" style="left: {{ $left + 3 }}pt; top: 13pt">TP DOC.</div>
         <div class="field label" style="left: {{ $left + 66 }}pt; top: 13pt">CHAVE DO DF-e</div>
+        @foreach ($columnDocuments as $row => $originDocument)
+            @php($top = 21 + ($row * 7.5))
+            @if ($originDocument['kind'] === 'nfe')
+                <div class="field small" style="left: {{ $left + 3 }}pt; top: {{ $top }}pt">NF-E {{ substr((string) $originDocument['chave'], 25, 9) }}</div>
+                <div class="field small" style="left: {{ $left + 66 }}pt; top: {{ $top }}pt; width: 204pt">{{ implode(' ', str_split((string) $originDocument['chave'], 4)) }}</div>
+            @elseif ($originDocument['kind'] === 'outros')
+                <div class="field small" style="left: {{ $left + 3 }}pt; top: {{ $top }}pt; width: 75pt">{{ $originDocument['tpDoc'] }} {{ $originDocument['nDoc'] }}</div>
+                <div class="field small" style="left: {{ $left + 66 }}pt; top: {{ $top }}pt; width: 204pt">{{ $originDocument['descOutros'] }} - Emissão: {{ $originDocument['dEmi'] }}</div>
+            @endif
+        @endforeach
     @endforeach
-    @if (($document['kind'] ?? null) === 'nfe')
-        <div class="field" style="left: 3pt; top: 21pt">NF-E {{ substr($document['chave'], 25, 9) }}</div>
-        <div class="field" style="left: 85pt; top: 21pt; font-size: 6.5pt">{{ implode(' ', str_split($document['chave'], 4)) }}</div>
-    @elseif (($document['kind'] ?? null) === 'outros')
-        <div class="field" style="left: 3pt; top: 21pt; width: 75pt">{{ $document['tpDoc'] }} {{ $document['nDoc'] }}</div>
-        <div class="field" style="left: 85pt; top: 21pt; width: 187pt">{{ $document['descOutros'] }}<br>Emissão: {{ $document['dEmi'] }}</div>
-    @endif
 </div>
 
 <div id="observations" class="section" style="top: 564.75pt; height: 32pt">
@@ -242,6 +256,7 @@
     <div class="field" style="left: 4pt; top: 20pt">{{ $dacte->rntrc }}</div>
     <div class="field label" style="left: 147pt; top: 13pt">DATA PREVISTA DE ENTREGA</div>
     <div class="divider" style="left: 224pt; top: 11pt; height: 21pt"></div>
+    <div class="field center" style="left: 150pt; top: 20pt; width: 70pt">{{ filled($deliveryDate) ? \Carbon\Carbon::parse($deliveryDate)->format('d/m/Y') : '' }}</div>
     <div class="field small center" style="left: 227pt; top: 20pt; width: 332pt">ESTE CONHECIMENTO DE TRANSPORTE ATENDE À LEGISLAÇÃO DE TRANSPORTE RODOVIÁRIO EM VIGOR</div>
 </div>
 <div id="closing" class="section" style="top: 630.75pt; height: 50pt">

@@ -61,6 +61,30 @@ class DacteDataTest extends TestCase
         $this->assertSame([], $dacte->components);
     }
 
+    public function test_parses_multiple_nfe_references_and_the_physical_receiver(): void
+    {
+        $proc = (string) file_get_contents(__DIR__.'/../../../Fixtures/Dfe/cte-2963.xml');
+        $firstReference = '<infNFe><chave>35260945483450002164550010004300881365784943</chave><dPrev>2026-09-30</dPrev></infNFe>';
+        $references = '<infNFe><chave>35260945483450002164550010004300881365784943</chave><dPrev>2026-10-01</dPrev></infNFe>'
+            .'<infNFe><chave>35261011111111111111550010000000021000000027</chave><dPrev>2026-10-01</dPrev></infNFe>';
+        $receiver = '<receb><CPF>12345678901</CPF><xNome>Recebedor físico da carga</xNome>'
+            .'<enderReceb><xLgr>Rua da Entrega</xLgr><nro>300</nro><xCpl>Portão 2</xCpl><xBairro>Industrial</xBairro>'
+            .'<cMun>3506003</cMun><xMun>Campinas</xMun><CEP>13000000</CEP><UF>SP</UF></enderReceb></receb>';
+        $proc = str_replace($firstReference, $references, $proc);
+        $proc = str_replace('</rem><dest>', '</rem>'.$receiver.'<dest>', $proc);
+
+        $dacte = DacteData::fromProc($proc);
+
+        $this->assertCount(2, $dacte->documents);
+        $this->assertSame($dacte->documents[0], $dacte->document);
+        $this->assertSame('35260945483450002164550010004300881365784943', $dacte->documents[0]['chave']);
+        $this->assertSame('35261011111111111111550010000000021000000027', $dacte->documents[1]['chave']);
+        $this->assertSame('12345678901', $dacte->receb['CPF']);
+        $this->assertSame('Recebedor físico da carga', $dacte->receb['xNome']);
+        $this->assertSame('Rua da Entrega', $dacte->receb['xLgr']);
+        $this->assertSame('Portão 2', $dacte->receb['xCpl']);
+    }
+
     public function test_flags_the_homologacao_ambiente(): void
     {
         $dacte = DacteData::fromProc((string) file_get_contents(__DIR__.'/../../../Fixtures/Dfe/cte-homolog-autorizado.xml'));

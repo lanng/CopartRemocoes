@@ -4,8 +4,10 @@ namespace App\Services\Cte;
 
 use App\Models\City;
 use App\Models\Company;
+use App\Models\CompanyFiscalAlias;
 use App\Models\CteDocument;
 use DomainException;
+use Illuminate\Database\Eloquent\Collection;
 
 /**
  * Enriquece o snapshot v1 do documento (dados da remocao) com os blocos
@@ -20,16 +22,26 @@ use DomainException;
  * Partes: rem = seguradora do registro, dest = empresa no IBGE do destino —
  * sempre no cadastro companies; dado faltante é erro explícito, nunca chute.
  *
- * A linha tanque (tank_alcohol) ainda não nasce de registros; snapshots já
- * completos (v2, ex.: smoke) passam intocados.
+ * A linha tanque (tank_alcohol) usa snapshots v2 antigos ou v3 com NF-es
+ * arquivadas; ambos são preservados como foram preparados.
  */
 class ResolveCteSnapshot
 {
+    private ?Collection $companies = null;
+
+    private ?Collection $aliases = null;
+
+    private array $resolvedCities = [];
+
+    public function __construct(private AssertCteNfeOriginalsArchived $assertNfeOriginalsArchived) {}
+
     public function handle(CteDocument $document): array
     {
         $base = (array) $document->snapshot;
 
         if ((int) ($base['schema_version'] ?? 1) >= 2) {
+            $this->assertNfeOriginalsArchived->handle($document);
+
             return $base;
         }
 
@@ -40,7 +52,8 @@ class ResolveCteSnapshot
         }
 
         $origin = $this->resolveCity((string) $base['origin_city'], 'origem');
-        $destination = $this->resolveCity((string) $base['destination_city'], 'destino');
+        $sender = $this->resolveSender((string) $base['insurance']);
+        $destination = $this->resolveDestination((string) $base['destination_city']);
 
         return [
             'schema_version' => 2,
@@ -52,18 +65,58 @@ class ResolveCteSnapshot
             'vehicle_plate' => (string) $base['vehicle_plate'],
             'payment_code' => (string) $base['payment_code'],
             'origin' => $origin,
-            'destination' => $destination,
-            'rem' => $this->companyBlock($this->resolveCompanyByName((string) $base['insurance'], 'seguradora (rem)')),
-            'dest' => $this->companyBlock($this->resolveCompanyByIbge($destination['ibge'], 'pátio/destinatário (dest)')),
+            'destination' => $destination['city'],
+            'rem' => $sender['party'],
+            'dest' => $destination['party'],
+            'rem_company_id' => $sender['company_id'],
+            'dest_company_id' => $destination['company_id'],
+        ];
+    }
+
+    /** @return array{company_id: int, party: array<string, string|null>} */
+    public function resolveSender(string $name): array
+    {
+        $company = $this->resolveCompanyByName($name, 'seguradora (rem)');
+
+        return ['company_id' => $company->id, 'party' => $this->companyBlock($company)];
+    }
+
+    /** @return array{company_id: int, city_id: int, party: array<string, string|null>, city: array{ibge: string, name: string, uf: string}} */
+    public function resolveDestination(string $name): array
+    {
+        $alias = $this->findAlias('destination', $name);
+
+        if ($alias !== null) {
+            if ($alias->city === null) {
+                throw new DomainException("O destino \"{$name}\" está sem município confirmado.");
+            }
+
+            $company = $this->activeAliasCompany($alias);
+            $city = $this->cityBlock($alias->city);
+        } else {
+            $city = $this->resolveCity($name, 'destino');
+            $company = $this->resolveCompanyByIbge($city['ibge'], 'pátio/destinatário (dest)');
+        }
+
+        return [
+            'company_id' => $company->id,
+            'city_id' => $alias?->city_id ?? City::query()->where('ibge_code', $city['ibge'])->value('id'),
+            'party' => $this->companyBlock($company),
+            'city' => $city,
         ];
     }
 
     /**
      * @return array{ibge: string, name: string, uf: string}
      */
-    protected function resolveCity(string $rawName, string $role): array
+    public function resolveCity(string $rawName, string $role): array
     {
         $rawName = trim($rawName);
+        $cacheKey = $role.'|'.$this->normalize($rawName);
+
+        if (isset($this->resolvedCities[$cacheKey])) {
+            return $this->resolvedCities[$cacheKey];
+        }
 
         if ($rawName === '') {
             throw new DomainException("Cidade de {$role} vazia no snapshot.");
@@ -75,7 +128,7 @@ class ResolveCteSnapshot
         // não casam com like de prefixo maior em maiúsculas sem acento; a
         // comparação exata é feita normalizada em PHP abaixo.
         $candidates = City::query()
-            ->where('name', 'like', mb_substr($canonical, 0, 1).'%')
+            ->whereLike('name', mb_substr($canonical, 0, 1).'%')
             ->get()
             ->filter(fn (City $city): bool => $this->normalize($city->name) === $this->normalize($canonical));
 
@@ -87,12 +140,12 @@ class ResolveCteSnapshot
             $match = $candidates->first(fn (City $city): bool => $city->state === $preferred);
 
             if ($match !== null) {
-                return $this->cityBlock($match);
+                return $this->resolvedCities[$cacheKey] = $this->cityBlock($match);
             }
         }
 
         if ($candidates->count() === 1) {
-            return $this->cityBlock($candidates->first());
+            return $this->resolvedCities[$cacheKey] = $this->cityBlock($candidates->first());
         }
 
         $states = $candidates->pluck('state')->unique()->implode(', ');
@@ -102,15 +155,25 @@ class ResolveCteSnapshot
 
     protected function resolveCompanyByName(string $name, string $role): Company
     {
+        $alias = $this->findAlias('sender', $name);
+
+        if ($alias !== null) {
+            return $this->activeAliasCompany($alias);
+        }
+
         $normalized = $this->normalize($name);
 
-        $company = Company::query()
-            ->where('is_active', true)
-            ->get()
-            ->first(fn (Company $company): bool => $this->normalize($company->name) === $normalized);
+        $matches = $this->activeCompanies()
+            ->filter(fn (Company $company): bool => $this->normalize($company->name) === $normalized);
+
+        if ($matches->count() > 1) {
+            throw new DomainException("Há mais de uma empresa para \"{$name}\"; confirme o CNPJ do remetente.");
+        }
+
+        $company = $matches->first();
 
         if ($company === null) {
-            throw new DomainException("Empresa {$role} \"{$name}\" não encontrada no cadastro companies (com IE e endereço completos).");
+            throw new DomainException("Empresa {$role} \"{$name}\" não encontrada no cadastro companies (com dados fiscais e endereço completos).");
         }
 
         return $company;
@@ -118,11 +181,13 @@ class ResolveCteSnapshot
 
     protected function resolveCompanyByIbge(string $ibge, string $role): Company
     {
-        $company = Company::query()
-            ->where('is_active', true)
-            ->where('ibge_code', $ibge)
-            ->orderBy('id')
-            ->first();
+        $matches = $this->activeCompanies()->where('ibge_code', $ibge);
+
+        if ($matches->count() > 1) {
+            throw new DomainException("Há mais de uma empresa no município {$ibge}; confirme o CNPJ do destinatário.");
+        }
+
+        $company = $matches->first();
 
         if ($company === null) {
             throw new DomainException("Nenhuma empresa ativa do cadastro companies no IBGE {$ibge} para {$role}.");
@@ -134,21 +199,27 @@ class ResolveCteSnapshot
     /**
      * Bloco fiscal no formato do snapshot v2 (spec §2.5).
      *
-     * @return array<string, string>
+     * @return array<string, string|null>
      */
-    protected function companyBlock(Company $company): array
+    public function companyBlock(Company $company): array
     {
-        $incomplete = collect(['cnpj', 'ie', 'street', 'number', 'district', 'city', 'state', 'zipcode', 'ibge_code'])
+        $incomplete = collect(['cnpj', 'street', 'number', 'district', 'city', 'state', 'zipcode', 'ibge_code'])
             ->filter(fn (string $field): bool => blank($company->{$field}));
 
         if ($incomplete->isNotEmpty()) {
             throw new DomainException("A empresa \"{$company->name}\" (CNPJ {$company->cnpj}) está sem dados fiscais obrigatórios: {$incomplete->implode(', ')}.");
         }
 
+        $ie = Company::normalizeIe($company->ie);
+
+        if ($ie !== null && (in_array($ie, ['0', '1'], true) || ! preg_match('/^(?:[0-9]{1,14}|ISENTO)$/', $ie))) {
+            throw new DomainException("A empresa \"{$company->name}\" possui IE inválida. Informe a inscrição real, ISENTO ou deixe vazio para não contribuinte.");
+        }
+
         return [
             'cnpj' => (string) $company->cnpj,
-            'ie' => (string) $company->ie,
-            'xNome' => (string) $company->name,
+            'ie' => $ie,
+            'xNome' => trim((string) $company->name),
             'xLgr' => (string) $company->street,
             'nro' => (string) $company->number,
             'xBairro' => (string) $company->district,
@@ -176,21 +247,28 @@ class ResolveCteSnapshot
      */
     protected function normalize(string $value): string
     {
-        $transliterated = strtr(trim($value), [
-            'á' => 'a', 'à' => 'a', 'ã' => 'a', 'â' => 'a', 'ä' => 'a',
-            'é' => 'e', 'è' => 'e', 'ê' => 'e', 'ë' => 'e',
-            'í' => 'i', 'ì' => 'i', 'î' => 'i', 'ï' => 'i',
-            'ó' => 'o', 'ò' => 'o', 'õ' => 'o', 'ô' => 'o', 'ö' => 'o',
-            'ú' => 'u', 'ù' => 'u', 'û' => 'u', 'ü' => 'u',
-            'ç' => 'c', 'ñ' => 'n',
-            'Á' => 'A', 'À' => 'A', 'Ã' => 'A', 'Â' => 'A', 'Ä' => 'A',
-            'É' => 'E', 'È' => 'E', 'Ê' => 'E', 'Ë' => 'E',
-            'Í' => 'I', 'Ì' => 'I', 'Î' => 'I', 'Ï' => 'I',
-            'Ó' => 'O', 'Ò' => 'O', 'Õ' => 'O', 'Ô' => 'O', 'Ö' => 'O',
-            'Ú' => 'U', 'Ù' => 'U', 'Û' => 'U', 'Ü' => 'U',
-            'Ç' => 'C', 'Ñ' => 'N',
-        ]);
+        return CompanyFiscalAlias::normalize($value);
+    }
 
-        return mb_strtoupper(preg_replace('/\s+/', ' ', $transliterated) ?? $transliterated, 'UTF-8');
+    private function activeCompanies(): Collection
+    {
+        return $this->companies ??= Company::query()->where('is_active', true)->get();
+    }
+
+    private function findAlias(string $role, string $name): ?CompanyFiscalAlias
+    {
+        $this->aliases ??= CompanyFiscalAlias::query()->with(['company', 'city'])->get();
+
+        return $this->aliases->first(fn (CompanyFiscalAlias $alias): bool => $alias->role === $role
+            && $alias->normalized_name === CompanyFiscalAlias::normalize($name));
+    }
+
+    private function activeAliasCompany(CompanyFiscalAlias $alias): Company
+    {
+        if ($alias->company === null || ! $alias->company->is_active) {
+            throw new DomainException("A empresa associada a \"{$alias->source_name}\" está inativa ou não existe.");
+        }
+
+        return $alias->company;
     }
 }

@@ -41,6 +41,13 @@ class SefazSoapClient
         return $this->send('recepcao_sinc', base64_encode((string) gzencode($signedXml)));
     }
 
+    public function transmitEvent(string $signedEventXml, ?callable $onRawResponse = null): SefazResponse
+    {
+        $payloadXml = preg_replace('/^<\?xml[^?]*\?>\s*/', '', $signedEventXml, 1) ?? $signedEventXml;
+
+        return $this->send('evento', $payloadXml, $onRawResponse);
+    }
+
     /**
      * Consulta de situação (CTeConsultaV4): usada pelo guard de retransmissão
      * — antes de queimar um novo número, verifica se a chave da tentativa
@@ -57,7 +64,7 @@ class SefazSoapClient
         return $this->send('consulta', $payload);
     }
 
-    protected function send(string $serviceKey, string $payloadXml): SefazResponse
+    protected function send(string $serviceKey, string $payloadXml, ?callable $onRawResponse = null): SefazResponse
     {
         $service = (string) config("dfe.paths.{$serviceKey}");
         $serviceName = (string) preg_replace('/\.asmx$/', '', $service);
@@ -80,6 +87,10 @@ class SefazSoapClient
             ]);
 
             throw new SefazException('Falha de conexão com a SEFAZ: '.$exception->getMessage(), httpStatus: 0);
+        }
+
+        if ($onRawResponse !== null) {
+            $onRawResponse($response->status(), $response->header('Content-Type'), $response->body());
         }
 
         if ($response->serverError()) {

@@ -7,6 +7,7 @@ use App\Models\CteDocument;
 use App\Services\Cte\ResolveCteSnapshot;
 use DomainException;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use PHPUnit\Framework\Attributes\DataProvider;
 use Tests\Support\BuildsCteWorld;
 use Tests\TestCase;
 
@@ -94,6 +95,22 @@ class ResolveCteSnapshotTest extends TestCase
         $this->assertSame($v2, app(ResolveCteSnapshot::class)->handle($document));
     }
 
+    public function test_requires_archived_nfe_links_for_a_v3_alcohol_snapshot(): void
+    {
+        $document = CteDocument::factory()->create([
+            'snapshot' => [
+                'schema_version' => 3,
+                'line' => 'tank_alcohol',
+                'nfe_documents' => [['access_key' => str_repeat('1', 44)]],
+            ],
+        ]);
+
+        $this->expectException(DomainException::class);
+        $this->expectExceptionMessage('vínculos arquivados das NF-es');
+
+        app(ResolveCteSnapshot::class)->handle($document);
+    }
+
     public function test_fails_explicitly_when_the_insurer_is_not_registered(): void
     {
         $document = CteDocument::factory()->create([
@@ -133,9 +150,57 @@ class ResolveCteSnapshotTest extends TestCase
         ]);
 
         $this->expectException(DomainException::class);
-        $this->expectExceptionMessage('ie, street');
+        $this->expectExceptionMessage('street');
 
         app(ResolveCteSnapshot::class)->handle($document);
+    }
+
+    public function test_resolves_a_non_contributor_sender_without_ie(): void
+    {
+        Company::query()->where('cnpj', '33164021000100')->update(['ie' => null]);
+        $document = CteDocument::factory()->create([
+            'snapshot' => $this->v1Snapshot('Pirapora', 'Itaquaquecetuba'),
+        ]);
+
+        $snapshot = app(ResolveCteSnapshot::class)->handle($document);
+
+        $this->assertNull($snapshot['rem']['ie']);
+        $this->assertSame('379121178113', $snapshot['dest']['ie']);
+    }
+
+    public function test_resolves_an_exempt_sender(): void
+    {
+        Company::query()->where('cnpj', '33164021000100')->update(['ie' => 'ISENTO']);
+        $document = CteDocument::factory()->create([
+            'snapshot' => $this->v1Snapshot('Pirapora', 'Itaquaquecetuba'),
+        ]);
+
+        $snapshot = app(ResolveCteSnapshot::class)->handle($document);
+
+        $this->assertSame('ISENTO', $snapshot['rem']['ie']);
+    }
+
+    #[DataProvider('invalidInscriptionExamples')]
+    public function test_rejects_invalid_sender_ie_before_emission(string $ie): void
+    {
+        Company::query()->where('cnpj', '33164021000100')->update(['ie' => $ie]);
+        $document = CteDocument::factory()->create([
+            'snapshot' => $this->v1Snapshot('Pirapora', 'Itaquaquecetuba'),
+        ]);
+
+        $this->expectException(DomainException::class);
+        $this->expectExceptionMessage('IE inválida');
+
+        app(ResolveCteSnapshot::class)->handle($document);
+    }
+
+    public static function invalidInscriptionExamples(): array
+    {
+        return [
+            'legacy non contributor marker' => ['0'],
+            'legacy exempt marker' => ['1'],
+            'unexpected letters' => ['123A456789'],
+        ];
     }
 
     /**

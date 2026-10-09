@@ -17,10 +17,12 @@ class DacteData
     /**
      * @param  array<string, string>  $emit
      * @param  array<string, string>  $rem
+     * @param  array<string, string>  $receb
      * @param  array<string, string>  $dest
      * @param  list<array{xNome: string, vComp: string}>  $components
      * @param  array{vCarga: ?string, proPred: ?string, xOutCat: ?string, qCarga: ?string, tpMed: ?string, cUnid: ?string}|null  $cargo
      * @param  array{kind: string, chave: ?string, dPrev: ?string, tpDoc: ?string, descOutros: ?string, nDoc: ?string, dEmi: ?string}|null  $document
+     * @param  list<array{kind: string, chave: ?string, dPrev: ?string, tpDoc: ?string, descOutros: ?string, nDoc: ?string, dEmi: ?string}>  $documents
      */
     public function __construct(
         public readonly string $accessKey,
@@ -39,12 +41,14 @@ class DacteData
         public readonly ?string $xMotivo,
         public readonly array $emit,
         public readonly array $rem,
+        public readonly array $receb,
         public readonly array $dest,
         public readonly string $vTPrest,
         public readonly string $vRec,
         public readonly array $components,
         public readonly ?array $cargo,
         public readonly ?array $document,
+        public readonly array $documents,
         public readonly ?string $rntrc,
         public readonly ?string $qrUrl,
         public readonly ?string $originCity,
@@ -81,6 +85,7 @@ class DacteData
         $ide = self::first($infCte, 'ide');
         $emit = self::first($infCte, 'emit');
         $rem = self::first($infCte, 'rem');
+        $receb = self::first($infCte, 'receb');
         $dest = self::first($infCte, 'dest');
         $vPrest = self::first($infCte, 'vPrest');
         $infCteNorm = self::first($infCte, 'infCTeNorm');
@@ -103,8 +108,13 @@ class DacteData
             }
         }
 
-        $infOutros = $infDoc !== null ? self::first($infDoc, 'infOutros') : null;
-        $infNFe = $infDoc !== null ? self::first($infDoc, 'infNFe') : null;
+        $documents = [];
+
+        foreach ($infDoc?->childNodes ?? [] as $originDocument) {
+            if ($originDocument instanceof DOMElement && in_array($originDocument->localName, ['infNFe', 'infOutros'], true)) {
+                $documents[] = self::originDocument($originDocument);
+            }
+        }
 
         $originMun = $ide !== null ? self::first($ide, 'xMunIni') : null;
         $destinationMun = $ide !== null ? self::first($ide, 'xMunFim') : null;
@@ -126,6 +136,7 @@ class DacteData
             xMotivo: self::protText($root, 'xMotivo'),
             emit: self::party($emit, 'enderEmit'),
             rem: self::party($rem, 'enderReme'),
+            receb: self::party($receb, 'enderReceb'),
             dest: self::party($dest, 'enderDest'),
             vTPrest: (string) ($vPrest !== null ? self::textOf($vPrest, 'vTPrest') : ''),
             vRec: (string) ($vPrest !== null ? self::textOf($vPrest, 'vRec') : ''),
@@ -138,23 +149,8 @@ class DacteData
                 'tpMed' => $infQ !== null ? self::optional($infQ, 'tpMed') : null,
                 'cUnid' => $infQ !== null ? self::optional($infQ, 'cUnid') : null,
             ] : null,
-            document: $infOutros !== null ? [
-                'kind' => 'outros',
-                'tpDoc' => self::optional($infOutros, 'tpDoc'),
-                'descOutros' => self::optional($infOutros, 'descOutros'),
-                'nDoc' => self::optional($infOutros, 'nDoc'),
-                'dEmi' => self::optional($infOutros, 'dEmi'),
-                'chave' => null,
-                'dPrev' => null,
-            ] : ($infNFe !== null ? [
-                'kind' => 'nfe',
-                'chave' => self::optional($infNFe, 'chave'),
-                'dPrev' => self::optional($infNFe, 'dPrev'),
-                'tpDoc' => null,
-                'descOutros' => null,
-                'nDoc' => null,
-                'dEmi' => null,
-            ] : null),
+            document: $documents[0] ?? null,
+            documents: $documents,
             rntrc: $rodo !== null ? self::optional($rodo, 'RNTRC') : null,
             qrUrl: self::qrUrl($cte),
             originCity: $originMun !== null ? trim((string) $originMun->textContent) : null,
@@ -246,13 +242,44 @@ class DacteData
             'xNome' => (string) self::optional($parent, 'xNome'),
             'xFant' => self::optional($parent, 'xFant') ?? '',
             'CNPJ' => (string) self::optional($parent, 'CNPJ'),
+            'CPF' => (string) self::optional($parent, 'CPF'),
             'IE' => (string) self::optional($parent, 'IE'),
             'xLgr' => $address !== null ? (string) self::textOf($address, 'xLgr') : '',
             'nro' => $address !== null ? (string) self::textOf($address, 'nro') : '',
+            'xCpl' => $address !== null ? (string) self::optional($address, 'xCpl') : '',
             'xBairro' => $address !== null ? (string) self::textOf($address, 'xBairro') : '',
+            'cMun' => $address !== null ? (string) self::textOf($address, 'cMun') : '',
             'xMun' => $address !== null ? (string) self::textOf($address, 'xMun') : '',
             'UF' => $address !== null ? (string) self::textOf($address, 'UF') : '',
             'CEP' => $address !== null ? (string) self::textOf($address, 'CEP') : '',
+        ];
+    }
+
+    /**
+     * @return array{kind: string, chave: ?string, dPrev: ?string, tpDoc: ?string, descOutros: ?string, nDoc: ?string, dEmi: ?string}
+     */
+    protected static function originDocument(DOMElement $document): array
+    {
+        if ($document->localName === 'infOutros') {
+            return [
+                'kind' => 'outros',
+                'tpDoc' => self::optional($document, 'tpDoc'),
+                'descOutros' => self::optional($document, 'descOutros'),
+                'nDoc' => self::optional($document, 'nDoc'),
+                'dEmi' => self::optional($document, 'dEmi'),
+                'chave' => null,
+                'dPrev' => null,
+            ];
+        }
+
+        return [
+            'kind' => 'nfe',
+            'chave' => self::optional($document, 'chave'),
+            'dPrev' => self::optional($document, 'dPrev'),
+            'tpDoc' => null,
+            'descOutros' => null,
+            'nDoc' => null,
+            'dEmi' => null,
         ];
     }
 

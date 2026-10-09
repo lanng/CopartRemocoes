@@ -4,6 +4,8 @@ namespace App\Services\Cte;
 
 use App\Enums\CteDocumentStatusEnum;
 use App\Enums\CteEmissionBatchStatusEnum;
+use App\Enums\FiscalDocumentStatusEnum;
+use App\Enums\FiscalDocumentWorkflowOriginEnum;
 use App\Models\CteDocument;
 use App\Services\Dfe\SefazCertificate;
 use App\Services\Dfe\SefazException;
@@ -14,7 +16,7 @@ use DomainException;
 
 /**
  * Seam de emissão direta do CT-e (spec dfe §4.2, espelho do EmitCiotDeclaration):
- * snapshot v2 → BuildCteXml → assinar → validar XSD → transmitir → registrar.
+ * snapshots v2/v3 → BuildCteXml → assinar → validar XSD → transmitir → registrar.
  * Falhas de regra/dados (DomainException) são terminais; erros retryable da
  * SEFAZ sobem para o job re-tentar com o documento em authorizing.
  *
@@ -23,8 +25,8 @@ use DomainException;
  * Se um retry encontrar artifacts (a tentativa anterior pode ter autorizado na
  * SEFAZ antes de um crash), o attempt CONSULTA a chave queimada via
  * CTeConsultaV4: autorizada → registra o protocolo sem retransmitir; não
- * autorizada → a chave está de fato livre e um novo documento é construído
- * (queimando o próximo número). Nunca reusar número de tentativa anterior.
+ * autorizada → um novo documento pode ser construído, queimando outro número.
+ * Uma autorização já persistida que divergir da consulta exige reconciliação.
  */
 class EmitCteDocument
 {
@@ -44,13 +46,17 @@ class EmitCteDocument
     public function attempt(CteDocument $document): CteDocument
     {
         $this->assertEmissionRules($document);
+        $hasPreviousAttemptArtifacts = $this->hasArtifactsFromPreviousAttempt($document);
+        $snapshot = $hasPreviousAttemptArtifacts
+            ? null
+            : $this->snapshotResolver->handle($document);
 
         if ($document->status === CteDocumentStatusEnum::QUEUED) {
             app(DirectCteDocumentWorkflow::class)->transition($document, CteDocumentStatusEnum::AUTHORIZING);
             $document->refresh();
         }
 
-        if ($this->hasArtifactsFromPreviousAttempt($document)) {
+        if ($hasPreviousAttemptArtifacts) {
             $consult = $this->client->consult((string) $document->access_key);
 
             if ($consult->isAuthorized()) {
@@ -62,11 +68,22 @@ class EmitCteDocument
                 );
             }
 
+            if ($document->fiscal_status === FiscalDocumentStatusEnum::AUTHORIZED) {
+                app(DirectCteDocumentWorkflow::class)->transition($document, CteDocumentStatusEnum::RECONCILIATION_REQUIRED);
+                $document->forceFill([
+                    'error_stage' => 'transmission',
+                    'error_code' => 'authorization_consult_conflict',
+                    'error_message' => 'A consulta da chave divergiu da autorização previamente registrada; nova transmissão bloqueada.',
+                ])->save();
+
+                return $document->refresh();
+            }
+
             // Consulta não autorizada: a chave queimada está de fato livre —
             // um novo documento é construído abaixo (queimando o próximo número).
         }
 
-        $snapshot = $this->snapshotResolver->handle($document);
+        $snapshot ??= $this->snapshotResolver->handle($document);
 
         $built = $this->builder->handle($snapshot);
 
@@ -128,7 +145,19 @@ class EmitCteDocument
             throw new DomainException('Somente documentos em modo live são transmitidos à SEFAZ.');
         }
 
-        if ($document->batch?->status !== CteEmissionBatchStatusEnum::APPROVED) {
+        if ((string) config('dfe.tp_amb') === '1' && ! config('dfe.cte.production_enabled', false)) {
+            throw new DomainException('A transmissão de CT-e em produção está bloqueada por DFE_CTE_PRODUCTION_ENABLED.');
+        }
+
+        if ($document->batch === null) {
+            if ($document->workflow_origin !== FiscalDocumentWorkflowOriginEnum::ControlledV1) {
+                throw new DomainException('Somente documentos do fluxo controlado podem ser emitidos sem lote.');
+            }
+
+            return;
+        }
+
+        if ($document->batch->status !== CteEmissionBatchStatusEnum::APPROVED) {
             throw new DomainException('Somente lotes aprovados podem ser emitidos.');
         }
     }

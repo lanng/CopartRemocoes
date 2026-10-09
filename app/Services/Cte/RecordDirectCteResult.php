@@ -3,6 +3,7 @@
 namespace App\Services\Cte;
 
 use App\Enums\CteDocumentStatusEnum;
+use App\Enums\FiscalDocumentStatusEnum;
 use App\Models\CteDocument;
 use App\Services\Dfe\BuildCteProc;
 use App\Services\Dfe\DfeDocumentStore;
@@ -30,7 +31,7 @@ class RecordDirectCteResult
 
     public function handle(CteDocument $document, BuiltCte $built, string $signedXml, SefazResponse $response): CteDocument
     {
-        return DB::transaction(function () use ($document, $built, $signedXml, $response): CteDocument {
+        $document = DB::transaction(function () use ($document, $built, $signedXml, $response): CteDocument {
             $document = CteDocument::query()->lockForUpdate()->findOrFail($document->id);
 
             // Idempotência do job: resultado já registrado, nada a fazer.
@@ -52,31 +53,81 @@ class RecordDirectCteResult
                 if ($response->digestValue !== null && $digest !== null && $response->digestValue !== $digest) {
                     $this->recordReconciliation($document, $signedXml, $response, $digest);
                 } else {
-                    $this->recordAuthorized($document, $built, $signedXml, $response, $digest);
+                    $this->recordAuthorizationPendingArtifacts($document, $built, $signedXml, $response, $digest);
                 }
             } else {
                 $this->recordRejected($document, $signedXml, $response);
             }
 
-            $document = $document->refresh();
-            app(CteBatchStatusUpdater::class)->handle($document->batch);
+            return $document->refresh();
+        });
+
+        if ($document->status !== CteDocumentStatusEnum::AUTHORIZING
+            || $document->fiscal_status !== FiscalDocumentStatusEnum::AUTHORIZED
+            || filled($document->xml_path)) {
+            $this->updateBatchStatusIfPresent($document);
 
             return $document;
-        });
-    }
+        }
 
-    protected function recordAuthorized(CteDocument $document, BuiltCte $built, string $signedXml, SefazResponse $response, ?string $digest): void
-    {
-        $proc = $this->procBuilder->handle($signedXml, (string) $response->rawXml);
-        $stored = $this->store->storeCteProc((string) $built->accessKey, $proc);
+        try {
+            $proc = $this->procBuilder->handle($signedXml, (string) $response->rawXml);
+            $stored = $this->store->storeCteProc((string) $built->accessKey, $proc);
+        } catch (Throwable $exception) {
+            CteDocument::query()->whereKey($document->id)->update([
+                'error_stage' => 'artifact',
+                'error_code' => 'archive_pending',
+                'error_message' => $exception->getMessage(),
+            ]);
+
+            throw $exception;
+        }
 
         $dactePath = $this->generateDacte((string) $built->accessKey, $proc);
 
-        $this->workflow->transition($document, CteDocumentStatusEnum::AUTHORIZED);
+        $document = DB::transaction(function () use ($document, $stored, $dactePath): CteDocument {
+            $document = CteDocument::query()->lockForUpdate()->findOrFail($document->id);
+
+            if ($document->status === CteDocumentStatusEnum::AUTHORIZING
+                && $document->fiscal_status === FiscalDocumentStatusEnum::AUTHORIZED) {
+                $this->workflow->transition($document, CteDocumentStatusEnum::AUTHORIZED);
+                $document->forceFill([
+                    'xml_path' => $stored['path'],
+                    'pdf_path' => $dactePath,
+                    'sha256' => $stored['sha256'],
+                    'error_stage' => null,
+                    'error_code' => null,
+                    'error_message' => null,
+                ])->save();
+            }
+
+            return $document->refresh();
+        });
+
+        $this->updateBatchStatusIfPresent($document);
+
+        return $document;
+    }
+
+    private function updateBatchStatusIfPresent(CteDocument $document): void
+    {
+        $batch = $document->batch;
+
+        if ($batch !== null) {
+            app(CteBatchStatusUpdater::class)->handle($batch);
+        }
+    }
+
+    protected function recordAuthorizationPendingArtifacts(CteDocument $document, BuiltCte $built, string $signedXml, SefazResponse $response, ?string $digest): void
+    {
+        if (blank($response->protocol)) {
+            throw new DomainException('Resposta autorizada do CT-e sem protocolo.');
+        }
 
         $document->forceFill([
-            'issued_at' => now(),
-            'authorized_at' => now(),
+            'fiscal_status' => FiscalDocumentStatusEnum::AUTHORIZED,
+            'issued_at' => $document->issued_at ?? now(),
+            'authorized_at' => $document->authorized_at ?? now(),
             'cte_number' => (string) $built->number,
             'access_key' => $built->accessKey,
             'series' => (string) $built->serie,
@@ -86,19 +137,15 @@ class RecordDirectCteResult
             'payload_xml' => $signedXml,
             'response_xml' => $response->rawXml,
             'digest_value' => $digest,
-            'xml_path' => $stored['path'],
-            'pdf_path' => $dactePath,
-            'sha256' => $stored['sha256'],
-            'error_stage' => null,
-            'error_code' => null,
-            'error_message' => null,
+            'error_stage' => 'artifact',
+            'error_code' => 'archive_pending',
+            'error_message' => 'Autorização confirmada; cteProc aguardando armazenamento.',
         ])->save();
 
-        $this->log('info', 'CT-e autorizado na SEFAZ.', [
+        $this->log('info', 'Autorização do CT-e confirmada; persistência dos artefatos pendente.', [
             'document' => $document->public_id,
             'access_key' => $built->accessKey,
             'protocol' => $response->protocol,
-            'dacte' => $dactePath,
         ]);
     }
 
@@ -157,6 +204,7 @@ class RecordDirectCteResult
         $this->workflow->transition($document, CteDocumentStatusEnum::REJECTED);
 
         $document->forceFill([
+            'fiscal_status' => FiscalDocumentStatusEnum::NOT_AUTHORIZED,
             'fiscal_status_code' => $response->cStat,
             'fiscal_status_message' => $response->xMotivo,
             'payload_xml' => $signedXml,

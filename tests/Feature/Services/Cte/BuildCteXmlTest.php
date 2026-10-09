@@ -10,6 +10,7 @@ use App\Services\Dfe\XsdValidator;
 use Carbon\Carbon;
 use DomainException;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use PHPUnit\Framework\Attributes\DataProvider;
 use Tests\Support\DfeTestCertificate;
 use Tests\TestCase;
 
@@ -131,11 +132,63 @@ class BuildCteXmlTest extends TestCase
         $this->assertStringNotContainsString('<xOutCat>', $xml);
     }
 
+    public function test_builds_multiple_nfe_references_without_a_receiver_group(): void
+    {
+        $snapshot = $this->tankSnapshot();
+        $snapshot['schema_version'] = 3;
+        unset($snapshot['nfe_key']);
+        $snapshot['nfe_documents'] = [
+            ['access_key' => '35261011111111111111550010000000011000000011'],
+            ['access_key' => '35261011111111111111550010000000021000000027'],
+        ];
+        $snapshot['dprev'] = '2026-10-03';
+        $snapshot['destination'] = ['ibge' => '3506003', 'name' => 'Campinas', 'uf' => 'SP'];
+        $snapshot['delivery_party'] = [
+            'cpf' => '12345678901',
+            'ie' => '',
+            'xNome' => 'Recebedor físico da carga',
+            'xLgr' => 'Rua da Entrega',
+            'nro' => '300',
+            'xCpl' => 'Portão 2',
+            'xBairro' => 'Industrial',
+            'cMun' => '3506003',
+            'xMun' => 'Campinas',
+            'cep' => '13000000',
+            'uf' => 'SP',
+        ];
+        $snapshot['delivery_missing_fields'] = [];
+
+        $built = $this->signed($snapshot);
+        $xml = $built->xml;
+
+        $this->assertSame(2, substr_count($xml, '<infNFe>'));
+        $this->assertStringContainsString('<chave>35261011111111111111550010000000011000000011</chave><dPrev>2026-10-03</dPrev>', $xml);
+        $this->assertStringContainsString('<chave>35261011111111111111550010000000021000000027</chave><dPrev>2026-10-03</dPrev>', $xml);
+        $this->assertStringContainsString('<cMunFim>3506003</cMunFim><xMunFim>Campinas</xMunFim><UFFim>SP</UFFim>', $xml);
+        $this->assertStringNotContainsString('<receb>', $xml);
+        $this->assertStringNotContainsString('<enderReceb>', $xml);
+        $this->assertStringContainsString('<dest><CNPJ>00000000000191</CNPJ>', $xml);
+    }
+
     public function test_production_derives_real_parties_and_qr_from_tp_amb(): void
     {
         config(['dfe.tp_amb' => '1', 'dfe.numbering_start' => 2964]);
 
-        $built = $this->signed($this->vehicleSnapshot());
+        $snapshot = $this->vehicleSnapshot();
+        $snapshot['delivery_party'] = [
+            'cnpj' => '48123456000178',
+            'ie' => '123456789',
+            'xNome' => 'Recebedor físico diferente do destinatário',
+            'xLgr' => 'Rua da Entrega',
+            'nro' => '300',
+            'xBairro' => 'Industrial',
+            'cMun' => '3523107',
+            'xMun' => 'Itaquaquecetuba',
+            'cep' => '08597000',
+            'uf' => 'SP',
+        ];
+
+        $built = $this->signed($snapshot);
 
         $xml = $built->xml;
 
@@ -147,6 +200,7 @@ class BuildCteXmlTest extends TestCase
         $this->assertStringContainsString('<rem><CNPJ>33164021000100</CNPJ><IE>110794302111</IE><xNome>TOKIO MARINE SEGURADORA S.A</xNome><xFant>TOKIO MARINE SEGURADORA S.A</xFant>', $xml);
         $this->assertStringContainsString('<dest><CNPJ>14517191000178</CNPJ><IE>379121178113</IE><xNome>Copart do Brasil Organizacao de Leiloes Ltda</xNome>', $xml);
         $this->assertStringNotContainsString('SEM VALOR FISCAL', $xml);
+        $this->assertStringNotContainsString('<receb>', $xml);
 
         $this->assertStringContainsString('https://nfe.fazenda.sp.gov.br/CTeConsulta/qrCode?chCTe='.$built->accessKey.'&tpAmb=1', $xml);
     }
@@ -179,6 +233,74 @@ class BuildCteXmlTest extends TestCase
         $this->assertSame(900000001, $first->number);
         $this->assertSame(900000002, $second->number);
         $this->assertNotSame($first->accessKey, $second->accessKey);
+    }
+
+    public function test_vehicle_and_alcohol_documents_share_the_same_cte_number_sequence(): void
+    {
+        $vehicle = $this->builder->handle($this->vehicleSnapshot());
+        $alcohol = $this->builder->handle($this->tankSnapshot());
+
+        $this->assertSame(900000001, $vehicle->number);
+        $this->assertSame(900000002, $alcohol->number);
+    }
+
+    public function test_production_uses_non_contributor_indicator_when_fiscal_recipient_has_no_ie(): void
+    {
+        config(['dfe.tp_amb' => '1', 'dfe.numbering_start' => '123']);
+        $snapshot = $this->vehicleSnapshot();
+        $snapshot['dest']['ie'] = '';
+
+        $xml = $this->signed($snapshot)->xml;
+
+        $this->assertStringContainsString('<indIEToma>9</indIEToma>', $xml);
+        $this->assertStringNotContainsString('<dest><CNPJ>14517191000178</CNPJ><IE>', $xml);
+    }
+
+    #[DataProvider('senderInscriptionExamples')]
+    public function test_sender_ie_preserves_the_taker_indicator_and_actual_route(?string $ie): void
+    {
+        config(['dfe.tp_amb' => '1', 'dfe.numbering_start' => '123']);
+        $snapshot = $this->vehicleSnapshot();
+        $snapshot['rem']['ie'] = $ie;
+        $snapshot['rem']['uf'] = 'PR';
+        $snapshot['rem']['cMun'] = '4106902';
+        $snapshot['rem']['xMun'] = 'Curitiba';
+        $snapshot['rem']['cep'] = '80010000';
+
+        $xml = $this->signed($snapshot)->xml;
+
+        $this->assertStringContainsString('<indIEToma>1</indIEToma>', $xml);
+        $this->assertStringContainsString('<UFIni>SP</UFIni>', $xml);
+        $this->assertStringContainsString('<UFFim>SP</UFFim>', $xml);
+        $this->assertStringContainsString('<CEP>80010000</CEP><UF>PR</UF>', $xml);
+        $this->assertStringContainsString(
+            '<rem><CNPJ>33164021000100</CNPJ>'.($ie === null ? '<xNome>' : '<IE>ISENTO</IE><xNome>'),
+            $xml,
+        );
+    }
+
+    public static function senderInscriptionExamples(): array
+    {
+        return [
+            'exempt sender' => ['ISENTO'],
+            'non contributor sender' => [null],
+        ];
+    }
+
+    public function test_production_rejects_an_exempt_tomador_in_sao_paulo_before_allocating_a_number(): void
+    {
+        config(['dfe.tp_amb' => '1']);
+        $snapshot = $this->vehicleSnapshot();
+        $snapshot['dest']['ie'] = 'ISENTO';
+
+        try {
+            $this->builder->handle($snapshot);
+            $this->fail('The São Paulo rule must reject an exempt tomador before number allocation.');
+        } catch (DomainException $exception) {
+            $this->assertStringContainsString('não pode ser informado como ISENTO', $exception->getMessage());
+        }
+
+        $this->assertDatabaseCount('cte_number_sequences', 0);
     }
 
     /**

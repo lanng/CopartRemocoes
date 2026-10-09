@@ -8,9 +8,9 @@ use DomainException;
 
 /**
  * Coreografia do emissor direto (spec §1.2): sem os estágios de digitação do
- * Lab — queued → authorizing → authorized|rejected. Falhas de regra/dados
- * antes da transmissão e exaustão de tentativas do job vão para
- * failed_before_authorization; divergência de digVal para reconciliation_required.
+ * Lab — queued → authorizing → authorized|rejected. Falhas locais sem artifacts
+ * vão para failed_before_authorization; resultado de transmissão incerto ou
+ * divergência de digVal exige reconciliation_required.
  */
 class DirectCteDocumentWorkflow
 {
@@ -22,6 +22,7 @@ class DirectCteDocumentWorkflow
             CteDocumentStatusEnum::AUTHORIZING,
             CteDocumentStatusEnum::DRY_RUN_COMPLETED,
             CteDocumentStatusEnum::FAILED_BEFORE_AUTHORIZATION,
+            CteDocumentStatusEnum::RECONCILIATION_REQUIRED,
         ],
         'authorizing' => [
             CteDocumentStatusEnum::AUTHORIZED,

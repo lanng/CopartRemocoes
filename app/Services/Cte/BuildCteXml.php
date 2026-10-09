@@ -13,9 +13,8 @@ use DomainException;
  * estrita de xs:sequence dos gabaritos autorizados (2962/2963). Saída = XML
  * assinável (sem Signature — o XmlSigner entra depois, F3).
  *
- * O snapshot é o contrato v2: além dos dados da viagem/frete, carrega os
- * blocos fiscais de rem/dest (que o Lab digitava à mão) e a bifurcação da
- * linha (veículos = infOutros; tanque = infNFe).
+ * O snapshot v2 mantém os blocos fiscais de rem/dest; o v3 de álcool adiciona
+ * referências múltiplas de NF-e e os dados da entrega física usados na rota.
  */
 class BuildCteXml
 {
@@ -94,7 +93,7 @@ class BuildCteXml
             .$this->cityGroup('Ini', $snapshot['origin'])
             .$this->cityGroup('Fim', $snapshot['destination'])
             .'<retira>0</retira>'
-            .'<indIEToma>'.($isHomolog ? '9' : '1').'</indIEToma>'
+            .'<indIEToma>'.$this->takerIeIndicator($snapshot, $isHomolog).'</indIEToma>'
             .'<toma3><toma>3</toma></toma3>'
             .'</ide>'
             .'<compl><Entrega><semData><tpPer>0</tpPer></semData><semHora><tpHor>0</tpHor></semHora></Entrega></compl>'
@@ -160,21 +159,24 @@ class BuildCteXml
     {
         $addressTag = $tag === 'rem' ? 'enderReme' : 'enderDest';
 
-        $cnpj = $isHomolog ? self::HOMOLOG_PARTY_CNPJ : (string) $party['cnpj'];
+        $identity = $isHomolog
+            ? '<CNPJ>'.self::HOMOLOG_PARTY_CNPJ.'</CNPJ>'
+            : $this->partyIdentity($party);
         $name = $isHomolog ? self::HOMOLOG_PARTY_NAME : (string) $party['xNome'];
         $fantasy = ! $isHomolog && $withFantasyName
             ? '<xFant>'.e((string) ($party['xFant'] ?? $party['xNome'])).'</xFant>'
             : '';
-        $ie = ! $isHomolog ? '<IE>'.e((string) $party['ie']).'</IE>' : '';
+        $ie = ! $isHomolog && filled($party['ie'] ?? null) ? '<IE>'.e((string) $party['ie']).'</IE>' : '';
 
         return '<'.$tag.'>'
-            .'<CNPJ>'.e($cnpj).'</CNPJ>'
+            .$identity
             .$ie
             .'<xNome>'.e($name).'</xNome>'
             .$fantasy
             .'<'.$addressTag.'>'
             .'<xLgr>'.e((string) $party['xLgr']).'</xLgr>'
             .'<nro>'.e((string) $party['nro']).'</nro>'
+            .$this->complementElement($party)
             .'<xBairro>'.e((string) $party['xBairro']).'</xBairro>'
             .'<cMun>'.e((string) $party['cMun']).'</cMun>'
             .'<xMun>'.e((string) $party['xMun']).'</xMun>'
@@ -183,6 +185,45 @@ class BuildCteXml
             .'<cPais>1058</cPais><xPais>Brasil</xPais>'
             .'</'.$addressTag.'>'
             .'</'.$tag.'>';
+    }
+
+    /** @param array<string, mixed> $party */
+    private function partyIdentity(array $party): string
+    {
+        $cnpj = preg_replace('/\D/', '', (string) ($party['cnpj'] ?? '')) ?: '';
+        $cpf = preg_replace('/\D/', '', (string) ($party['cpf'] ?? '')) ?: '';
+
+        if (($cnpj === '') === ($cpf === '')) {
+            throw new DomainException('Cada parte fiscal deve informar exatamente um CNPJ ou CPF.');
+        }
+
+        if ($cnpj !== '') {
+            return '<CNPJ>'.e($cnpj).'</CNPJ>';
+        }
+
+        return '<CPF>'.e($cpf).'</CPF>';
+    }
+
+    /** @param array<string, mixed> $party */
+    private function complementElement(array $party): string
+    {
+        return filled($party['xCpl'] ?? null) ? '<xCpl>'.e((string) $party['xCpl']).'</xCpl>' : '';
+    }
+
+    /** @param array<string, mixed> $snapshot */
+    private function takerIeIndicator(array $snapshot, bool $isHomolog): string
+    {
+        if ($isHomolog) {
+            return '9';
+        }
+
+        $ie = mb_strtoupper(trim((string) ($snapshot['dest']['ie'] ?? '')));
+
+        if ($ie === '') {
+            return '9';
+        }
+
+        return $ie === 'ISENTO' ? '2' : '1';
     }
 
     /**
@@ -228,10 +269,19 @@ class BuildCteXml
                 .'</infOutros></infDoc>';
         }
 
-        return '<infDoc><infNFe>'
-            .'<chave>'.e((string) $snapshot['nfe_key']).'</chave>'
-            .'<dPrev>'.e((string) $snapshot['dprev']).'</dPrev>'
-            .'</infNFe></infDoc>';
+        $references = $snapshot['nfe_documents'] ?? [[
+            'access_key' => (string) ($snapshot['nfe_key'] ?? ''),
+        ]];
+        $documents = '';
+
+        foreach ($references as $reference) {
+            $documents .= '<infNFe>'
+                .'<chave>'.e((string) $reference['access_key']).'</chave>'
+                .'<dPrev>'.e((string) $snapshot['dprev']).'</dPrev>'
+                .'</infNFe>';
+        }
+
+        return '<infDoc>'.$documents.'</infDoc>';
     }
 
     /**
@@ -278,15 +328,19 @@ class BuildCteXml
         }
 
         foreach (['rem', 'dest'] as $field) {
-            foreach (['cnpj', 'xLgr', 'nro', 'xBairro', 'cMun', 'xMun', 'cep', 'uf'] as $key) {
+            foreach (['xNome', 'xLgr', 'nro', 'xBairro', 'cMun', 'xMun', 'cep', 'uf'] as $key) {
                 if (blank($snapshot[$field][$key] ?? null)) {
                     $missing[] = $field.'.'.$key;
                 }
             }
 
-            // IE só existe no documento em produção (homologação usa letreiro).
-            if ((string) config('dfe.tp_amb') === '1' && blank($snapshot[$field]['ie'] ?? null)) {
-                $missing[] = $field.'.ie';
+            $cnpj = preg_replace('/\D/', '', (string) ($snapshot[$field]['cnpj'] ?? '')) ?: '';
+            $cpf = preg_replace('/\D/', '', (string) ($snapshot[$field]['cpf'] ?? '')) ?: '';
+
+            if (($cnpj === '') === ($cpf === '')
+                || ($cnpj !== '' && ! preg_match('/^\d{14}$/', $cnpj))
+                || ($cpf !== '' && ! preg_match('/^\d{11}$/', $cpf))) {
+                $missing[] = $field.'.cnpj/cpf';
             }
         }
 
@@ -297,15 +351,94 @@ class BuildCteXml
                 }
             }
         } else {
-            foreach (['nfe_key', 'dprev', 'cargo_value', 'cargo_liters'] as $field) {
+            foreach (['dprev', 'cargo_value', 'cargo_liters'] as $field) {
                 if (blank($snapshot[$field] ?? null)) {
                     $missing[] = $field;
                 }
             }
 
-            if (filled($snapshot['nfe_key'] ?? null) && ! preg_match('/^\d{44}$/', (string) $snapshot['nfe_key'])) {
-                $missing[] = 'nfe_key (44 dígitos numéricos)';
+            $references = $snapshot['nfe_documents'] ?? null;
+            $schemaVersion = (int) ($snapshot['schema_version'] ?? 2);
+
+            if (is_array($references) && array_is_list($references) && $references !== []) {
+                $seenKeys = [];
+
+                foreach ($references as $reference) {
+                    $accessKey = is_array($reference) ? (string) ($reference['access_key'] ?? '') : '';
+
+                    if (! preg_match('/^\d{44}$/', $accessKey) || isset($seenKeys[$accessKey])) {
+                        $missing[] = 'nfe_documents (chaves de 44 dígitos únicas)';
+                        break;
+                    }
+
+                    $seenKeys[$accessKey] = true;
+                }
+            } elseif ($schemaVersion < 3
+                && filled($snapshot['nfe_key'] ?? null)
+                && preg_match('/^\d{44}$/', (string) $snapshot['nfe_key'])) {
+                $references = [['access_key' => (string) $snapshot['nfe_key']]];
+            } else {
+                $missing[] = 'nfe_documents ou nfe_key';
+                $references = [];
             }
+
+            if (count($references) > (int) config('dfe.nfe_xml_max_files_per_import', 10)) {
+                $missing[] = 'nfe_documents (limite de NF-es)';
+            }
+
+            if (filled($snapshot['dprev'] ?? null)) {
+                $date = (string) $snapshot['dprev'];
+
+                if (! preg_match('/^\d{4}-\d{2}-\d{2}$/', $date)) {
+                    $missing[] = 'dprev (AAAA-MM-DD)';
+                } else {
+                    [$year, $month, $day] = array_map('intval', explode('-', $date));
+
+                    if (! checkdate($month, $day, $year)) {
+                        $missing[] = 'dprev (data válida)';
+                    } elseif ($schemaVersion >= 3 && $date < now('America/Sao_Paulo')->toDateString()) {
+                        $missing[] = 'dprev (previsão não vencida)';
+                    }
+                }
+            }
+
+            if ($schemaVersion >= 3 && ! is_array($snapshot['delivery_party'] ?? null)) {
+                $missing[] = 'delivery_party';
+            }
+
+            if (isset($snapshot['delivery_party']) && is_array($snapshot['delivery_party'])) {
+                foreach (['xNome', 'xLgr', 'nro', 'xBairro', 'cMun', 'xMun', 'cep', 'uf'] as $field) {
+                    if (blank($snapshot['delivery_party'][$field] ?? null)) {
+                        $missing[] = 'delivery_party.'.$field;
+                    }
+                }
+
+                foreach ((array) ($snapshot['delivery_missing_fields'] ?? []) as $field) {
+                    $missing[] = 'delivery_party.'.(string) $field;
+                }
+
+                $deliveryCnpj = preg_replace('/\D/', '', (string) ($snapshot['delivery_party']['cnpj'] ?? '')) ?: '';
+                $deliveryCpf = preg_replace('/\D/', '', (string) ($snapshot['delivery_party']['cpf'] ?? '')) ?: '';
+
+                if (($deliveryCnpj === '') === ($deliveryCpf === '')
+                    || ($deliveryCnpj !== '' && ! preg_match('/^\d{14}$/', $deliveryCnpj))
+                    || ($deliveryCpf !== '' && ! preg_match('/^\d{11}$/', $deliveryCpf))) {
+                    $missing[] = 'delivery_party.cnpj/cpf';
+                }
+
+                if ((string) ($snapshot['destination']['ibge'] ?? '') !== (string) $snapshot['delivery_party']['cMun']
+                    || (string) ($snapshot['destination']['name'] ?? '') !== (string) $snapshot['delivery_party']['xMun']
+                    || (string) ($snapshot['destination']['uf'] ?? '') !== (string) $snapshot['delivery_party']['uf']) {
+                    $missing[] = 'destination (destino da entrega física)';
+                }
+            }
+
+        }
+
+        if ((string) config('dfe.tp_amb') === '1'
+            && mb_strtoupper(trim((string) ($snapshot['dest']['ie'] ?? ''))) === 'ISENTO'
+            && strtoupper((string) ($snapshot['dest']['uf'] ?? '')) === 'SP') {
+            throw new DomainException('O tomador fiscal em SP não pode ser informado como ISENTO na inscrição estadual.');
         }
 
         if ($missing !== []) {

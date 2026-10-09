@@ -117,6 +117,45 @@ class SefazSoapClientTest extends TestCase
         });
     }
 
+    public function test_transmit_event_sends_the_signed_event_uncompressed_and_records_raw_transport(): void
+    {
+        config(['dfe.paths.evento' => 'CTeRecepcaoEventoV4.asmx']);
+        $eventXml = '<?xml version="1.0" encoding="UTF-8"?>'
+            .'<eventoCTe xmlns="http://www.portalfiscal.inf.br/cte" versao="4.00">'
+            .'<infEvento Id="ID110111'.str_repeat('1', 44).'001"><tpEvento>110111</tpEvento></infEvento>'
+            .'</eventoCTe>';
+        $responseXml = '<retEventoCTe><infEvento><cStat>135</cStat><xMotivo>Evento registrado</xMotivo>'
+            .'<nProt>135260000000099</nProt></infEvento></retEventoCTe>';
+        Http::fake([
+            'https://sefaz-hml.test/CTeWS/WS/CTeRecepcaoEventoV4.asmx' => Http::response(
+                $this->soapEnvelope('cteRecepcaoEventoCTeResult', $responseXml),
+                200,
+                ['Content-Type' => 'application/soap+xml; charset=utf-8'],
+            ),
+        ]);
+        $rawTransport = null;
+
+        $response = app(SefazSoapClient::class)->transmitEvent(
+            $eventXml,
+            function (int $httpStatus, ?string $contentType, string $body) use (&$rawTransport): void {
+                $rawTransport = [$httpStatus, $contentType, $body];
+            },
+        );
+
+        $this->assertSame('135', $response->cStat);
+        $this->assertSame('135260000000099', $response->protocol);
+        $this->assertSame(200, $rawTransport[0]);
+        $this->assertSame('application/soap+xml; charset=utf-8', $rawTransport[1]);
+        $this->assertStringContainsString('&lt;retEventoCTe', $rawTransport[2]);
+
+        Http::assertSent(function ($request) use ($eventXml): bool {
+            return $request->url() === 'https://sefaz-hml.test/CTeWS/WS/CTeRecepcaoEventoV4.asmx'
+                && str_contains($request->body(), '<cteDadosMsg xmlns="http://www.portalfiscal.inf.br/cte/wsdl/CTeRecepcaoEventoV4">')
+                && str_contains($request->body(), '<eventoCTe xmlns="http://www.portalfiscal.inf.br/cte" versao="4.00">')
+                && ! str_contains($request->body(), base64_encode((string) gzencode($eventXml)));
+        });
+    }
+
     public function test_server_error_throws_retryable_exception(): void
     {
         Http::fake([
@@ -290,5 +329,42 @@ class SefazSoapClientTest extends TestCase
                 && str_contains($body, '<xServ>CONSULTAR</xServ>')
                 && str_contains($body, '<chCTe>35260912563112000130570010000000019997761234</chCTe>');
         });
+    }
+
+    public function test_consult_reports_the_root_cancelled_status_and_parses_the_cancellation_event(): void
+    {
+        $accessKey = str_repeat('4', 44);
+        $ret = '<retConsSitCTe versao="4.00" xmlns="http://www.portalfiscal.inf.br/cte">'
+            .'<cStat>101</cStat><xMotivo>Cancelamento homologado</xMotivo><cUF>35</cUF>'
+            .'<protCTe versao="4.00"><infProt><chCTe>'.$accessKey.'</chCTe><nProt>135260007132708</nProt>'
+            .'<cStat>100</cStat><xMotivo>Autorizado o uso do CT-e</xMotivo></infProt></protCTe>'
+            .'<procEventoCTe versao="4.00"><eventoCTe versao="4.00"><infEvento Id="ID110111'.$accessKey.'001">'
+            .'<tpEvento>110111</tpEvento><nSeqEvento>1</nSeqEvento><detEvento versaoEvento="4.00">'
+            .'<evCancCTe><nProt>135260007132708</nProt></evCancCTe></detEvento></infEvento></eventoCTe>'
+            .'<retEventoCTe versao="4.00"><infEvento><cStat>135</cStat><nProt>135260000000099</nProt>'
+            .'<dhRegEvento>2026-10-07T14:45:00-03:00</dhRegEvento></infEvento></retEventoCTe></procEventoCTe>'
+            .'</retConsSitCTe>';
+
+        $response = SefazResponse::fromSoapXml($ret);
+
+        $this->assertSame('101', $response->cStat);
+        $this->assertSame('135260007132708', $response->protocol);
+        $this->assertTrue($response->hasCteCancellationEvent);
+        $this->assertSame('135260000000099', $response->cancellationEventProtocol);
+        $this->assertSame('2026-10-07T14:45:00-03:00', $response->cancellationEventReceivedAt);
+        $this->assertStringContainsString('<procEventoCTe', (string) $response->cancellationEventXml);
+    }
+
+    public function test_parses_the_previous_cancellation_protocol_from_rejection_218(): void
+    {
+        $response = SefazResponse::fromSoapXml(
+            '<retEventoCTe><infEvento><cStat>218</cStat>'
+            .'<xMotivo>CTe já cancelado [nProt:135260000000099][dhCanc:2026-10-07T14:45:00-03:00]</xMotivo>'
+            .'</infEvento></retEventoCTe>',
+        );
+
+        $this->assertSame('218', $response->cStat);
+        $this->assertSame('135260000000099', $response->cancellationEventProtocol);
+        $this->assertSame('2026-10-07T14:45:00-03:00', $response->cancellationEventReceivedAt);
     }
 }
