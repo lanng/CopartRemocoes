@@ -5,6 +5,8 @@ namespace Tests\Feature\Services;
 use App\Enums\CteDocumentStatusEnum;
 use App\Enums\CteEmissionBatchStatusEnum;
 use App\Jobs\EmitCteDirectJob;
+use App\Models\City;
+use App\Models\Company;
 use App\Models\CteDocument;
 use App\Models\CteEmissionBatch;
 use App\Models\Register;
@@ -19,6 +21,17 @@ use Tests\TestCase;
 class ApproveCteEmissionBatchTest extends TestCase
 {
     use RefreshDatabase;
+
+    protected function setUp(): void
+    {
+        parent::setUp();
+
+        config(['cte.emitter' => 'lab']);
+        City::factory()->create(['ibge_code' => '3534708', 'name' => 'Ourinhos', 'state' => 'SP']);
+        City::factory()->create(['ibge_code' => '3539103', 'name' => 'Pirapora do Bom Jesus', 'state' => 'SP']);
+        Company::factory()->create(['name' => 'ALLIANZ SEGUROS SA', 'ibge_code' => '3550308']);
+        Company::factory()->create(['name' => 'Pátio Pirapora', 'ibge_code' => '3539103']);
+    }
 
     public function test_approval_records_the_user_and_queues_documents(): void
     {
@@ -51,7 +64,7 @@ class ApproveCteEmissionBatchTest extends TestCase
         app(ApproveCteEmissionBatch::class)->handle($batch, $user);
     }
 
-    public function test_approval_supersedes_the_previous_authorized_cte_of_a_reemission(): void
+    public function test_approval_preserves_the_fiscal_status_of_the_previous_cte_of_a_reemission(): void
     {
         $user = User::factory()->create();
         $register = Register::factory()->create();
@@ -63,6 +76,7 @@ class ApproveCteEmissionBatchTest extends TestCase
             'register_id' => $register->id,
             'cte_emission_batch_id' => $oldBatch->id,
             'cte_number' => '900100',
+            'fiscal_status' => 'authorized',
         ]);
 
         $batch = app(CreateCteEmissionBatch::class)->handle(
@@ -75,13 +89,14 @@ class ApproveCteEmissionBatchTest extends TestCase
 
         app(ApproveCteEmissionBatch::class)->handle($batch, $user);
 
-        $this->assertSame(CteDocumentStatusEnum::SUPERSEDED, $oldDocument->refresh()->status);
+        $this->assertSame(CteDocumentStatusEnum::AUTHORIZED, $oldDocument->refresh()->status);
+        $this->assertSame('authorized', $oldDocument->refresh()->fiscal_status->value);
         $this->assertSame('900100', $oldDocument->cte_number);
         $this->assertSame(CteDocumentStatusEnum::QUEUED, $newDocument->refresh()->status);
         $this->assertSame(CteEmissionBatchStatusEnum::COMPLETED, $oldBatch->refresh()->status);
     }
 
-    public function test_approval_fails_when_the_replaced_cte_is_no_longer_authorized(): void
+    public function test_approval_keeps_reemission_history_when_previous_cte_was_canceled_after_draft_creation(): void
     {
         $user = User::factory()->create();
         $register = Register::factory()->create();
@@ -96,16 +111,11 @@ class ApproveCteEmissionBatchTest extends TestCase
 
         $oldDocument->update(['status' => CteDocumentStatusEnum::CANCELLED]);
 
-        try {
-            app(ApproveCteEmissionBatch::class)->handle($batch, $user);
-            $this->fail('A approval whose replaced CT-e is no longer authorized should fail.');
-        } catch (ValidationException $exception) {
-            $messages = collect($exception->errors())->flatten()->implode(' ');
-            $this->assertStringContainsString('nao esta mais autorizado', $messages);
-        }
+        $approved = app(ApproveCteEmissionBatch::class)->handle($batch, $user);
 
-        $this->assertSame(CteEmissionBatchStatusEnum::DRAFT, $batch->refresh()->status);
-        $this->assertSame(CteDocumentStatusEnum::DRAFT, $batch->documents->first()->refresh()->status);
+        $this->assertSame(CteEmissionBatchStatusEnum::APPROVED, $approved->status);
+        $this->assertSame(CteDocumentStatusEnum::CANCELLED, $oldDocument->refresh()->status);
+        $this->assertSame(CteDocumentStatusEnum::QUEUED, $batch->documents->first()->refresh()->status);
     }
 
     public function test_direct_emitter_dispatches_one_job_per_live_document(): void
@@ -123,6 +133,7 @@ class ApproveCteEmissionBatchTest extends TestCase
         app(ApproveCteEmissionBatch::class)->handle($batch, $user);
 
         Queue::assertPushed(EmitCteDirectJob::class, 2);
+        Queue::assertPushed(EmitCteDirectJob::class, fn (EmitCteDirectJob $job): bool => $job->afterCommit === true);
         $this->assertTrue($batch->refresh()->documents->every(
             fn ($document): bool => $document->status === CteDocumentStatusEnum::QUEUED
                 && $document->emitter === 'direct'
