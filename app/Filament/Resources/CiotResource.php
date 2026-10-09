@@ -50,175 +50,187 @@ class CiotResource extends Resource
     public static function form(Form $form): Form
     {
         return $form
-            ->schema([
-                Forms\Components\Hidden::make('status')
-                    ->default(CiotStatusEnum::DRAFT->value),
-                Forms\Components\Section::make('Operação')
-                    ->columns(2)
-                    ->schema([
-                        Forms\Components\Select::make('line')
-                            ->label('Linha')
-                            ->options(self::lineOptions())
-                            ->default(CiotLineEnum::VehicleRemoval->value)
-                            ->live()
-                            ->required(),
-                        Forms\Components\Select::make('operation_type')
-                            ->label('Tipo de operação')
-                            ->options(self::operationTypeOptions())
-                            ->default(CiotOperationTypeEnum::Lotation->value)
-                            ->live()
-                            ->required()
-                            ->hintIcon('heroicon-m-information-circle')
-                            ->hintIconTooltip(fn (Forms\Get $get): string => self::operationTypeHint($get)),
-                        Forms\Components\Select::make('payer_id')
-                            ->label('Contratante (pátio pagante)')
-                            ->options(fn (): array => self::payerOptions())
-                            ->searchable()
-                            ->live()
-                            ->afterStateUpdated(function (Forms\Get $get, Forms\Set $set, ?string $state): void {
-                                $cnpj = Company::query()->find($state)?->cnpj;
-
-                                if (filled($cnpj)) {
-                                    $set('additional_payers', self::withoutPayerCnpjs($get('additional_payers') ?? [], [$cnpj]));
-                                }
-                            })
-                            ->required(),
-                        Forms\Components\Select::make('delivery_payer_id')
-                            ->label('Destinatário (pátio final da entrega)')
-                            ->options(fn (): array => self::payerOptions())
-                            ->searchable()
-                            ->live()
-                            ->afterStateUpdated(function (Forms\Set $set, ?string $state): void {
-                                $payer = Company::query()->find($state);
-
-                                if ($payer === null) {
-                                    return;
-                                }
-
-                                // O pátio de destino é o ponto final da rota:
-                                // reaproveita o endereço cadastrado no pagante.
-                                $set('destination.cidade', $payer->city);
-                                $set('destination.uf', $payer->state);
-
-                                if (filled($payer->zipcode)) {
-                                    $set('destination.cep', $payer->zipcode);
-                                }
-
-                                if (filled($payer->ibge_code)) {
-                                    $set('destination.ibge', $payer->ibge_code);
-                                }
-                            })
-                            ->required(),
-                        Forms\Components\CheckboxList::make('additional_payers')
-                            ->label('Contratantes adicionais (demais pátios da viagem)')
-                            ->options(fn (Forms\Get $get): array => self::additionalPayerOptions($get('payer_id')))
-                            ->live()
-                            ->nestedRecursiveRules([fn (Forms\Get $get): string => self::additionalPayerRule($get)])
-                            ->validationMessages(['not_in' => 'O pátio pagante não pode repetir nos contratantes adicionais (regra B119 da ANTT).'])
-                            ->afterStateHydrated(function (Forms\Set $set, ?Ciot $record, ?array $state): void {
-                                $clean = self::withoutPayerCnpjs($state ?? [], array_filter([$record?->payer_cnpj]));
-
-                                if ($clean !== ($state ?? [])) {
-                                    $set('additional_payers', $clean);
-                                }
-                            })
-                            ->visible(fn (Forms\Get $get): bool => $get('operation_type') === CiotOperationTypeEnum::Fractioned->value)
-                            ->columnSpanFull(),
-                    ]),
-                Forms\Components\Section::make('Rota')
-                    ->columns(2)
-                    ->schema([
-                        Forms\Components\Fieldset::make('Origem')
-                            ->columns(2)
-                            ->schema(self::locationFields('origin.')),
-                        Forms\Components\Fieldset::make('Destino')
-                            ->columns(2)
-                            ->schema(self::locationFields('destination.')),
-                        Forms\Components\TextInput::make('distance_km')
-                            ->label('Distância (km)')
-                            ->inputMode('decimal')
-                            ->formatStateUsing(fn ($state) => PtbrNumeric::format($state))
-                            ->rule(new PtbrNumericRule(min: 0.01))
-                            ->required()
-                            ->dehydrateStateUsing(fn ($state) => PtbrNumeric::normalize($state))
-                            ->suffixAction(
-                                Forms\Components\Actions\Action::make('calcularDistancia')
-                                    ->icon('heroicon-m-calculator')
-                                    ->label('Calcular distância')
-                                    ->color('gray')
-                                    ->action(function (Forms\Set $set, Forms\Get $get): void {
-                                        self::calculateDistance($set, $get);
-                                    }),
-                            ),
-                    ]),
-                Forms\Components\Section::make('Carga e veículos')
-                    ->columns(2)
-                    ->schema([
-                        Forms\Components\TextInput::make('freight_value')
-                            ->label('Valor do frete (total da viagem)')
-                            ->prefix('R$')
-                            ->inputMode('decimal')
-                            ->rule(new PtbrNumericRule(min: 0.01))
-                            ->required()
-                            ->dehydrateStateUsing(fn ($state) => PtbrNumeric::normalize($state))
-                            ->afterStateHydrated(function (?Ciot $record, Forms\Set $set): void {
-                                if ($record !== null) {
-                                    $set('freight_value', PtbrNumeric::format($record->freight_value_cents / 100));
-                                }
-                            }),
-                        Forms\Components\TextInput::make('cargo_weight_kg')
-                            ->label('Peso da carga (kg)')
-                            ->inputMode('decimal')
-                            ->formatStateUsing(fn ($state) => PtbrNumeric::format($state))
-                            ->rule(new PtbrNumericRule(min: 0))
-                            ->dehydrateStateUsing(fn ($state) => PtbrNumeric::normalize($state)),
-                        Forms\Components\CheckboxList::make('vehicle_ids')
-                            ->label('Veículos (1 automotor + reboques)')
-                            ->options(fn (): array => self::vehicleOptions())
-                            ->columns(2)
-                            ->required()
-                            ->columnSpanFull()
-                            ->afterStateHydrated(function (?Ciot $record, Forms\Set $set): void {
-                                if ($record === null) {
-                                    return;
-                                }
-
-                                $plates = collect($record->vehicles ?? [])
-                                    ->pluck('placa')
-                                    ->map(fn ($plate): string => strtoupper(trim((string) $plate)));
-
-                                $set('vehicle_ids', CiotVehicle::query()->whereIn('plate', $plates)->pluck('id')->all());
-                            }),
-                    ]),
-                Forms\Components\Section::make('Viagem')
-                    ->columns(2)
-                    ->schema([
-                        Forms\Components\DatePicker::make('travel_start_at')
-                            ->label('Início da viagem')
-                            ->default(today())
-                            ->minDate(today())
-                            ->required(),
-                        Forms\Components\DatePicker::make('travel_end_at')
-                            ->label('Fim da viagem')
-                            ->minDate(fn (Forms\Get $get) => $get('travel_start_at') ?? today())
-                            ->required(),
-                    ]),
-                Forms\Components\Section::make('Indicadores operacionais')
-                    ->columns(3)
-                    ->visible(fn (Forms\Get $get): bool => $get('operation_type') === CiotOperationTypeEnum::Lotation->value)
-                    ->schema([
-                        Forms\Components\Toggle::make('indicators.ind_alto_desempenho')
-                            ->label('Alto desempenho')
-                            ->default((bool) config('ciot.defaults.ind_alto_desempenho')),
-                        Forms\Components\Toggle::make('indicators.ind_retorno_vazio')
-                            ->label('Retorno vazio')
-                            ->default((bool) config('ciot.defaults.ind_retorno_vazio')),
-                        Forms\Components\Toggle::make('indicators.composicao_veicular')
-                            ->label('Composição veicular')
-                            ->default((bool) config('ciot.defaults.composicao_veicular')),
-                    ]),
-            ])
+            ->schema(self::formSchema())
             ->columns(1);
+    }
+
+    /**
+     * @return list<Forms\Components\Component>
+     */
+    public static function formSchema(bool $lineReadOnly = false): array
+    {
+        return [
+            Forms\Components\Hidden::make('status')
+                ->default(CiotStatusEnum::DRAFT->value),
+            Forms\Components\Section::make('Operação')
+                ->columns(2)
+                ->schema([
+                    Forms\Components\Select::make('line')
+                        ->label('Linha')
+                        ->options(self::lineOptions())
+                        ->default(CiotLineEnum::VehicleRemoval->value)
+                        ->disabled($lineReadOnly)
+                        ->dehydrated()
+                        ->live()
+                        ->required(),
+                    Forms\Components\Select::make('operation_type')
+                        ->label('Tipo de operação')
+                        ->options(self::operationTypeOptions())
+                        ->default(CiotOperationTypeEnum::Lotation->value)
+                        ->live()
+                        ->required()
+                        ->hintIcon('heroicon-m-information-circle')
+                        ->hintIconTooltip(fn (Forms\Get $get): string => self::operationTypeHint($get)),
+                    Forms\Components\Select::make('payer_id')
+                        ->label('Contratante (pátio pagante)')
+                        ->options(fn (): array => self::payerOptions())
+                        ->searchable()
+                        ->live()
+                        ->afterStateUpdated(function (Forms\Get $get, Forms\Set $set, ?string $state): void {
+                            $cnpj = Company::query()->find($state)?->cnpj;
+
+                            if (filled($cnpj)) {
+                                $set('additional_payers', self::withoutPayerCnpjs($get('additional_payers') ?? [], [$cnpj]));
+                            }
+                        })
+                        ->required(),
+                    Forms\Components\Select::make('delivery_payer_id')
+                        ->label('Destinatário (pátio final da entrega)')
+                        ->options(fn (): array => self::payerOptions())
+                        ->searchable()
+                        ->live()
+                        ->afterStateUpdated(function (Forms\Set $set, ?string $state): void {
+                            $payer = Company::query()->find($state);
+
+                            if ($payer === null) {
+                                return;
+                            }
+
+                            // O pátio de destino é o ponto final da rota:
+                            // reaproveita o endereço cadastrado no pagante.
+                            $set('destination.cidade', $payer->city);
+                            $set('destination.uf', $payer->state);
+
+                            if (filled($payer->zipcode)) {
+                                $set('destination.cep', $payer->zipcode);
+                            }
+
+                            if (filled($payer->ibge_code)) {
+                                $set('destination.ibge', $payer->ibge_code);
+                            }
+                        })
+                        ->required(),
+                    Forms\Components\CheckboxList::make('additional_payers')
+                        ->label('Contratantes adicionais (demais pátios da viagem)')
+                        ->options(fn (Forms\Get $get): array => self::additionalPayerOptions($get('payer_id')))
+                        ->live()
+                        ->nestedRecursiveRules([fn (Forms\Get $get): string => self::additionalPayerRule($get)])
+                        ->validationMessages(['not_in' => 'O pátio pagante não pode repetir nos contratantes adicionais (regra B119 da ANTT).'])
+                        ->afterStateHydrated(function (Forms\Set $set, ?Ciot $record, ?array $state): void {
+                            $clean = self::withoutPayerCnpjs($state ?? [], array_filter([$record?->payer_cnpj]));
+
+                            if ($clean !== ($state ?? [])) {
+                                $set('additional_payers', $clean);
+                            }
+                        })
+                        ->visible(fn (Forms\Get $get): bool => $get('operation_type') === CiotOperationTypeEnum::Fractioned->value)
+                        ->columnSpanFull(),
+                ]),
+            Forms\Components\Section::make('Rota')
+                ->columns(2)
+                ->schema([
+                    Forms\Components\Fieldset::make('Origem')
+                        ->columns(2)
+                        ->schema(self::locationFields('origin.')),
+                    Forms\Components\Fieldset::make('Destino')
+                        ->columns(2)
+                        ->schema(self::locationFields('destination.')),
+                    Forms\Components\TextInput::make('distance_km')
+                        ->label('Distância (km)')
+                        ->inputMode('decimal')
+                        ->formatStateUsing(fn ($state) => PtbrNumeric::format($state))
+                        ->rule(new PtbrNumericRule(min: 0.01))
+                        ->required()
+                        ->dehydrateStateUsing(fn ($state) => PtbrNumeric::normalize($state))
+                        ->suffixAction(
+                            Forms\Components\Actions\Action::make('calcularDistancia')
+                                ->icon('heroicon-m-calculator')
+                                ->label('Calcular distância')
+                                ->color('gray')
+                                ->action(function (Forms\Set $set, Forms\Get $get): void {
+                                    self::calculateDistance($set, $get);
+                                }),
+                        ),
+                ]),
+            Forms\Components\Section::make('Carga e veículos')
+                ->columns(2)
+                ->schema([
+                    Forms\Components\TextInput::make('freight_value')
+                        ->label('Valor do frete (total da viagem)')
+                        ->prefix('R$')
+                        ->inputMode('decimal')
+                        ->rule(new PtbrNumericRule(min: 0.01))
+                        ->required()
+                        ->dehydrateStateUsing(fn ($state) => PtbrNumeric::normalize($state))
+                        ->afterStateHydrated(function (?Ciot $record, Forms\Set $set): void {
+                            if ($record !== null) {
+                                $set('freight_value', PtbrNumeric::format($record->freight_value_cents / 100));
+                            }
+                        }),
+                    Forms\Components\TextInput::make('cargo_weight_kg')
+                        ->label('Peso da carga (kg)')
+                        ->inputMode('decimal')
+                        ->formatStateUsing(fn ($state) => PtbrNumeric::format($state))
+                        ->rule(new PtbrNumericRule(min: 0))
+                        ->dehydrateStateUsing(fn ($state) => PtbrNumeric::normalize($state)),
+                    Forms\Components\CheckboxList::make('vehicle_ids')
+                        ->label('Veículos (1 automotor + reboques)')
+                        ->options(fn (Forms\Get $get): array => self::vehicleOptions(
+                            CiotLineEnum::tryFrom((string) $get('line'))?->value,
+                        ))
+                        ->columns(2)
+                        ->required()
+                        ->columnSpanFull()
+                        ->afterStateHydrated(function (?Ciot $record, Forms\Set $set): void {
+                            if ($record === null) {
+                                return;
+                            }
+
+                            $plates = collect($record->vehicles ?? [])
+                                ->pluck('placa')
+                                ->map(fn ($plate): string => strtoupper(trim((string) $plate)));
+
+                            $set('vehicle_ids', CiotVehicle::query()->whereIn('plate', $plates)->pluck('id')->all());
+                        }),
+                ]),
+            Forms\Components\Section::make('Viagem')
+                ->columns(2)
+                ->schema([
+                    Forms\Components\DatePicker::make('travel_start_at')
+                        ->label('Início da viagem')
+                        ->default(today())
+                        ->minDate(today())
+                        ->required(),
+                    Forms\Components\DatePicker::make('travel_end_at')
+                        ->label('Fim da viagem')
+                        ->minDate(fn (Forms\Get $get) => $get('travel_start_at') ?? today())
+                        ->required(),
+                ]),
+            Forms\Components\Section::make('Indicadores operacionais')
+                ->columns(3)
+                ->visible(fn (Forms\Get $get): bool => $get('operation_type') === CiotOperationTypeEnum::Lotation->value)
+                ->schema([
+                    Forms\Components\Toggle::make('indicators.ind_alto_desempenho')
+                        ->label('Alto desempenho')
+                        ->default((bool) config('ciot.defaults.ind_alto_desempenho')),
+                    Forms\Components\Toggle::make('indicators.ind_retorno_vazio')
+                        ->label('Retorno vazio')
+                        ->default((bool) config('ciot.defaults.ind_retorno_vazio')),
+                    Forms\Components\Toggle::make('indicators.composicao_veicular')
+                        ->label('Composição veicular')
+                        ->default((bool) config('ciot.defaults.composicao_veicular')),
+                ]),
+        ];
     }
 
     public static function infolist(Infolist $infolist): Infolist
@@ -231,8 +243,10 @@ class CiotResource extends Resource
                         TextEntry::make('status')
                             ->label('Situação')
                             ->badge()
-                            ->color(fn (CiotStatusEnum $state): string => $state->color())
-                            ->formatStateUsing(fn (CiotStatusEnum $state): string => $state->label()),
+                            ->color(fn (CiotStatusEnum $state, Ciot $record): string => $record->isSyntheticHomologation() ? 'warning' : $state->color())
+                            ->formatStateUsing(fn (CiotStatusEnum $state, Ciot $record): string => $record->isSyntheticHomologation()
+                                ? 'Sintético (homologação)'
+                                : $state->label()),
                         TextEntry::make('line')
                             ->label('Linha')
                             ->formatStateUsing(fn (CiotLineEnum $state): string => $state->label()),
@@ -369,8 +383,10 @@ class CiotResource extends Resource
                 Tables\Columns\TextColumn::make('status')
                     ->label('Situação')
                     ->badge()
-                    ->color(fn (CiotStatusEnum $state): string => $state->color())
-                    ->formatStateUsing(fn (CiotStatusEnum $state): string => $state->label()),
+                    ->color(fn (CiotStatusEnum $state, Ciot $record): string => $record->isSyntheticHomologation() ? 'warning' : $state->color())
+                    ->formatStateUsing(fn (CiotStatusEnum $state, Ciot $record): string => $record->isSyntheticHomologation()
+                        ? 'Sintético (homologação)'
+                        : $state->label()),
                 Tables\Columns\TextColumn::make('line')
                     ->label('Linha')
                     ->badge()
@@ -428,7 +444,7 @@ class CiotResource extends Resource
                     ->label('Cancelar')
                     ->icon('heroicon-o-x-circle')
                     ->color('danger')
-                    ->visible(fn (Ciot $record): bool => $record->status === CiotStatusEnum::ISSUED)
+                    ->visible(fn (Ciot $record): bool => $record->status === CiotStatusEnum::ISSUED && ! $record->isSyntheticHomologation())
                     ->form([
                         Forms\Components\Textarea::make('motivo')
                             ->label('Motivo (obrigatório, até 500 caracteres)')
@@ -465,7 +481,7 @@ class CiotResource extends Resource
                     ->label('Encerrar')
                     ->icon('heroicon-o-check-circle')
                     ->color('success')
-                    ->visible(fn (Ciot $record): bool => $record->status === CiotStatusEnum::ISSUED)
+                    ->visible(fn (Ciot $record): bool => $record->status === CiotStatusEnum::ISSUED && ! $record->isSyntheticHomologation())
                     ->requiresConfirmation()
                     ->modalHeading('Encerrar CIOT')
                     ->modalDescription('O encerramento marca a operação como concluída na ANTT. É a rotina feita 1-2 dias após a emissão.')
@@ -634,10 +650,13 @@ class CiotResource extends Resource
     }
 
     /** @return array<int|string, string> */
-    protected static function vehicleOptions(): array
+    protected static function vehicleOptions(?string $line = null): array
     {
         return CiotVehicle::query()
             ->where('is_active', true)
+            ->when($line !== null, fn ($query) => $query->where(fn ($query) => $query
+                ->where('line', $line)
+                ->orWhereNull('line')))
             ->orderBy('type')
             ->orderBy('plate')
             ->get()

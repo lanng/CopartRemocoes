@@ -9,6 +9,7 @@ use DomainException;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Support\Facades\DB;
 use Spatie\Activitylog\LogOptions;
 use Spatie\Activitylog\Traits\LogsActivity;
@@ -67,9 +68,19 @@ class Ciot extends Model
         return $this->belongsTo(CteEmissionBatch::class);
     }
 
+    public function mdfeDocuments(): HasMany
+    {
+        return $this->hasMany(MdfeDocument::class);
+    }
+
     public function isOpen(): bool
     {
         return $this->status === CiotStatusEnum::ISSUED;
+    }
+
+    public function isSyntheticHomologation(): bool
+    {
+        return ($this->response['homologation_fixture']['synthetic'] ?? false) === true;
     }
 
     /**

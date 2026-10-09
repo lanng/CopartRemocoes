@@ -56,6 +56,22 @@ class CiotResourceTest extends TestCase
             ->assertSee('Emitido');
     }
 
+    public function test_synthetic_homologation_ciots_are_labeled_and_cannot_be_cancelled_or_closed_from_the_list(): void
+    {
+        $ciot = Ciot::factory()->issued()->create([
+            'response' => ['homologation_fixture' => ['synthetic' => true]],
+        ]);
+
+        Livewire::test(ListCiots::class)
+            ->assertCanSeeTableRecords([$ciot])
+            ->assertSee('Sintético (homologação)')
+            ->assertTableActionHidden('cancel', $ciot)
+            ->assertTableActionHidden('close', $ciot);
+
+        Livewire::test(ViewCiot::class, ['record' => $ciot->id])
+            ->assertSee('Sintético (homologação)');
+    }
+
     public function test_the_create_form_builds_a_draft_ciot_snapshot(): void
     {
         $payer = Company::factory()->create(['cnpj' => '14517191000925', 'name' => 'Copart Caçapava']);
