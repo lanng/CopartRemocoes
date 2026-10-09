@@ -2,84 +2,446 @@
 
 namespace Database\Seeders;
 
-use App\Models\City;
 use App\Models\Company;
 use Illuminate\Database\Seeder;
 
 class CompanySeeder extends Seeder
 {
     /**
-     * Pátios Copart confirmados (spec, seção 5 — o CNPJ 14.517.191/0001-78
-     * permanece fora até confirmação). Endereços/CEPs são preenchidos pelo operador.
+     * Cadastros fiscais conferidos no ambiente local em 09/10/2026.
      *
-     * @return array<string, array{name: string, cnpj: string, city: string, state: string}>
+     * @return list<array{name: string, cnpj: string, ie: ?string, street: string, number: string, complement: ?string, district: string, city: string, state: string, zipcode: string, ibge_code: string, is_active: bool}>
      */
-    public static function payers(): array
+    public static function companies(): array
     {
         return [
-            'cacapava' => [
-                'name' => 'Copart Caçapava',
-                'cnpj' => '14517191000925',
-                'city' => 'Caçapava',
-                'state' => 'SP',
+            [
+                'name' => 'LOCALIZA FLEET S.A',
+                'cnpj' => '02286479000108',
+                'ie' => '46213490639',
+                'street' => 'AV BERNARDO MONTEIRO',
+                'number' => 'S/N',
+                'complement' => null,
+                'district' => 'Funcionários',
+                'city' => 'Belo Horizonte',
+                'state' => 'MG',
+                'zipcode' => '03150902',
+                'ibge_code' => '3106200',
+                'is_active' => true,
             ],
-            'pirapora' => [
-                'name' => 'Copart Pirapora do Bom Jesus',
+            [
+                'name' => 'ALFA SEGURADORA S.A.',
+                'cnpj' => '02713529000188',
+                'ie' => '115550340117',
+                'street' => 'Alameda Santos',
+                'number' => '466',
+                'complement' => 'Andar 7',
+                'district' => 'Cerqueira César',
+                'city' => 'São Paulo',
+                'state' => 'SP',
+                'zipcode' => '01418000',
+                'ibge_code' => '3550308',
+                'is_active' => true,
+            ],
+            [
+                'name' => 'BANCO TOYOTA DO BRASIL S.A.',
+                'cnpj' => '03215790000110',
+                'ie' => null,
+                'street' => 'Avenida Jornalista Roberto Marinho',
+                'number' => '85',
+                'complement' => null,
+                'district' => 'Cidade Monções',
+                'city' => 'São Paulo',
+                'state' => 'SP',
+                'zipcode' => '04576010',
+                'ibge_code' => '3550308',
+                'is_active' => true,
+            ],
+            [
+                'name' => 'PORTOSEG S/A - CREDITO, FINANCIAMENTO E INVESTIMENTO',
+                'cnpj' => '04862600000110',
+                'ie' => 'ISENTO',
+                'street' => 'Alameda Barão de Piracicaba',
+                'number' => '740',
+                'complement' => null,
+                'district' => 'Campos Elíseos',
+                'city' => 'São Paulo',
+                'state' => 'SP',
+                'zipcode' => '01216012',
+                'ibge_code' => '3550308',
+                'is_active' => true,
+            ],
+            [
+                'name' => 'CNP CONSORCIO S.A. ADMINISTRADORA DE CONSORCIOS',
+                'cnpj' => '05349595000109',
+                'ie' => '743961400100',
+                'street' => 'Quadra SHN Quadra 1 Bloco E',
+                'number' => 'S/N',
+                'complement' => null,
+                'district' => 'Asa Norte',
+                'city' => 'Brasília',
+                'state' => 'DF',
+                'zipcode' => '70701050',
+                'ibge_code' => '5300108',
+                'is_active' => true,
+            ],
+            [
+                'name' => 'Copart do Brasil Organização de Leilões Ltda',
+                'cnpj' => '14517191000178',
+                'ie' => '379121178113',
+                'street' => 'Estrada Muranaka',
+                'number' => '199',
+                'complement' => null,
+                'district' => 'Jardim Novo Horizonte',
+                'city' => 'Itaquaquecetuba',
+                'state' => 'SP',
+                'zipcode' => '08597230',
+                'ibge_code' => '3523107',
+                'is_active' => true,
+            ],
+            [
+                'name' => 'Copart do Brasil Organização de Leilões Ltda',
+                'cnpj' => '14517191000259',
+                'ie' => '298114154113',
+                'street' => 'Estrada Dona Maria José Ferraz Prado',
+                'number' => '1700',
+                'complement' => null,
+                'district' => 'Chácaras Bartira',
+                'city' => 'Embu das Artes',
+                'state' => 'SP',
+                'zipcode' => '06845070',
+                'ibge_code' => '3515004',
+                'is_active' => true,
+            ],
+            [
+                'name' => 'Copart do Brasil Organização de Leilões Ltda',
                 'cnpj' => '14517191000330',
+                'ie' => '540011815116',
+                'street' => 'Estrada dos Romeiros',
+                'number' => '3000',
+                'complement' => null,
+                'district' => 'Bairro Sitio Guarapiranga',
                 'city' => 'Pirapora do Bom Jesus',
                 'state' => 'SP',
+                'zipcode' => '06550000',
+                'ibge_code' => '3539103',
+                'is_active' => true,
             ],
-            'osasco' => [
-                'name' => 'Copart Osasco',
+            [
+                'name' => 'Copart do Brasil Organização de Leilões Ltda',
                 'cnpj' => '14517191000410',
+                'ie' => '492678527113',
+                'street' => 'Rua Henry Ford',
+                'number' => '965',
+                'complement' => null,
+                'district' => 'Presidente Altino',
                 'city' => 'Osasco',
                 'state' => 'SP',
+                'zipcode' => '06210108',
+                'ibge_code' => '3534401',
+                'is_active' => true,
             ],
-            'embu' => [
-                'name' => 'Copart Embú das Artes',
-                'cnpj' => '14517191000259',
-                'city' => 'Embú das Artes',
+            [
+                'name' => 'Copart do Brasil Organização de Leilões Ltda',
+                'cnpj' => '14517191000925',
+                'ie' => '234235768117',
+                'street' => 'Avenida Henry Nestlé',
+                'number' => '1500',
+                'complement' => null,
+                'district' => 'Vila Galvão',
+                'city' => 'Caçapava',
                 'state' => 'SP',
+                'zipcode' => '12286140',
+                'ibge_code' => '3508504',
+                'is_active' => true,
+            ],
+            [
+                'name' => 'LOCALIZA RENT A CAR SA',
+                'cnpj' => '16670085000155',
+                'ie' => '0622449110096',
+                'street' => 'Avenida Bernardo Monteiro',
+                'number' => '1563',
+                'complement' => null,
+                'district' => 'Funcionários',
+                'city' => 'Belo Horizonte',
+                'state' => 'MG',
+                'zipcode' => '30150902',
+                'ibge_code' => '3106200',
+                'is_active' => true,
+            ],
+            [
+                'name' => 'SUHAI SEGURADORA S.A.',
+                'cnpj' => '16825255000123',
+                'ie' => '144667846112',
+                'street' => 'Alameda Iraé',
+                'number' => '523',
+                'complement' => null,
+                'district' => 'Indianópolis',
+                'city' => 'São Paulo',
+                'state' => 'SP',
+                'zipcode' => '04075000',
+                'ibge_code' => '3550308',
+                'is_active' => true,
+            ],
+            [
+                'name' => 'ZURICH MINAS BRASIL SEGUROS S.A',
+                'cnpj' => '17197385000121',
+                'ie' => '620033750083',
+                'street' => 'Avenida Getúlio Vargas',
+                'number' => '1420',
+                'complement' => null,
+                'district' => 'Savassi',
+                'city' => 'Belo Horizonte',
+                'state' => 'MG',
+                'zipcode' => '30112021',
+                'ibge_code' => '3106200',
+                'is_active' => true,
+            ],
+            [
+                'name' => 'SANCOR SEGUROS DO BRASIL S.A',
+                'cnpj' => '17643407000130',
+                'ie' => 'ISENTO',
+                'street' => 'Avenida Duque de Caxias',
+                'number' => '882',
+                'complement' => null,
+                'district' => 'Zona 01',
+                'city' => 'Maringá',
+                'state' => 'PR',
+                'zipcode' => '87013180',
+                'ibge_code' => '4115200',
+                'is_active' => true,
+            ],
+            [
+                'name' => 'HDI SEGUROS SA NOVO',
+                'cnpj' => '29980158000157',
+                'ie' => '110539135117',
+                'street' => 'Avenida das Nações Unidas',
+                'number' => '14261',
+                'complement' => null,
+                'district' => 'Brooklin Paulista',
+                'city' => 'São Paulo',
+                'state' => 'SP',
+                'zipcode' => '04578000',
+                'ibge_code' => '3550308',
+                'is_active' => true,
+            ],
+            [
+                'name' => 'SANTANDER AUTO S.A',
+                'cnpj' => '30617319000121',
+                'ie' => '123548100115',
+                'street' => 'Avenida Presidente Juscelino Kubitschek',
+                'number' => '2041-2235',
+                'complement' => null,
+                'district' => 'Vila Nova Conceição',
+                'city' => 'São Paulo',
+                'state' => 'SP',
+                'zipcode' => '04543001',
+                'ibge_code' => '3550308',
+                'is_active' => true,
+            ],
+            [
+                'name' => 'EZZE SEGUROS S.A.',
+                'cnpj' => '31534848000124',
+                'ie' => '138700710116',
+                'street' => 'Avenida Presidente Juscelino Kubitschek',
+                'number' => '50',
+                'complement' => 'ANDAR 10',
+                'district' => 'Vila Nova Conceição',
+                'city' => 'São Paulo',
+                'state' => 'SP',
+                'zipcode' => '04543000',
+                'ibge_code' => '3550308',
+                'is_active' => true,
+            ],
+            [
+                'name' => 'SEGUROS SURA S.A.',
+                'cnpj' => '33065699000127',
+                'ie' => '148415559112',
+                'street' => 'Avenida das Nações Unidas',
+                'number' => '14261',
+                'complement' => null,
+                'district' => 'Brooklin Paulista',
+                'city' => 'São Paulo',
+                'state' => 'SP',
+                'zipcode' => '04578000',
+                'ibge_code' => '3550308',
+                'is_active' => true,
+            ],
+            [
+                'name' => 'TOKIO MARINE SEGURADORA S.A ',
+                'cnpj' => '33164021000100',
+                'ie' => '110794302111',
+                'street' => 'Rua Sampaio Viana',
+                'number' => '44',
+                'complement' => null,
+                'district' => 'Paraíso',
+                'city' => 'São Paulo',
+                'state' => 'SP',
+                'zipcode' => '04004902',
+                'ibge_code' => '3550308',
+                'is_active' => true,
+            ],
+            [
+                'name' => 'CAIXA SEGURADORA S/A',
+                'cnpj' => '34020354000110',
+                'ie' => '731511800112',
+                'street' => 'Quadra SHN Quadra 1 Bloco E',
+                'number' => 'S/N',
+                'complement' => null,
+                'district' => 'Asa Norte',
+                'city' => 'Brasília',
+                'state' => 'DF',
+                'zipcode' => '70701050',
+                'ibge_code' => '5300108',
+                'is_active' => true,
+            ],
+            [
+                'name' => 'CW TECHNOLOGY LTDA',
+                'cnpj' => '34504257000100',
+                'ie' => '35151130064',
+                'street' => 'Rua Queluzita',
+                'number' => '34',
+                'complement' => null,
+                'district' => 'Dom Joaquim',
+                'city' => 'Belo Horizonte',
+                'state' => 'MG',
+                'zipcode' => '31920011',
+                'ibge_code' => '3106200',
+                'is_active' => true,
+            ],
+            [
+                'name' => 'PIER SEGURADORA S.A.',
+                'cnpj' => '39380513000100',
+                'ie' => '131268957110',
+                'street' => 'Rua Cláudio Soares',
+                'number' => '72',
+                'complement' => null,
+                'district' => 'Pinheiros',
+                'city' => 'São Paulo',
+                'state' => 'SP',
+                'zipcode' => '05422030',
+                'ibge_code' => '3550308',
+                'is_active' => true,
+            ],
+            [
+                'name' => 'JUSTOS CONSULTORIA E SERVICOS EM SEGUROS LTDA',
+                'cnpj' => '40317530000182',
+                'ie' => 'ISENTO',
+                'street' => 'Rua Cláudio Soares',
+                'number' => '72',
+                'complement' => null,
+                'district' => 'Pinheiros',
+                'city' => 'São Paulo',
+                'state' => 'SP',
+                'zipcode' => '05422030',
+                'ibge_code' => '3550308',
+                'is_active' => true,
+            ],
+            [
+                'name' => 'MAPFRE SEGUROS GERAIS S.A.',
+                'cnpj' => '61074175000138',
+                'ie' => '108244683111',
+                'street' => 'Avenida das Nações Unidas',
+                'number' => '14261',
+                'complement' => null,
+                'district' => 'Vila Gertrudes',
+                'city' => 'São Paulo',
+                'state' => 'SP',
+                'zipcode' => '04794000',
+                'ibge_code' => '3550308',
+                'is_active' => true,
+            ],
+            [
+                'name' => 'PORTO SEGURO COMPANHIA DE SEGUROS GERAIS',
+                'cnpj' => '61198164000160',
+                'ie' => '108377122112',
+                'street' => 'Avenida Rio Branco',
+                'number' => '1489',
+                'complement' => null,
+                'district' => 'Campos Elíseos',
+                'city' => 'São Paulo',
+                'state' => 'SP',
+                'zipcode' => '01205001',
+                'ibge_code' => '3550308',
+                'is_active' => true,
+            ],
+            [
+                'name' => 'YELUM SEGUROS S.A',
+                'cnpj' => '61550141000172',
+                'ie' => '108424974119',
+                'street' => 'Rua Doutor Geraldo Campos Moreira',
+                'number' => '110',
+                'complement' => null,
+                'district' => 'Cidade Monções',
+                'city' => 'São Paulo',
+                'state' => 'SP',
+                'zipcode' => '04571020',
+                'ibge_code' => '3550308',
+                'is_active' => true,
+            ],
+            [
+                'name' => 'ALLIANZ SEGUROS SA',
+                'cnpj' => '61573796000166',
+                'ie' => '108063509113',
+                'street' => 'Rua Eugênio de Medeiros',
+                'number' => '303',
+                'complement' => null,
+                'district' => 'Pinheiros',
+                'city' => 'São Paulo',
+                'state' => 'SP',
+                'zipcode' => '05425000',
+                'ibge_code' => '3550308',
+                'is_active' => true,
+            ],
+            [
+                'name' => 'ALLSEG SEGURADORA S/A',
+                'cnpj' => '67865360000127',
+                'ie' => '143951806114',
+                'street' => 'Avenida Angélica',
+                'number' => '2626',
+                'complement' => null,
+                'district' => 'Consolação',
+                'city' => 'São Paulo',
+                'state' => 'SP',
+                'zipcode' => '01228200',
+                'ibge_code' => '3550308',
+                'is_active' => true,
+            ],
+            [
+                'name' => 'GENTE SEGURADORA SA',
+                'cnpj' => '90180605000102',
+                'ie' => 'ISENTO',
+                'street' => 'Rua Marechal Floriano Peixoto',
+                'number' => '450',
+                'complement' => null,
+                'district' => 'Centro Histórico',
+                'city' => 'Porto Alegre',
+                'state' => 'RS',
+                'zipcode' => '90020060',
+                'ibge_code' => '4314902',
+                'is_active' => true,
             ],
         ];
     }
 
     public function run(): void
     {
-        foreach (self::payers() as $payer) {
-            $patio = Company::query()->firstOrCreate(
-                ['cnpj' => $payer['cnpj']],
-                [
-                    'name' => $payer['name'],
-                    'city' => $payer['city'],
-                    'state' => $payer['state'],
-                    'is_active' => true,
-                ],
+        $created = 0;
+        $skipped = 0;
+
+        foreach (self::companies() as $attributes) {
+            $company = Company::query()->firstOrCreate(
+                ['cnpj' => $attributes['cnpj']],
+                $attributes,
             );
 
-            $this->resolveIbge($patio, $payer['city'], $payer['state']);
-        }
-    }
-
-    /**
-     * Resolve o código IBGE na base local de municípios (ciot:seed-cities).
-     */
-    protected function resolveIbge(Company $patio, string $city, string $state): void
-    {
-        if (filled($patio->ibge_code)) {
-            return;
+            if ($company->wasRecentlyCreated) {
+                $created++;
+            } else {
+                $skipped++;
+            }
         }
 
-        $found = City::query()
-            ->where('state', $state)
-            ->where(fn ($query) => $query
-                ->where('name', $city)
-                ->orWhere('name', 'like', "{$city}%"))
-            ->orderByRaw('case when name = ? then 0 else 1 end', [$city])
-            ->first();
-
-        if ($found !== null) {
-            $patio->forceFill(['ibge_code' => $found->ibge_code])->save();
-        }
+        $this->command?->info("Empresas: {$created} criadas; {$skipped} ignoradas por CNPJ já cadastrado.");
     }
 }

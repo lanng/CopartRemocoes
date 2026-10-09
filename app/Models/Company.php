@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use Illuminate\Database\Eloquent\Casts\Attribute;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\HasMany;
@@ -27,6 +28,34 @@ class Company extends Model
         return [
             'is_active' => 'boolean',
         ];
+    }
+
+    public static function normalizeCnpj(?string $value): string
+    {
+        return preg_replace('/[.\-\/\s]+/u', '', $value ?? '') ?? '';
+    }
+
+    public static function normalizeIe(?string $value): ?string
+    {
+        $value = trim($value ?? '');
+
+        if (mb_strtoupper($value) === 'ISENTO') {
+            return 'ISENTO';
+        }
+
+        $value = preg_replace('/[.\-\/\s]+/u', '', $value) ?? '';
+
+        return $value === '' ? null : $value;
+    }
+
+    protected function cnpj(): Attribute
+    {
+        return Attribute::make(set: fn (?string $value): string => self::normalizeCnpj($value));
+    }
+
+    protected function ie(): Attribute
+    {
+        return Attribute::make(set: fn (?string $value): ?string => self::normalizeIe($value));
     }
 
     public function ciots(): HasMany

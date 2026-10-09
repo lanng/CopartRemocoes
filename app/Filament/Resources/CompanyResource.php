@@ -34,20 +34,30 @@ class CompanyResource extends Resource
                     ->columns(2)
                     ->schema([
                         Forms\Components\TextInput::make('name')
-                            ->label('Nome')
+                            ->label('Razão social')
                             ->required()
                             ->maxLength(255),
                         Forms\Components\TextInput::make('cnpj')
                             ->label('CNPJ (14 dígitos)')
-                            ->numeric()
-                            ->length(14)
+                            ->placeholder('05.257.723/0001-30')
+                            ->helperText('Aceita CNPJ com ou sem pontuação.')
+                            ->mutateStateForValidationUsing(fn (?string $state): string => Company::normalizeCnpj($state))
+                            ->dehydrateStateUsing(fn (?string $state): string => Company::normalizeCnpj($state))
+                            ->regex('/^[0-9]{14}$/')
+                            ->validationMessages(['regex' => 'Informe um CNPJ com 14 dígitos, com ou sem pontuação.'])
                             ->unique(ignoreRecord: true)
                             ->required(),
                         Forms\Components\TextInput::make('ie')
                             ->label('Inscrição Estadual (IE)')
-                            ->numeric()
-                            ->maxLength(20)
-                            ->required(fn (string $operation): bool => $operation === 'create'),
+                            ->helperText('Aceita pontuação. Informe ISENTO para contribuinte isento ou deixe vazio para não contribuinte.')
+                            ->mutateStateForValidationUsing(fn (?string $state): ?string => Company::normalizeIe($state))
+                            ->dehydrateStateUsing(fn (?string $state): ?string => Company::normalizeIe($state))
+                            ->regex('/^(?:[0-9]{1,14}|ISENTO)$/')
+                            ->rules(['not_in:0,1'])
+                            ->validationMessages([
+                                'regex' => 'Informe a IE numérica com até 14 dígitos, ISENTO ou deixe o campo vazio.',
+                                'not_in' => 'Informe ISENTO para contribuinte isento ou deixe vazio para não contribuinte; 0 e 1 não são inscrições estaduais.',
+                            ]),
                     ]),
                 Forms\Components\Section::make('Endereço')
                     ->columns(2)
