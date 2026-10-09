@@ -4,6 +4,7 @@ namespace Tests\Feature\Filament;
 
 use App\Filament\Resources\CiotVehicleResource\Pages\CreateCiotVehicle;
 use App\Filament\Resources\CompanyResource\Pages\CreateCompany;
+use App\Filament\Resources\CompanyResource\Pages\EditCompany;
 use App\Filament\Resources\CompanyResource\Pages\ListCompanies;
 use App\Models\CiotVehicle;
 use App\Models\City;
@@ -13,6 +14,7 @@ use Filament\Facades\Filament;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Http;
 use Livewire\Livewire;
+use PHPUnit\Framework\Attributes\DataProvider;
 use Tests\TestCase;
 
 class CiotSupportResourcesTest extends TestCase
@@ -54,7 +56,7 @@ class CiotSupportResourcesTest extends TestCase
         ]);
     }
 
-    public function test_requires_ie_and_address_on_creation(): void
+    public function test_requires_address_on_creation(): void
     {
         Livewire::test(CreateCompany::class)
             ->fillForm([
@@ -64,7 +66,105 @@ class CiotSupportResourcesTest extends TestCase
                 'state' => 'SP',
             ])
             ->call('create')
-            ->assertHasFormErrors(['ie', 'street', 'number', 'district', 'zipcode', 'ibge_code']);
+            ->assertHasFormErrors(['street', 'number', 'district', 'zipcode', 'ibge_code']);
+    }
+
+    #[DataProvider('companyInscriptionExamples')]
+    public function test_accepts_formatted_identifiers_and_optional_ie(?string $ie, ?string $expectedIe): void
+    {
+        Livewire::test(CreateCompany::class)
+            ->fillForm($this->companyFormData(['cnpj' => '05.257.723/0001-30', 'ie' => $ie]))
+            ->call('create')
+            ->assertHasNoFormErrors();
+
+        $this->assertDatabaseHas(Company::class, [
+            'cnpj' => '05257723000130',
+            'ie' => $expectedIe,
+        ]);
+    }
+
+    public static function companyInscriptionExamples(): array
+    {
+        return [
+            'numeric IE with punctuation and leading zero' => ['012.123.123.132', '012123123132'],
+            'exempt contributor' => [' isento ', 'ISENTO'],
+            'non contributor' => [null, null],
+            'empty IE' => ['', null],
+        ];
+    }
+
+    public function test_rejects_a_duplicate_cnpj_with_punctuation(): void
+    {
+        Company::factory()->create(['cnpj' => '05257723000130']);
+
+        Livewire::test(CreateCompany::class)
+            ->fillForm($this->companyFormData(['cnpj' => '05.257.723/0001-30']))
+            ->call('create')
+            ->assertHasFormErrors(['cnpj']);
+    }
+
+    #[DataProvider('companyInscriptionExamples')]
+    public function test_edits_a_company_with_formatted_cnpj_without_conflicting_with_itself(?string $ie, ?string $expectedIe): void
+    {
+        $company = Company::factory()->create(['cnpj' => '05257723000130']);
+
+        Livewire::test(EditCompany::class, ['record' => $company->getRouteKey()])
+            ->fillForm(['cnpj' => '05.257.723/0001-30', 'ie' => $ie])
+            ->call('save')
+            ->assertHasNoFormErrors();
+
+        $this->assertSame('05257723000130', $company->fresh()->cnpj);
+        $this->assertSame($expectedIe, $company->fresh()->ie);
+        $this->assertDatabaseCount('companies', 1);
+    }
+
+    #[DataProvider('invalidCompanyIdentifiers')]
+    public function test_rejects_invalid_identifiers_without_removing_unexpected_letters(string $field, string $value): void
+    {
+        Livewire::test(CreateCompany::class)
+            ->fillForm($this->companyFormData([$field => $value]))
+            ->call('create')
+            ->assertHasFormErrors([$field]);
+
+        $this->assertDatabaseCount('companies', 0);
+    }
+
+    public static function invalidCompanyIdentifiers(): array
+    {
+        return [
+            'CNPJ with unexpected letter' => ['cnpj', '05A.257.723/0001-30'],
+            'short CNPJ' => ['cnpj', '05.257.723/0001-3'],
+            'IE with unexpected letter' => ['ie', '123A.123.123.132'],
+            'old absent IE marker' => ['ie', '0'],
+            'old exempt IE marker' => ['ie', '1'],
+        ];
+    }
+
+    public function test_company_model_preserves_leading_zeroes_when_saving_formatted_identifiers(): void
+    {
+        $company = Company::factory()->create([
+            'cnpj' => '05.257.723/0001-30',
+            'ie' => '012.123.123.132',
+        ])->fresh();
+
+        $this->assertSame('05257723000130', $company->cnpj);
+        $this->assertSame('012123123132', $company->ie);
+    }
+
+    private function companyFormData(array $overrides = []): array
+    {
+        return array_replace([
+            'name' => 'Empresa de teste',
+            'cnpj' => '05257723000130',
+            'ie' => '123123123132',
+            'street' => 'Rua de teste',
+            'number' => '10',
+            'district' => 'Centro',
+            'city' => 'Caçapava',
+            'state' => 'SP',
+            'zipcode' => '12286140',
+            'ibge_code' => '3508504',
+        ], $overrides);
     }
 
     public function test_rejects_a_duplicate_company_cnpj(): void
