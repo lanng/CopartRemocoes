@@ -10,7 +10,6 @@ use App\Filament\Resources\CteEmissionBatchResource;
 use App\Filament\Resources\MdfeDocumentResource;
 use App\Filament\Support\CiotEmissionNotice;
 use App\Models\Ciot;
-use App\Models\City;
 use App\Models\MdfeDocument;
 use App\Models\MdfeDriver;
 use App\Services\Ciot\DispatchMdfeForBatch;
@@ -164,10 +163,10 @@ class ViewCteEmissionBatch extends ViewRecord
             });
     }
 
-    private function runTransportClosure(MdfeDocument $mdfe, ?City $city = null): void
+    private function runTransportClosure(MdfeDocument $mdfe): void
     {
         try {
-            $result = app(CloseTransportOperation::class)->handle($mdfe, $city);
+            $result = app(CloseTransportOperation::class)->handle($mdfe);
         } catch (DomainException $exception) {
             Notification::make()
                 ->title('Não foi possível encerrar a operação de transporte.')
@@ -246,31 +245,10 @@ class ViewCteEmissionBatch extends ViewRecord
                 ->icon('heroicon-o-lock-closed')
                 ->color('warning')
                 ->visible(fn (): bool => $this->mdfeAvailableForClosure() !== null)
-                ->form([
-                    Select::make('city_code')
-                        ->label('Município real de encerramento')
-                        ->placeholder('Pesquise por município ou UF')
-                        ->searchable()
-                        ->getSearchResultsUsing(fn (string $search): array => City::query()
-                            ->where(fn ($query) => $query
-                                ->where('name', 'like', "%{$search}%")
-                                ->orWhere('state', 'like', "%{$search}%"))
-                            ->orderBy('name')
-                            ->limit(50)
-                            ->get()
-                            ->mapWithKeys(fn (City $city): array => [$city->ibge_code => "{$city->name} - {$city->state}"])
-                            ->all())
-                        ->getOptionLabelUsing(function ($value): ?string {
-                            $city = City::query()->where('ibge_code', $value)->first();
-
-                            return $city === null ? null : "{$city->name} - {$city->state}";
-                        })
-                        ->required(),
-                ])
                 ->requiresConfirmation()
-                ->modalHeading('Registrar encerramento do MDF-e')
-                ->modalDescription('Informe o município onde a viagem efetivamente terminou. Após rejeição corrigível, o reenvio preserva a sequência e o Id fiscal, registrando uma nova tentativa local.')
-                ->action(function (array $data): void {
+                ->modalHeading('Encerrar operação de transporte')
+                ->modalDescription('A cidade de encerramento será o destino final da viagem. A ANTT só será chamada depois que a SEFAZ confirmar o encerramento do MDF-e.')
+                ->action(function (): void {
                     $mdfe = $this->mdfeAvailableForClosure();
 
                     if ($mdfe === null) {
@@ -279,8 +257,7 @@ class ViewCteEmissionBatch extends ViewRecord
                         return;
                     }
 
-                    $city = City::query()->where('ibge_code', $data['city_code'])->firstOrFail();
-                    $this->runTransportClosure($mdfe, $city);
+                    $this->runTransportClosure($mdfe);
                 }),
             Actions\Action::make('resumeCiotClosure')
                 ->label('Retomar encerramento do CIOT')

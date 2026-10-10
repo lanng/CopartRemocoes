@@ -5,7 +5,6 @@ namespace App\Filament\Resources\MdfeDocumentResource\Pages;
 use App\Enums\CiotStatusEnum;
 use App\Filament\Resources\CteEmissionBatchResource;
 use App\Filament\Resources\MdfeDocumentResource;
-use App\Models\City;
 use App\Models\MdfeDocument;
 use App\Models\MdfeEvent;
 use App\Services\Dfe\CancelMdfeDocument;
@@ -96,33 +95,11 @@ class ViewMdfeDocument extends ViewRecord
                 ->icon('heroicon-o-lock-closed')
                 ->color('warning')
                 ->visible(fn (): bool => $this->document()->isClosureAvailable())
-                ->form([
-                    Select::make('city_code')
-                        ->label('Município real de encerramento')
-                        ->placeholder('Pesquise por município ou UF')
-                        ->searchable()
-                        ->getSearchResultsUsing(fn (string $search): array => City::query()
-                            ->where(fn ($query) => $query
-                                ->where('name', 'like', "%{$search}%")
-                                ->orWhere('state', 'like', "%{$search}%"))
-                            ->orderBy('name')
-                            ->limit(50)
-                            ->get()
-                            ->mapWithKeys(fn (City $city): array => [$city->ibge_code => "{$city->name} - {$city->state}"])
-                            ->all())
-                        ->getOptionLabelUsing(function ($value): ?string {
-                            $city = City::query()->where('ibge_code', $value)->first();
-
-                            return $city === null ? null : "{$city->name} - {$city->state}";
-                        })
-                        ->required(),
-                ])
                 ->requiresConfirmation()
                 ->modalHeading('Encerrar operação de transporte')
-                ->modalDescription('A ANTT só será chamada depois que a consulta à SEFAZ confirmar o encerramento do MDF-e.')
-                ->action(function (array $data): void {
-                    $city = City::query()->where('ibge_code', $data['city_code'])->firstOrFail();
-                    $this->runTransportClosure($city);
+                ->modalDescription('A cidade de encerramento será o destino final da viagem. A ANTT só será chamada depois que a consulta à SEFAZ confirmar o encerramento do MDF-e.')
+                ->action(function (): void {
+                    $this->runTransportClosure();
                 }),
             Actions\Action::make('resumeCiotClosure')
                 ->label('Retomar encerramento do CIOT')
@@ -257,10 +234,10 @@ class ViewMdfeDocument extends ViewRecord
             ->exists();
     }
 
-    private function runTransportClosure(?City $city = null): void
+    private function runTransportClosure(): void
     {
         try {
-            $result = app(CloseTransportOperation::class)->handle($this->document(), $city);
+            $result = app(CloseTransportOperation::class)->handle($this->document());
         } catch (DomainException $exception) {
             Notification::make()
                 ->title('Não foi possível encerrar a operação de transporte.')

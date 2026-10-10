@@ -11,6 +11,7 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\Relations\HasOne;
 
 class MdfeDocument extends Model
 {
@@ -56,6 +57,14 @@ class MdfeDocument extends Model
         return $this->hasMany(MdfeEvent::class);
     }
 
+    public function latestClosureEvent(): HasOne
+    {
+        return $this->hasOne(MdfeEvent::class)->ofMany(
+            ['attempt' => 'max', 'id' => 'max'],
+            fn (Builder $query) => $query->where('event_type', '110112'),
+        );
+    }
+
     public function cteDocuments(): BelongsToMany
     {
         return $this->belongsToMany(CteDocument::class, 'cte_document_mdfe_document')
@@ -83,10 +92,9 @@ class MdfeDocument extends Model
             return false;
         }
 
-        $lastAttempt = $this->events()
-            ->where('event_type', '110112')
-            ->orderByDesc('attempt')
-            ->first();
+        $lastAttempt = $this->relationLoaded('latestClosureEvent')
+            ? $this->latestClosureEvent
+            : $this->latestClosureEvent()->first();
 
         return $lastAttempt === null
             || $lastAttempt->isRetryableRejection()

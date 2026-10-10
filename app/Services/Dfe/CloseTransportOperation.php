@@ -26,7 +26,7 @@ class CloseTransportOperation
 
         if (! $this->isSefazClosureConfirmed($mdfe)) {
             if ($closureCity === null) {
-                throw new DomainException('Informe o município real de encerramento do MDF-e.');
+                $closureCity = $this->destinationCity($mdfe);
             }
 
             try {
@@ -147,5 +147,26 @@ class CloseTransportOperation
             ->where('event_type', '110112')
             ->orderByDesc('attempt')
             ->first();
+    }
+
+    private function destinationCity(MdfeDocument $mdfe): City
+    {
+        $mdfeDestination = (array) data_get($mdfe->snapshot, 'destination', []);
+        $ciotDestination = (array) ($mdfe->ciot?->destination ?? []);
+        $mdfeIbgeCode = preg_replace('/\D/', '', (string) ($mdfeDestination['ibge'] ?? ''));
+        $ciotIbgeCode = preg_replace('/\D/', '', (string) ($ciotDestination['ibge'] ?? ''));
+        $ibgeCode = preg_match('/^\d{7}$/', (string) $mdfeIbgeCode) ? $mdfeIbgeCode : $ciotIbgeCode;
+        $state = strtoupper(trim((string) ($mdfeDestination['uf'] ?? '')));
+        $state = $state !== '' ? $state : strtoupper(trim((string) ($ciotDestination['uf'] ?? '')));
+
+        if (! preg_match('/^\d{7}$/', (string) $ibgeCode) || $state === '') {
+            throw new DomainException('O destino final do MDF-e e do CIOT não possui município IBGE e UF válidos para o encerramento.');
+        }
+
+        return new City([
+            'ibge_code' => $ibgeCode,
+            'name' => trim((string) ($mdfeDestination['name'] ?? $ciotDestination['cidade'] ?? '')),
+            'state' => $state,
+        ]);
     }
 }

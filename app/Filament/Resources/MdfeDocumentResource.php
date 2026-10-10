@@ -6,7 +6,6 @@ use App\Enums\CiotStatusEnum;
 use App\Enums\CteDocumentStatusEnum;
 use App\Enums\FiscalDocumentStatusEnum;
 use App\Filament\Resources\MdfeDocumentResource\Pages;
-use App\Models\City;
 use App\Models\MdfeDocument;
 use App\Models\MdfeEvent;
 use App\Services\Dfe\CloseTransportOperation;
@@ -22,10 +21,14 @@ use Filament\Infolists\Components\TextEntry;
 use Filament\Infolists\Infolist;
 use Filament\Notifications\Notification;
 use Filament\Resources\Resource;
+use Filament\Support\Enums\FontWeight;
 use Filament\Tables;
+use Filament\Tables\Columns\Layout\Split;
+use Filament\Tables\Columns\Layout\Stack;
 use Filament\Tables\Table;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\HasOne;
 use Illuminate\Support\Facades\Storage;
 use Symfony\Component\HttpFoundation\StreamedResponse;
 
@@ -62,7 +65,7 @@ class MdfeDocumentResource extends Resource
 
     public static function getEloquentQuery(): Builder
     {
-        return parent::getEloquentQuery()->with(['batch', 'ciot', 'events', 'cteDocuments']);
+        return parent::getEloquentQuery();
     }
 
     public static function infolist(Infolist $infolist): Infolist
@@ -185,80 +188,114 @@ class MdfeDocumentResource extends Resource
     public static function table(Table $table): Table
     {
         return $table
-            ->modifyQueryUsing(fn (Builder $query): Builder => $query->with(['batch', 'ciot', 'events']))
+            ->modifyQueryUsing(fn (Builder $query): Builder => $query
+                ->select([
+                    'id',
+                    'cte_emission_batch_id',
+                    'ciot_id',
+                    'mdfe_number',
+                    'snapshot',
+                    'status',
+                    'fiscal_status',
+                    'emitter',
+                    'access_key',
+                    'protocol',
+                    'fiscal_status_code',
+                    'authorized_at',
+                    'created_at',
+                    'xml_path',
+                    'pdf_path',
+                ])
+                ->with([
+                    'batch:id',
+                    'ciot:id,ciot_number,status',
+                    'latestClosureEvent' => function (HasOne $eventQuery): void {
+                        $eventQuery->select([
+                            'mdfe_events.id',
+                            'mdfe_events.mdfe_document_id',
+                            'mdfe_events.event_type',
+                            'mdfe_events.attempt',
+                            'mdfe_events.status',
+                            'mdfe_events.error_code',
+                            'mdfe_events.xml_path',
+                            'mdfe_events.created_at',
+                        ]);
+                    },
+                ])
+                ->withExists([
+                    'events as has_archived_event_xml' => fn (Builder $eventQuery) => $eventQuery->whereNotNull('xml_path'),
+                ]))
             ->columns([
-                Tables\Columns\TextColumn::make('mdfe_number')
-                    ->label('Número')
-                    ->fontFamily('mono')
-                    ->placeholder('—')
-                    ->sortable(),
-                Tables\Columns\TextColumn::make('snapshot.line')
-                    ->label('Operação')
-                    ->formatStateUsing(fn (?string $state): string => match ($state) {
-                        'vehicle_removal' => 'Remoção de veículos',
-                        'tank_alcohol' => 'Tanque de álcool',
-                        default => $state ?? '—',
-                    })
-                    ->badge(),
-                Tables\Columns\TextColumn::make('access_key')
-                    ->label('Chave de acesso')
-                    ->fontFamily('mono')
-                    ->copyable()
-                    ->searchable(),
-                Tables\Columns\TextColumn::make('batch.id')
-                    ->label('Lote')
-                    ->formatStateUsing(fn (?string $state): string => $state === null ? '—' : "#{$state}"),
-                Tables\Columns\TextColumn::make('ciot.ciot_number')
-                    ->label('CIOT')
-                    ->placeholder('—')
-                    ->searchable(),
-                Tables\Columns\TextColumn::make('status')
-                    ->label('Processamento')
-                    ->badge()
-                    ->formatStateUsing(fn (CteDocumentStatusEnum $state): string => $state->label())
-                    ->color(fn (CteDocumentStatusEnum $state): string => $state->color())
-                    ->sortable(),
-                Tables\Columns\TextColumn::make('fiscal_status')
-                    ->label('Situação fiscal')
-                    ->badge()
-                    ->formatStateUsing(fn (?FiscalDocumentStatusEnum $state): string => match ($state) {
-                        FiscalDocumentStatusEnum::AUTHORIZED => 'Autorizado',
-                        FiscalDocumentStatusEnum::CANCELLED => 'Cancelado',
-                        FiscalDocumentStatusEnum::CLOSED => 'Encerrado',
-                        default => 'Não autorizado',
-                    })
-                    ->placeholder('—'),
-                Tables\Columns\TextColumn::make('protocol')
-                    ->label('Protocolo')
-                    ->fontFamily('mono')
-                    ->placeholder('—'),
-                Tables\Columns\TextColumn::make('fiscal_status_code')
-                    ->label('Situação SEFAZ')
-                    ->badge()
-                    ->color(fn (?string $state): string => $state === '132' ? 'success' : 'warning')
-                    ->formatStateUsing(fn (?string $state): string => match ($state) {
-                        '100' => 'Autorizado / aberto',
-                        '132' => 'Encerrado',
-                        default => $state ?? 'Aguardando confirmação',
-                    }),
-                Tables\Columns\TextColumn::make('authorized_at')
-                    ->label('Autorizado em')
-                    ->dateTime('d/m/Y H:i')
-                    ->timezone('America/Sao_Paulo')
-                    ->sortable(),
-                Tables\Columns\TextColumn::make('closure_attempt')
-                    ->label('Última tentativa')
-                    ->state(function (MdfeDocument $record): string {
-                        $event = $record->events
-                            ->where('event_type', '110112')
-                            ->sortByDesc('attempt')
-                            ->first();
+                Split::make([
+                    Stack::make([
+                        Tables\Columns\TextColumn::make('mdfe_number')
+                            ->label('Número')
+                            ->description('Número do MDF-e', position: 'above')
+                            ->fontFamily('mono')
+                            ->weight(FontWeight::Bold)
+                            ->placeholder('—')
+                            ->sortable(),
+                        Tables\Columns\TextColumn::make('snapshot.line')
+                            ->label('Operação')
+                            ->description('Operação', position: 'above')
+                            ->formatStateUsing(fn (?string $state): string => match ($state) {
+                                'vehicle_removal' => 'Remoção de veículos',
+                                'tank_alcohol' => 'Tanque de álcool',
+                                default => $state ?? '—',
+                            })
+                            ->badge(),
+                        Tables\Columns\TextColumn::make('fiscal_status')
+                            ->label('Situação fiscal')
+                            ->description('Situação fiscal', position: 'above')
+                            ->badge()
+                            ->formatStateUsing(fn (?FiscalDocumentStatusEnum $state): string => match ($state) {
+                                FiscalDocumentStatusEnum::AUTHORIZED => 'Autorizado',
+                                FiscalDocumentStatusEnum::CANCELLED => 'Cancelado',
+                                FiscalDocumentStatusEnum::CLOSED => 'Encerrado',
+                                default => 'Não autorizado',
+                            })
+                            ->placeholder('—'),
+                        Tables\Columns\TextColumn::make('authorized_at')
+                            ->label('Autorizado em')
+                            ->description('Autorizado em', position: 'above')
+                            ->dateTime('d/m/Y H:i')
+                            ->timezone('America/Sao_Paulo')
+                            ->sortable(),
+                    ])->space(2),
+                    Stack::make([
+                        Tables\Columns\TextColumn::make('driver_vehicle')
+                            ->label('Motorista / placa')
+                            ->description('Motorista / placa', position: 'above')
+                            ->state(function (MdfeDocument $record): string {
+                                $driver = data_get($record->snapshot, 'vehicle.drivers.0.name');
+                                $plate = data_get($record->snapshot, 'vehicle.plate');
+                                $details = array_filter([
+                                    $driver,
+                                    filled($plate) ? "Placa {$plate}" : null,
+                                ]);
 
-                        return $event === null
-                            ? 'Não enviado'
-                            : "#{$event->attempt} — {$event->status}".($event->error_code ? " ({$event->error_code})" : '');
-                    })
-                    ->placeholder('Não enviado'),
+                                return $details === [] ? '—' : implode(' · ', $details);
+                            })
+                            ->wrap()
+                            ->placeholder('—'),
+                        Tables\Columns\TextColumn::make('batch.id')
+                            ->label('Lote')
+                            ->description('Lote de origem', position: 'above')
+                            ->formatStateUsing(fn (?string $state): string => $state === null ? '—' : "#{$state}"),
+                        Tables\Columns\TextColumn::make('closure_attempt')
+                            ->label('Última tentativa')
+                            ->description('Última tentativa de encerramento', position: 'above')
+                            ->state(function (MdfeDocument $record): string {
+                                $event = $record->latestClosureEvent;
+
+                                return $event === null
+                                    ? 'Não enviado'
+                                    : "#{$event->attempt} — {$event->status}".($event->error_code ? " ({$event->error_code})" : '');
+                            })
+                            ->wrap()
+                            ->placeholder('Não enviado'),
+                    ])->space(2),
+                ])->from('2xl'),
             ])
             ->filters([
                 Tables\Filters\SelectFilter::make('status')
@@ -283,39 +320,16 @@ class MdfeDocumentResource extends Resource
                     ]),
             ])
             ->actions([
-                Tables\Actions\ViewAction::make()->label('Ver MDF-e'),
                 Tables\Actions\Action::make('closeMdfe')
                     ->label(fn (MdfeDocument $record): string => self::closureActionLabel($record))
                     ->icon('heroicon-o-lock-closed')
                     ->color('warning')
                     ->visible(fn (MdfeDocument $record): bool => $record->isClosureAvailable())
-                    ->form([
-                        Forms\Components\Select::make('city_code')
-                            ->label('Município real de encerramento')
-                            ->placeholder('Pesquise por município ou UF')
-                            ->searchable()
-                            ->getSearchResultsUsing(fn (string $search): array => City::query()
-                                ->where(fn (Builder $query) => $query
-                                    ->where('name', 'like', "%{$search}%")
-                                    ->orWhere('state', 'like', "%{$search}%"))
-                                ->orderBy('name')
-                                ->limit(50)
-                                ->get()
-                                ->mapWithKeys(fn (City $city): array => [$city->ibge_code => "{$city->name} - {$city->state}"])
-                                ->all())
-                            ->getOptionLabelUsing(function ($value): ?string {
-                                $city = City::query()->where('ibge_code', $value)->first();
-
-                                return $city === null ? null : "{$city->name} - {$city->state}";
-                            })
-                            ->required(),
-                    ])
                     ->requiresConfirmation()
                     ->modalHeading('Encerrar operação de transporte')
-                    ->action(function (MdfeDocument $record, array $data): void {
-                        $city = City::query()->where('ibge_code', $data['city_code'])->firstOrFail();
-
-                        self::runTransportClosure($record, $city);
+                    ->modalDescription('A cidade de encerramento será o destino final da viagem. A ANTT só será chamada depois que a SEFAZ confirmar o encerramento do MDF-e.')
+                    ->action(function (MdfeDocument $record): void {
+                        self::runTransportClosure($record);
                     }),
                 Tables\Actions\Action::make('resumeCiotClosure')
                     ->label('Retomar encerramento do CIOT')
@@ -333,25 +347,40 @@ class MdfeDocumentResource extends Resource
                     ->label('Baixar XML')
                     ->icon('heroicon-o-arrow-down-tray')
                     ->color('gray')
-                    ->visible(fn (MdfeDocument $record): bool => filled($record->xml_path)
-                        && app(DfeDocumentStore::class)->exists((string) $record->xml_path))
-                    ->action(fn (MdfeDocument $record): StreamedResponse => Storage::disk('dfe')->download(
-                        (string) $record->xml_path,
-                        strtolower((string) ($record->access_key ?? $record->id)).'-mdfe.xml',
-                    )),
+                    ->visible(fn (MdfeDocument $record): bool => filled($record->xml_path))
+                    ->action(function (MdfeDocument $record): ?StreamedResponse {
+                        $path = (string) $record->xml_path;
+
+                        if (! filled($path) || ! app(DfeDocumentStore::class)->exists($path)) {
+                            self::notifyMissingArchivedFile();
+
+                            return null;
+                        }
+
+                        return Storage::disk('dfe')->download(
+                            $path,
+                            strtolower((string) ($record->access_key ?? $record->id)).'-mdfe.xml',
+                        );
+                    }),
                 Tables\Actions\Action::make('downloadDamdfe')
                     ->label('Baixar DAMDFE')
                     ->icon('heroicon-o-arrow-down-tray')
                     ->color('gray')
-                    ->visible(fn (MdfeDocument $record): bool => (filled($record->pdf_path)
-                        && app(DfeDocumentStore::class)->exists((string) $record->pdf_path))
-                        || (filled($record->xml_path)
-                            && app(DfeDocumentStore::class)->exists((string) $record->xml_path)))
-                    ->action(function (MdfeDocument $record): StreamedResponse {
-                        $pdfPath = $record->pdf_path;
+                    ->visible(fn (MdfeDocument $record): bool => filled($record->pdf_path) || filled($record->xml_path))
+                    ->action(function (MdfeDocument $record): ?StreamedResponse {
+                        $store = app(DfeDocumentStore::class);
+                        $pdfPath = (string) $record->pdf_path;
 
-                        if (blank($pdfPath) || ! app(DfeDocumentStore::class)->exists($pdfPath)) {
-                            $proc = app(DfeDocumentStore::class)->read((string) $record->xml_path);
+                        if (! filled($pdfPath) || ! $store->exists($pdfPath)) {
+                            $xmlPath = (string) $record->xml_path;
+
+                            if (! filled($xmlPath) || ! $store->exists($xmlPath)) {
+                                self::notifyMissingArchivedFile();
+
+                                return null;
+                            }
+
+                            $proc = $store->read($xmlPath);
                             $pdfPath = app(GenerateDamdfePdf::class)->generateForProc(
                                 (string) $record->access_key,
                                 $proc,
@@ -368,17 +397,22 @@ class MdfeDocumentResource extends Resource
                     ->label('Baixar evento XML')
                     ->icon('heroicon-o-arrow-down-tray')
                     ->color('gray')
-                    ->visible(fn (MdfeDocument $record): bool => self::archivedEventOptions($record) !== [])
+                    ->visible(fn (MdfeDocument $record): bool => (bool) $record->has_archived_event_xml)
                     ->form(fn (MdfeDocument $record): array => [
                         Forms\Components\Select::make('event_id')
                             ->label('Evento fiscal')
                             ->options(self::archivedEventOptions($record))
                             ->required(),
                     ])
-                    ->action(function (MdfeDocument $record, array $data): StreamedResponse {
+                    ->action(function (MdfeDocument $record, array $data): ?StreamedResponse {
                         $event = $record->events()->whereKey($data['event_id'])->firstOrFail();
-                        abort_unless(filled($event->xml_path)
-                            && app(DfeDocumentStore::class)->exists((string) $event->xml_path), 404);
+
+                        if (! filled($event->xml_path)
+                            || ! app(DfeDocumentStore::class)->exists((string) $event->xml_path)) {
+                            self::notifyMissingArchivedFile();
+
+                            return null;
+                        }
 
                         return Storage::disk('dfe')->download(
                             (string) $event->xml_path,
@@ -398,10 +432,10 @@ class MdfeDocumentResource extends Resource
     /** @return array<int, string> */
     private static function archivedEventOptions(MdfeDocument $record): array
     {
-        return $record->events
-            ->filter(fn (MdfeEvent $event): bool => filled($event->xml_path)
-                && app(DfeDocumentStore::class)->exists((string) $event->xml_path))
-            ->sortByDesc('created_at')
+        return $record->events()
+            ->whereNotNull('xml_path')
+            ->orderByDesc('created_at')
+            ->get(['id', 'event_type', 'attempt', 'status'])
             ->mapWithKeys(fn (MdfeEvent $event): array => [
                 $event->id => sprintf('%s · tentativa %s · %s', $event->event_type, $event->attempt, $event->status),
             ])
@@ -410,10 +444,7 @@ class MdfeDocumentResource extends Resource
 
     private static function closureActionLabel(MdfeDocument $record): string
     {
-        $latestAttempt = $record->events
-            ->where('event_type', '110112')
-            ->sortByDesc('attempt')
-            ->first();
+        $latestAttempt = $record->latestClosureEvent;
 
         if (in_array($latestAttempt?->status, ['pending', 'registered', 'reconciliation_required', 'duplicate_reconciliation'], true)) {
             return 'Reconciliar encerramento';
@@ -424,10 +455,19 @@ class MdfeDocumentResource extends Resource
             : 'Encerrar operação de transporte';
     }
 
-    private static function runTransportClosure(MdfeDocument $record, ?City $city = null): void
+    private static function notifyMissingArchivedFile(): void
+    {
+        Notification::make()
+            ->title('Arquivo fiscal indisponível')
+            ->body('O arquivo não foi encontrado no armazenamento. Atualize a lista ou solicite a recuperação do documento.')
+            ->warning()
+            ->send();
+    }
+
+    private static function runTransportClosure(MdfeDocument $record): void
     {
         try {
-            $result = app(CloseTransportOperation::class)->handle($record, $city);
+            $result = app(CloseTransportOperation::class)->handle($record);
         } catch (\DomainException $exception) {
             Notification::make()
                 ->title('Não foi possível encerrar a operação de transporte.')
