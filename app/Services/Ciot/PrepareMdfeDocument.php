@@ -18,7 +18,6 @@ class PrepareMdfeDocument
     public function __construct(
         private readonly CreateCiotForBatch $ciotCreator,
         private readonly EmitCiotDeclaration $ciotEmitter,
-        private readonly IssueSyntheticCiotForHomologation $syntheticCiotIssuer,
         private readonly ValidateMdfeDocumentSelection $selectionValidator,
         private readonly QueueDirectMdfeEmission $mdfeQueue,
     ) {}
@@ -46,7 +45,6 @@ class PrepareMdfeDocument
         $ciot = match ($data['ciot_mode'] ?? null) {
             'existing' => $this->existingCiot($documents, $data['ciot_id'] ?? null),
             'new' => $this->createAndEmitCiot($documents, $data['new_ciot'] ?? null, $batch, $ciotEmissionResult),
-            'synthetic' => $this->createSyntheticCiot($documents, $data['new_ciot'] ?? null, $batch),
             default => throw new DomainException('Escolha um CIOT emitido ou crie e emita um novo CIOT.'),
         };
 
@@ -195,7 +193,7 @@ class PrepareMdfeDocument
             ->orderByDesc('id')
             ->limit(100)
             ->get()
-            ->reject(fn (Ciot $ciot): bool => $ciot->isSyntheticHomologation() && ! $this->syntheticCiotIssuer->isEnabled())
+            ->reject(fn (Ciot $ciot): bool => $ciot->isSyntheticHomologation())
             ->values();
     }
 
@@ -430,22 +428,5 @@ class PrepareMdfeDocument
         $ciotEmissionResult = $this->ciotEmitter->emit($ciot);
 
         return $ciotEmissionResult->ciot;
-    }
-
-    /**
-     * @param  Collection<int, CteDocument>  $documents
-     */
-    private function createSyntheticCiot(Collection $documents, mixed $newCiotData, ?CteEmissionBatch $batch): Ciot
-    {
-        $this->syntheticCiotIssuer->assertEnabled();
-
-        if (! is_array($newCiotData)) {
-            throw new DomainException('Preencha os dados para criar um CIOT sintético de homologação.');
-        }
-
-        $newCiotData['status'] = CiotStatusEnum::DRAFT->value;
-        $ciot = $this->ciotCreator->handleForDocuments($documents, $newCiotData, $batch);
-
-        return $this->syntheticCiotIssuer->handle($ciot);
     }
 }

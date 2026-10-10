@@ -247,7 +247,7 @@ class CteEmissionBatchResourceTest extends TestCase
         $this->assertSame('AVERBACAO-PADRAO', collect($endorsementRows)->first()['number']);
     }
 
-    public function test_the_direct_mdfe_action_allows_the_known_ciots_homologation_217_fixture_only_in_homologation(): void
+    public function test_the_direct_mdfe_action_does_not_offer_a_failed_ciot_as_a_synthetic_fixture(): void
     {
         config([
             'dfe.mdfe.emitter' => 'direct',
@@ -269,7 +269,7 @@ class CteEmissionBatchResourceTest extends TestCase
 
         Livewire::test(ViewCteEmissionBatch::class, ['record' => $batch->id])
             ->assertSuccessful()
-            ->assertActionVisible('emitMdfeDirect');
+            ->assertActionHidden('emitMdfeDirect');
 
         config(['dfe.tp_amb' => '1']);
 
@@ -523,114 +523,16 @@ class CteEmissionBatchResourceTest extends TestCase
         Queue::assertNothingPushed();
     }
 
-    public function test_generate_ciot_action_can_create_a_synthetic_ciot_for_direct_mdfe_homologation(): void
+    public function test_generate_ciot_action_does_not_offer_synthetic_ciot_creation(): void
     {
-        config([
-            'dfe.tp_amb' => '2',
-            'dfe.ciot_synthetic_homologation_enabled' => true,
-            'dfe.mdfe.emitter' => 'direct',
-            'ciot.removal.weight_per_vehicle_kg' => 2000,
-        ]);
-
-        City::factory()->create([
-            'ibge_code' => '3534609', 'name' => 'Osvaldo Cruz', 'state' => 'SP',
-            'latitude' => -21.7972, 'longitude' => -50.9736,
-        ]);
-        City::factory()->create([
-            'ibge_code' => '3508504', 'name' => 'Caçapava', 'state' => 'SP',
-            'latitude' => -23.1006, 'longitude' => -45.6911,
-        ]);
-        $payer = Company::factory()->create([
-            'name' => 'Copart Caçapava', 'cnpj' => '14517191000925',
-            'city' => 'Caçapava', 'state' => 'SP', 'ibge_code' => '3508504',
-        ]);
-        $tractor = CiotVehicle::factory()->forRemoval()->create([
-            'plate' => 'PUC8E55', 'type' => 'automotor', 'axles' => 3,
-        ]);
-        CityDistance::query()->create([
-            'origin_ibge' => '3534609', 'destination_ibge' => '3508504',
-            'km' => 716, 'fetched_at' => now(),
-        ]);
-
         $batch = CteEmissionBatch::factory()->create([
             'status' => CteEmissionBatchStatusEnum::COMPLETED,
         ]);
-        CteDocument::factory()->authorized()->create([
-            'cte_emission_batch_id' => $batch->id,
-            'workflow_origin' => 'controlled_v1',
-            'access_key' => str_repeat('3', 44),
-            'snapshot' => [
-                'schema_version' => 2,
-                'line' => 'vehicle_removal',
-                'company' => 'copart',
-                'vehicle_plate' => 'ABC1234',
-                'origin_city' => 'Osvaldo Cruz',
-                'destination_city' => 'Caçapava',
-                'value' => '500.00',
-                'fipe_value' => '10000.00',
-                'origin' => ['ibge' => '3534609', 'name' => 'Osvaldo Cruz', 'uf' => 'SP'],
-                'destination' => ['ibge' => '3508504', 'name' => 'Caçapava', 'uf' => 'SP'],
-            ],
-        ]);
-
-        Http::fake();
-        Queue::fake();
-
-        $page = Livewire::test(ViewCteEmissionBatch::class, ['record' => $batch->id])
-            ->mountAction('generateCiot')
-            ->assertFormFieldExists('synthetic_homologation', 'mountedActionForm')
-            ->callAction('generateCiot', data: [
-                'operation_type' => 'lotation',
-                'payer_id' => $payer->id,
-                'delivery_payer_id' => $payer->id,
-                'origin.ibge' => '3534609',
-                'destination.ibge' => '3508504',
-                'distance_km' => '716',
-                'freight_value' => '500.00',
-                'cargo_weight_kg' => '2000',
-                'vehicle_ids' => [$tractor->id],
-                'travel_start_at' => now()->addDay()->format('Y-m-d'),
-                'travel_end_at' => now()->addDays(2)->format('Y-m-d'),
-                'synthetic_homologation' => true,
-            ])
-            ->assertHasNoActionErrors()
-            ->assertNoRedirect();
-
-        $ciot = Ciot::query()->where('cte_emission_batch_id', $batch->id)->firstOrFail();
-
-        $this->assertSame(CiotStatusEnum::ISSUED, $ciot->status);
-        $this->assertSame('14517191000925', $ciot->payer_cnpj);
-        $this->assertTrue($ciot->response['homologation_fixture']['synthetic']);
-        $this->assertNull($ciot->protocol);
-        $page->assertSee('CIOT da viagem')
-            ->assertSee($ciot->ciot_number)
-            ->assertSee('Emitido');
-        Http::assertNothingSent();
-
-        $queueService = \Mockery::mock(\App\Services\Ciot\QueueDirectMdfeEmission::class);
-        $queueService->shouldReceive('handleForDocuments')
-            ->once()
-            ->withArgs(function ($documents, Ciot $selectedCiot, array $endorsements, array $routeUfs) use ($ciot): bool {
-                $this->assertSame($ciot->id, $selectedCiot->id);
-                $this->assertTrue($selectedCiot->response['homologation_fixture']['synthetic']);
-                $this->assertContains('AVERBACAO-LOTE-001', $endorsements);
-                $this->assertSame([], $routeUfs);
-
-                return true;
-            })
-            ->andReturnUsing(fn (): MdfeDocument => MdfeDocument::factory()->create([
-                'cte_emission_batch_id' => $batch->id,
-                'ciot_id' => $ciot->id,
-            ]));
-        $this->app->instance(\App\Services\Ciot\QueueDirectMdfeEmission::class, $queueService);
-
         Livewire::test(ViewCteEmissionBatch::class, ['record' => $batch->id])
-            ->assertActionVisible('emitMdfeDirect')
-            ->callAction('emitMdfeDirect', data: [
-                'ciot_id' => $ciot->id,
-                'endorsements' => [['number' => 'AVERBACAO-LOTE-001']],
-            ])
-            ->assertHasNoActionErrors();
+            ->mountAction('generateCiot')
+            ->assertDontSee('Criar CIOT sintético para homologação');
+
+        $this->assertSame(0, Ciot::query()->where('cte_emission_batch_id', $batch->id)->count());
     }
 
     public function test_generate_ciot_action_sends_additional_payers_cnpjs_to_the_antt(): void

@@ -52,7 +52,12 @@ class ReserveMdfeDocuments
 
             $lockedCiot = Ciot::query()->whereKey($ciot->id)->lockForUpdate()->firstOrFail();
 
-            if (! $lockedCiot->isOpen() && ! $this->isHomologationFixture($mdfe, $lockedCiot)) {
+            if ($lockedCiot->isSyntheticHomologation()
+                || in_array($mdfe->snapshot['ciot_source'] ?? null, ['synthetic_homologation', 'homologation_fixture'], true)) {
+                throw new DomainException('CIOT sintético de homologação não pode ser reservado para emissão de MDF-e.');
+            }
+
+            if (! $lockedCiot->isOpen()) {
                 throw new DomainException('Somente um CIOT emitido e aberto pode ser reservado para o MDF-e.');
             }
 
@@ -166,14 +171,5 @@ class ReserveMdfeDocuments
         if ($activeMdfeExists) {
             throw new DomainException('Este CIOT já está vinculado a outro MDF-e ativo ou em processamento.');
         }
-    }
-
-    private function isHomologationFixture(MdfeDocument $mdfe, Ciot $ciot): bool
-    {
-        return (string) config('dfe.tp_amb') === '2'
-            && ($mdfe->snapshot['ciot_source'] ?? null) === 'homologation_fixture'
-            && $ciot->status === CiotStatusEnum::FAILED
-            && $ciot->error_code === '217'
-            && filled($ciot->payload);
     }
 }

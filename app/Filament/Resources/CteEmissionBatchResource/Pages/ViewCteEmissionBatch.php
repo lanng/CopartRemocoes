@@ -15,7 +15,6 @@ use App\Models\MdfeDocument;
 use App\Models\MdfeDriver;
 use App\Services\Ciot\DispatchMdfeForBatch;
 use App\Services\Ciot\EmitCiotDeclaration;
-use App\Services\Ciot\IssueSyntheticCiotForHomologation;
 use App\Services\Ciot\QueueDirectMdfeEmission;
 use App\Services\Cte\ApproveCteEmissionBatch;
 use App\Services\Cte\CheckCteBatchParties;
@@ -53,31 +52,17 @@ class ViewCteEmissionBatch extends ViewRecord
     /** @return array<int, string> */
     protected function directMdfeCiotOptions(): array
     {
-        $query = $this->record->ciots()
-            ->where(function ($query): void {
-                $query->where('status', CiotStatusEnum::ISSUED->value);
-
-                if ((string) config('dfe.tp_amb') === '2') {
-                    $query->orWhere(function ($query): void {
-                        $query->where('status', CiotStatusEnum::FAILED->value)
-                            ->where('error_code', '217')
-                            ->whereNotNull('payload');
-                    });
-                }
-            });
-
-        return $query
+        return $this->record->ciots()
+            ->where('status', CiotStatusEnum::ISSUED->value)
             ->latest('id')
             ->get()
-            ->reject(fn (Ciot $ciot): bool => $ciot->isSyntheticHomologation()
-                && ! app(IssueSyntheticCiotForHomologation::class)->isEnabled())
+            ->reject(fn (Ciot $ciot): bool => $ciot->isSyntheticHomologation())
             ->mapWithKeys(fn (Ciot $ciot): array => [
                 $ciot->id => sprintf(
-                    '#%d · %s · %s%s',
+                    '#%d · %s · %s',
                     $ciot->id,
                     $ciot->line->label(),
                     $ciot->status->label(),
-                    $ciot->isSyntheticHomologation() ? ' (sintético de homologação)' : '',
                 ),
             ])
             ->all();
@@ -119,7 +104,12 @@ class ViewCteEmissionBatch extends ViewRecord
 
     protected function selectedDirectMdfeCiot(mixed $id): ?Ciot
     {
-        return blank($id) ? null : $this->record->ciots()->whereKey($id)->first();
+        $ciot = blank($id) ? null : $this->record->ciots()
+            ->whereKey($id)
+            ->where('status', CiotStatusEnum::ISSUED->value)
+            ->first();
+
+        return $ciot?->isSyntheticHomologation() ? null : $ciot;
     }
 
     protected function mdfeAvailableForClosure(): ?MdfeDocument
@@ -347,7 +337,7 @@ class ViewCteEmissionBatch extends ViewRecord
                 ->color('warning')
                 ->visible(fn (): bool => config('dfe.mdfe.emitter', 'agent') === 'agent'
                     && in_array($this->record->refresh()->status?->value, ['completed', 'completed_with_errors'], true)
-                    && $this->record->ciots()->where('status', CiotStatusEnum::ISSUED->value)->exists()
+                    && $this->directMdfeCiotOptions() !== []
                     && ! $this->record->mdfeDocuments()
                         ->whereNotIn('status', ['rejected', 'failed_before_authorization', 'cancelled'])
                         ->exists())
@@ -425,17 +415,6 @@ class ViewCteEmissionBatch extends ViewRecord
                         ->label('Usar dados sintéticos de seguro para homologação')
                         ->helperText('Disponível apenas no ambiente de homologação; não salva esses dados na configuração.')
                         ->visible(fn (): bool => (string) config('dfe.tp_amb') === '2'),
-                    Toggle::make('homologation_ciot_fixture')
-                        ->label('Usar CIOT sintético para homologação')
-                        ->helperText('A tentativa ANTT rejeitada com código 217 será preservada. O número sintético será usado somente no XML de homologação do MDF-e.')
-                        ->visible(fn (\Filament\Forms\Get $get): bool => (string) config('dfe.tp_amb') === '2'
-                            && $this->selectedDirectMdfeCiot($get('ciot_id'))?->status === CiotStatusEnum::FAILED),
-                    TextInput::make('fixture_ciot_number')
-                        ->label('CIOT sintético (12 dígitos)')
-                        ->default('999999999999')
-                        ->length(12)
-                        ->required(fn (\Filament\Forms\Get $get): bool => (bool) $get('homologation_ciot_fixture'))
-                        ->visible(fn (\Filament\Forms\Get $get): bool => (bool) $get('homologation_ciot_fixture')),
                     TextInput::make('fixture_insurer_name')
                         ->label('Nome da seguradora de teste')
                         ->maxLength(30)
@@ -479,9 +458,6 @@ class ViewCteEmissionBatch extends ViewRecord
                             batch: $this->record,
                             driver: isset($data['driver_id']) ? MdfeDriver::query()->findOrFail($data['driver_id']) : null,
                             homologationFixture: $fixture,
-                            homologationCiotNumber: ($data['homologation_ciot_fixture'] ?? false)
-                                ? (string) $data['fixture_ciot_number']
-                                : null,
                         );
                     } catch (DomainException $exception) {
                         Notification::make()->title('MDF-e não foi enfileirado')->body($exception->getMessage())->danger()->send();

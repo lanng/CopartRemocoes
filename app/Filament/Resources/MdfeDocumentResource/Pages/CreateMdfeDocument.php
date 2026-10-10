@@ -13,7 +13,6 @@ use App\Models\City;
 use App\Models\CteDocument;
 use App\Models\CteEmissionBatch;
 use App\Models\MdfeDriver;
-use App\Services\Ciot\IssueSyntheticCiotForHomologation;
 use App\Services\Ciot\PrefillCiotFromDocuments;
 use App\Services\Ciot\PrepareMdfeDocument;
 use DomainException;
@@ -134,7 +133,7 @@ class CreateMdfeDocument extends Page implements HasForms
                             ->columnSpanFull(),
                     ]),
                 Section::make('CIOT da operação')
-                    ->description('Use um CIOT já emitido e aberto ou escolha Criar e emitir para aguardar a confirmação da ANTT. O modo sintético, quando habilitado, grava um CIOT local de teste sem contato com a ANTT.')
+                    ->description('Use um CIOT já emitido e aberto ou escolha Criar e emitir para aguardar a confirmação da ANTT.')
                     ->columns(2)
                     ->schema([
                         Select::make('ciot_mode')
@@ -158,17 +157,12 @@ class CreateMdfeDocument extends Page implements HasForms
                         Placeholder::make('ciot_prefill_notice')
                             ->label('Sugestões para o novo CIOT')
                             ->content(fn (): HtmlString|string => $this->prefillNotice())
-                            ->visible(fn (Get $get): bool => in_array($get('ciot_mode'), ['new', 'synthetic'], true) && $get('line') !== null)
-                            ->columnSpanFull(),
-                        Placeholder::make('synthetic_ciot_notice')
-                            ->label('CIOT sintético de homologação')
-                            ->content('Será criado localmente com número fictício e status Emitido. Nenhuma solicitação será enviada à ANTT.')
-                            ->visible(fn (Get $get): bool => $get('ciot_mode') === 'synthetic')
+                            ->visible(fn (Get $get): bool => $get('ciot_mode') === 'new' && $get('line') !== null)
                             ->columnSpanFull(),
                         \Filament\Forms\Components\Group::make()
                             ->schema(CiotResource::formSchema(lineReadOnly: true))
                             ->statePath('new_ciot')
-                            ->visible(fn (Get $get): bool => in_array($get('ciot_mode'), ['new', 'synthetic'], true) && $get('line') !== null)
+                            ->visible(fn (Get $get): bool => $get('ciot_mode') === 'new' && $get('line') !== null)
                             ->columnSpanFull(),
                     ]),
                 Section::make('Dados do MDF-e')
@@ -301,10 +295,6 @@ class CreateMdfeDocument extends Page implements HasForms
             'existing' => 'Usar um CIOT emitido e aberto',
             'new' => 'Criar e emitir um novo CIOT',
         ];
-
-        if (app(IssueSyntheticCiotForHomologation::class)->isEnabled()) {
-            $options['synthetic'] = 'Criar CIOT sintético para homologação';
-        }
 
         return $options;
     }

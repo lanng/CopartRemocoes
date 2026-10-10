@@ -36,36 +36,18 @@ class BuildMdfeEmissionSnapshot
         array $routeUfs,
         ?MdfeDriver $driver = null,
         ?array $homologationFixture = null,
-        ?string $homologationCiotNumber = null,
         ?string $paymentMethod = null,
         ?string $paymentBankCode = null,
         ?string $paymentBankAgency = null,
     ): array {
-        $ciot = $batch->ciots()->where('status', CiotStatusEnum::ISSUED)->latest('id')->first();
+        $ciot = $batch->ciots()
+            ->where('status', CiotStatusEnum::ISSUED)
+            ->latest('id')
+            ->get()
+            ->first(fn (Ciot $candidate): bool => ! $candidate->isSyntheticHomologation());
 
         if (! $ciot instanceof Ciot) {
-            if ($homologationCiotNumber === null) {
-                throw new DomainException('CIOT emitido não encontrado para este lote.');
-            }
-
-            if ((string) config('dfe.tp_amb') !== '2') {
-                throw new DomainException('CIOT sintético permitido somente em homologação.');
-            }
-
-            if (! preg_match('/^\d{12}$/', $homologationCiotNumber)) {
-                throw new DomainException('O CIOT sintético de homologação deve conter exatamente 12 dígitos.');
-            }
-
-            $ciot = $batch->ciots()
-                ->where('status', CiotStatusEnum::FAILED)
-                ->where('error_code', '217')
-                ->whereNotNull('payload')
-                ->latest('id')
-                ->first();
-
-            if (! $ciot instanceof Ciot) {
-                throw new DomainException('A fixture de CIOT só pode substituir uma tentativa rejeitada pela ANTT com código 217.');
-            }
+            throw new DomainException('CIOT emitido não encontrado para este lote.');
         }
 
         $documents = $batch->documents()
@@ -81,7 +63,6 @@ class BuildMdfeEmissionSnapshot
             batch: $batch,
             driver: $driver,
             homologationFixture: $homologationFixture,
-            homologationCiotNumber: $homologationCiotNumber,
             paymentMethod: $paymentMethod,
             paymentBankCode: $paymentBankCode,
             paymentBankAgency: $paymentBankAgency,
@@ -103,18 +84,12 @@ class BuildMdfeEmissionSnapshot
         ?CteEmissionBatch $batch = null,
         ?MdfeDriver $driver = null,
         ?array $homologationFixture = null,
-        ?string $homologationCiotNumber = null,
         ?string $paymentMethod = null,
         ?string $paymentBankCode = null,
         ?string $paymentBankAgency = null,
     ): array {
-        $line = $this->selectionValidator->handle($documents, $ciot, $homologationCiotNumber);
-        $ciotSource = match (true) {
-            $ciot->status === CiotStatusEnum::FAILED => 'homologation_fixture',
-            $ciot->isSyntheticHomologation() => 'synthetic_homologation',
-            default => 'issued',
-        };
-        $ciotNumber = $ciotSource === 'homologation_fixture' ? $homologationCiotNumber : (string) $ciot->ciot_number;
+        $line = $this->selectionValidator->handle($documents, $ciot);
+        $ciotNumber = (string) $ciot->ciot_number;
 
         if (! preg_match('/^\d{12}$/', (string) $ciotNumber)) {
             throw new DomainException('CIOT emitido ausente ou inválido; o MDF-e exige os 12 dígitos reais.');
@@ -159,12 +134,7 @@ class BuildMdfeEmissionSnapshot
             'issue_at' => now()->toIso8601String(),
             'tp_emit' => (string) config('dfe.mdfe.tp_emit'),
             'ciot' => (string) $ciotNumber,
-            'ciot_source' => $ciotSource,
-            'ciot_fixture_reason' => match ($ciotSource) {
-                'homologation_fixture' => '217',
-                'synthetic_homologation' => 'synthetic',
-                default => null,
-            },
+            'ciot_source' => 'issued',
             'ciot_responsible_cnpj' => preg_replace('/\D/', '', (string) config('dfe.emit.cnpj')),
             'rntrc' => (string) config('dfe.mdfe.rntrc'),
             'origin' => $origin,

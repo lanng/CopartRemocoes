@@ -2,7 +2,6 @@
 
 namespace App\Services\Dfe;
 
-use App\Services\Ciot\IssueSyntheticCiotForHomologation;
 use Carbon\Carbon;
 use DomainException;
 
@@ -12,7 +11,6 @@ class BuildMdfeXml
         protected AllocateMdfeNumber $allocator,
         protected AccessKey $accessKey,
         protected BuildMdfeInsuranceSnapshot $insuranceSnapshot,
-        protected IssueSyntheticCiotForHomologation $syntheticCiotIssuer,
     ) {}
 
     /**
@@ -301,8 +299,8 @@ class BuildMdfeXml
      */
     protected function assertSnapshotComplete(array $snapshot): void
     {
-        if (($snapshot['ciot_source'] ?? null) === 'synthetic_homologation' && ! $this->syntheticCiotIssuer->isEnabled()) {
-            throw new DomainException('CIOT sintético de homologação só pode ser usado com o recurso habilitado em homologação.');
+        if (in_array($snapshot['ciot_source'] ?? null, ['synthetic_homologation', 'homologation_fixture'], true)) {
+            throw new DomainException('CIOT sintético de homologação não pode ser usado para emitir MDF-e.');
         }
 
         $required = ['issue_at', 'ciot', 'ciot_responsible_cnpj', 'rntrc', 'origin', 'destination', 'loading_cities', 'destinations', 'vehicle', 'cargo', 'insurance'];

@@ -92,9 +92,8 @@ class BuildMdfeEmissionSnapshotTest extends TestCase
         ], $snapshot['payment']);
     }
 
-    public function test_marks_an_issued_synthetic_ciot_in_the_mdfe_snapshot(): void
+    public function test_rejects_a_previously_created_synthetic_ciot_from_the_mdfe_snapshot(): void
     {
-        config(['dfe.ciot_synthetic_homologation_enabled' => true]);
         [$batch, $ciot] = $this->makeTrip();
         $ciot->forceFill(['response' => ['homologation_fixture' => ['synthetic' => true]]])->save();
         CiotVehicle::factory()->forRemoval()->create([
@@ -107,15 +106,14 @@ class BuildMdfeEmissionSnapshotTest extends TestCase
             'is_default' => true,
         ]);
 
-        $snapshot = app(BuildMdfeEmissionSnapshot::class)->handle(
+        $this->expectException(DomainException::class);
+        $this->expectExceptionMessage('CIOT sintético local não pode ser usado');
+
+        app(BuildMdfeEmissionSnapshot::class)->handle(
             batch: $batch,
             endorsements: ['AVERBACAO-OP-001'],
             routeUfs: [],
         );
-
-        $this->assertSame($ciot->ciot_number, $snapshot['ciot']);
-        $this->assertSame('synthetic_homologation', $snapshot['ciot_source']);
-        $this->assertSame('synthetic', $snapshot['ciot_fixture_reason']);
     }
 
     public function test_selects_the_configured_ncm_by_line_in_homologation_and_production_snapshots(): void
@@ -179,7 +177,7 @@ class BuildMdfeEmissionSnapshotTest extends TestCase
         $this->assertSame($ciot->payer_name, $snapshot['payment']['payer_name']);
     }
 
-    public function test_builds_homologation_snapshot_with_synthetic_ciot_after_known_fleet_link_rejection(): void
+    public function test_rejects_a_failed_ciot_217_instead_of_substituting_a_synthetic_number(): void
     {
         [$batch, $ciot] = $this->makeTrip();
         $ciot->forceFill([
@@ -188,34 +186,17 @@ class BuildMdfeEmissionSnapshotTest extends TestCase
             'error_code' => '217',
             'payload' => ['DadosCarga' => ['CodigoNaturezaCarga' => 1, 'CodigoTipoCarga' => 5]],
         ])->save();
-        CiotVehicle::factory()->forRemoval()->create([
-            'plate' => 'PUC8E55', 'renavam' => '12345678901', 'tare_kg' => 8000,
-            'capacity_kg' => 12000, 'type_rod' => '03', 'body_type' => '00', 'uf' => 'SP',
-        ]);
-        MdfeDriver::factory()->create([
-            'cpf' => '12345678909',
-            'line' => CiotLineEnum::VehicleRemoval->value,
-            'is_default' => true,
-        ]);
+        $this->expectException(DomainException::class);
+        $this->expectExceptionMessage('CIOT emitido não encontrado para este lote.');
 
-        $snapshot = app(BuildMdfeEmissionSnapshot::class)->handle(
+        app(BuildMdfeEmissionSnapshot::class)->handle(
             batch: $batch,
             endorsements: ['99032'],
             routeUfs: [],
-            homologationCiotNumber: '999999999999',
-            paymentMethod: '0',
-            paymentBankCode: '104',
-            paymentBankAgency: '0276',
         );
-
-        $this->assertSame('999999999999', $snapshot['ciot']);
-        $this->assertSame('homologation_fixture', $snapshot['ciot_source']);
-        $this->assertSame('217', $snapshot['ciot_fixture_reason']);
-        $this->assertNull($ciot->fresh()->ciot_number);
-        $this->assertSame('99032', $snapshot['insurance']['endorsements'][0]);
     }
 
-    public function test_rejects_synthetic_ciot_fixture_outside_homologation(): void
+    public function test_rejects_a_failed_ciot_217_in_production_as_well(): void
     {
         [$batch, $ciot] = $this->makeTrip();
         $ciot->forceFill([
@@ -227,13 +208,12 @@ class BuildMdfeEmissionSnapshotTest extends TestCase
         config(['dfe.tp_amb' => '1']);
 
         $this->expectException(DomainException::class);
-        $this->expectExceptionMessage('somente em homologação');
+        $this->expectExceptionMessage('CIOT emitido não encontrado para este lote.');
 
         app(BuildMdfeEmissionSnapshot::class)->handle(
             batch: $batch,
             endorsements: ['99032'],
             routeUfs: [],
-            homologationCiotNumber: '999999999999',
         );
     }
 

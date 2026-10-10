@@ -236,12 +236,11 @@ class BuildMdfeXmlTest extends TestCase
         app(BuildMdfeXml::class)->handle($snapshot);
     }
 
-    public function test_blocks_a_synthetic_ciot_snapshot_when_homologation_is_disabled(): void
+    public function test_blocks_a_previously_queued_synthetic_ciot_snapshot_in_production(): void
     {
         config([
             'app.env' => 'production',
             'dfe.tp_amb' => '1',
-            'dfe.ciot_synthetic_homologation_enabled' => false,
             'dfe.mdfe.numbering_start' => 123,
         ]);
         $snapshot = $this->snapshot();
@@ -254,20 +253,18 @@ class BuildMdfeXmlTest extends TestCase
         app(BuildMdfeXml::class)->handle($snapshot);
     }
 
-    public function test_builds_a_synthetic_ciot_number_into_the_homologation_mdfe_xml(): void
+    public function test_blocks_a_previously_queued_ciot_fixture_snapshot_in_homologation(): void
     {
-        config([
-            'dfe.tp_amb' => '2',
-            'dfe.ciot_synthetic_homologation_enabled' => true,
-        ]);
+        config(['dfe.tp_amb' => '2']);
         $snapshot = $this->snapshot();
         $snapshot['ciot'] = '990000000001';
-        $snapshot['ciot_source'] = 'synthetic_homologation';
+        $snapshot['ciot_source'] = 'homologation_fixture';
         $snapshot['insurance'] = app(BuildMdfeInsuranceSnapshot::class)->handle(['AVERBACAO-LOCAL-001']);
 
-        $built = app(BuildMdfeXml::class)->handle($snapshot);
+        $this->expectException(DomainException::class);
+        $this->expectExceptionMessage('CIOT sintético de homologação não pode ser usado');
 
-        $this->assertStringContainsString('<CIOT>990000000001</CIOT>', $built->xml);
+        app(BuildMdfeXml::class)->handle($snapshot);
     }
 
     public function test_rejects_an_operational_snapshot_without_insurance_endorsements(): void

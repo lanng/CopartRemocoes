@@ -12,7 +12,6 @@ use App\Models\CteEmissionBatch;
 use App\Services\Ciot\CityDistanceCalculator;
 use App\Services\Ciot\CreateCiotForBatch;
 use App\Services\Ciot\EmitCiotDeclaration;
-use App\Services\Ciot\IssueSyntheticCiotForHomologation;
 use App\Services\Ciot\PrefillCiotFromBatch;
 use App\Support\PtbrNumeric;
 use App\Support\PtbrNumericRule;
@@ -82,11 +81,6 @@ class GenerateCiotForBatchAction
         return [
             Hidden::make('status')->default(CiotStatusEnum::DRAFT->value),
             Hidden::make('line')->default($form['line']),
-            Toggle::make('synthetic_homologation')
-                ->label('Criar CIOT sintético para homologação')
-                ->helperText('Cria o CIOT localmente como Emitido, com número fictício e sem contato com a ANTT.')
-                ->default(false)
-                ->visible(fn (): bool => app(IssueSyntheticCiotForHomologation::class)->isEnabled()),
 
             Placeholder::make('avisos')
                 ->content(implode("\n", $prefill['warnings']))
@@ -298,34 +292,12 @@ class GenerateCiotForBatchAction
 
     protected static function submit(CteEmissionBatch $batch, array $data): void
     {
-        $synthetic = (bool) ($data['synthetic_homologation'] ?? false);
-        $syntheticIssuer = app(IssueSyntheticCiotForHomologation::class);
-
         try {
-            if ($synthetic) {
-                $syntheticIssuer->assertEnabled();
-                $data['status'] = CiotStatusEnum::DRAFT->value;
-            }
-
             $ciot = app(CreateCiotForBatch::class)->handle($batch, $data);
-
-            if ($synthetic) {
-                $ciot = $syntheticIssuer->handle($ciot);
-            }
         } catch (DomainException $exception) {
             Notification::make()
-                ->title($synthetic ? 'Não foi possível criar o CIOT sintético.' : 'Este lote já possui um CIOT ativo')
-                ->body($synthetic ? $exception->getMessage() : 'Cancele o CIOT existente para emitir outro para esta viagem.')
-                ->warning()
-                ->send();
-
-            return;
-        }
-
-        if ($synthetic) {
-            Notification::make()
-                ->title('CIOT sintético de homologação criado.')
-                ->body('Número local: '.$ciot->ciot_number.'. Nenhuma solicitação foi enviada à ANTT.')
+                ->title('Este lote já possui um CIOT ativo')
+                ->body('Cancele o CIOT existente para emitir outro para esta viagem.')
                 ->warning()
                 ->send();
 

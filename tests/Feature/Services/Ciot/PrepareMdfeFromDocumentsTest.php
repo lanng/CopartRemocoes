@@ -22,7 +22,6 @@ use App\Services\Ciot\ValidateMdfeDocumentSelection;
 use DomainException;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Foundation\Testing\RefreshDatabase;
-use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Queue;
 use Tests\TestCase;
 
@@ -261,74 +260,27 @@ class PrepareMdfeFromDocumentsTest extends TestCase
         $this->assertNull($snapshot['trip_id']);
     }
 
-    public function test_prepares_a_synthetic_ciot_for_alcohol_and_queues_the_real_mdfe_snapshot(): void
+    public function test_rejects_the_removed_synthetic_ciot_mode_for_tank_alcohol(): void
     {
-        config(['dfe.ciot_synthetic_homologation_enabled' => true]);
-        Queue::fake();
-        Http::fake();
-
         $batch = CteEmissionBatch::factory()->create();
         $document = $this->tankAlcoholDocument($batch);
-        $payer = Company::factory()->create([
-            'name' => 'Destinatário fiscal',
-            'cnpj' => '14517191000925',
-            'city' => 'Osvaldo Cruz',
-            'state' => 'SP',
-            'ibge_code' => '3534609',
-        ]);
-        $delivery = Company::factory()->create([
-            'name' => 'Entrega efetiva',
-            'cnpj' => '11222333000181',
-            'city' => 'Caçapava',
-            'state' => 'SP',
-            'ibge_code' => '3508504',
-        ]);
-        $vehicle = CiotVehicle::factory()->forTank()->create([
-            'plate' => 'PUC8E55',
-            'renavam' => '12345678901',
-            'tare_kg' => 8000,
-            'capacity_kg' => 12000,
-            'type_rod' => '03',
-            'body_type' => '00',
-            'uf' => 'SP',
-        ]);
         $driver = MdfeDriver::factory()->create([
-            'cpf' => '12345678909',
             'line' => CiotLineEnum::TankAlcohol->value,
         ]);
 
-        $result = app(PrepareMdfeDocument::class)->handle([
-            'line' => CiotLineEnum::TankAlcohol->value,
-            'cte_document_ids' => [$document->id],
-            'driver_id' => $driver->id,
-            'ciot_mode' => 'synthetic',
-            'new_ciot' => [
-                'status' => 'draft',
+        try {
+            app(PrepareMdfeDocument::class)->handle([
                 'line' => CiotLineEnum::TankAlcohol->value,
-                'operation_type' => 'lotation',
-                'payer_id' => $payer->id,
-                'delivery_payer_id' => $delivery->id,
-                'origin' => ['cidade' => 'Osvaldo Cruz', 'uf' => 'SP', 'cep' => '14810539', 'ibge' => '3534609'],
-                'destination' => ['cidade' => 'Caçapava', 'uf' => 'SP', 'cep' => '12286140', 'ibge' => '3508504'],
-                'distance_km' => '716',
-                'freight_value' => '250.00',
-                'cargo_weight_kg' => '2000.123',
-                'vehicle_ids' => [$vehicle->id],
-                'travel_start_at' => today()->toDateString(),
-                'travel_end_at' => today()->addDay()->toDateString(),
-            ],
-            'endorsements' => [['number' => 'AVERBACAO-ALC-SYNTH-001']],
-            'payment_method' => '0',
-        ]);
+                'cte_document_ids' => [$document->id],
+                'driver_id' => $driver->id,
+                'ciot_mode' => 'synthetic',
+            ]);
+            $this->fail('Expected DomainException.');
+        } catch (DomainException $exception) {
+            $this->assertStringContainsString('Escolha um CIOT emitido', $exception->getMessage());
+        }
 
-        $this->assertSame(CiotLineEnum::TankAlcohol, $result->ciot->line);
-        $this->assertSame('issued', $result->ciot->status->value);
-        $this->assertNotNull($result->mdfe);
-        $this->assertSame($result->ciot->ciot_number, $result->mdfe->snapshot['ciot']);
-        $this->assertSame('synthetic_homologation', $result->mdfe->snapshot['ciot_source']);
-        $this->assertSame('ALCOOL ETILICO', $result->mdfe->snapshot['cargo']['predominant_product']);
-        Queue::assertPushed(EmitMdfeDirectJob::class);
-        Http::assertNothingSent();
+        $this->assertSame(0, Ciot::query()->count());
     }
 
     public function test_creates_a_draft_ciot_for_an_explicit_selection_without_a_batch(): void

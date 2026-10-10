@@ -15,13 +15,12 @@ class ValidateMdfeDocumentSelection
 {
     public function __construct(
         private readonly AssertCteDocumentsEligibleForMdfe $cteEligibility,
-        private readonly IssueSyntheticCiotForHomologation $syntheticCiotIssuer,
     ) {}
 
     /**
      * @param  Collection<int, CteDocument>  $documents
      */
-    public function handle(Collection $documents, Ciot $ciot, ?string $homologationCiotNumber = null): CiotLineEnum
+    public function handle(Collection $documents, Ciot $ciot): CiotLineEnum
     {
         if ($documents->isEmpty()) {
             throw new DomainException('Selecione ao menos um CT-e autorizado para montar o MDF-e.');
@@ -65,15 +64,11 @@ class ValidateMdfeDocumentSelection
             throw new DomainException('A linha do CIOT deve corresponder à modalidade dos CT-es selecionados.');
         }
 
-        if ($ciot->isSyntheticHomologation() && ! $this->syntheticCiotIssuer->isEnabled()) {
-            throw new DomainException('O CIOT sintético só pode ser usado com o recurso habilitado em homologação.');
+        if ($ciot->isSyntheticHomologation()) {
+            throw new DomainException('CIOT sintético local não pode ser usado para emitir MDF-e.');
         }
 
         if ($ciot->status === CiotStatusEnum::ISSUED) {
-            return $line;
-        }
-
-        if ($this->isKnownHomologationFixture($ciot, $homologationCiotNumber)) {
             return $line;
         }
 
@@ -89,15 +84,5 @@ class ValidateMdfeDocumentSelection
         }
 
         return $line;
-    }
-
-    private function isKnownHomologationFixture(Ciot $ciot, ?string $fixtureNumber): bool
-    {
-        return $fixtureNumber !== null
-            && (string) config('dfe.tp_amb') === '2'
-            && preg_match('/^\d{12}$/', $fixtureNumber) === 1
-            && $ciot->status === CiotStatusEnum::FAILED
-            && $ciot->error_code === '217'
-            && filled($ciot->payload);
     }
 }

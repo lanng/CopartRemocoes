@@ -4,6 +4,7 @@ namespace App\Services\Ciot;
 
 use App\Enums\CiotStatusEnum;
 use App\Enums\CteDocumentStatusEnum;
+use App\Models\Ciot;
 use App\Models\CteDocument;
 use App\Models\CteEmissionBatch;
 use App\Models\MdfeDocument;
@@ -51,7 +52,8 @@ class DispatchMdfeForBatch
         $ciot = $batch->ciots()
             ->where('status', CiotStatusEnum::ISSUED->value)
             ->latest('id')
-            ->first();
+            ->get()
+            ->first(fn (Ciot $candidate): bool => ! $candidate->isSyntheticHomologation());
 
         if ($ciot === null) {
             $this->log("MDF-e do lote #{$batch->id} aguardando: sem CIOT emitido.");

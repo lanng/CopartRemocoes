@@ -12,7 +12,6 @@ use App\Models\Company;
 use App\Models\CteDocument;
 use App\Models\CteEmissionBatch;
 use App\Models\MdfeDocument;
-use App\Models\MdfeDriver;
 use App\Services\Ciot\PrepareMdfeDocument;
 use App\Services\Ciot\QueueDirectMdfeEmission;
 use DomainException;
@@ -38,7 +37,6 @@ class PrepareMdfeDocumentTest extends TestCase
             'ciot.lines.vehicle_removal.bank_code' => '756',
             'ciot.lines.vehicle_removal.bank_agency' => '0001',
             'dfe.tp_amb' => '2',
-            'dfe.ciot_synthetic_homologation_enabled' => true,
             'dfe.emit.cnpj' => '12563112000130',
         ]);
     }
@@ -51,103 +49,44 @@ class PrepareMdfeDocumentTest extends TestCase
         app(PrepareMdfeDocument::class)->handle(['vehicle_plate' => 'INVALID']);
     }
 
-    public function test_it_creates_a_synthetic_ciot_for_tank_alcohol_and_queues_the_mdfe_without_antt(): void
+    public function test_it_rejects_the_removed_synthetic_ciot_mode_in_homologation(): void
     {
-        Http::fake();
-        Queue::fake();
-
-        $document = CteDocument::factory()->authorized()->create([
-            'cte_emission_batch_id' => null,
-            'register_id' => null,
-            'workflow_origin' => 'controlled_v1',
-            'access_key' => str_repeat('2', 44),
-            'snapshot' => [
-                'schema_version' => 2,
-                'line' => CiotLineEnum::TankAlcohol->value,
-                'value' => '1200.00',
-                'cargo_weight_kg' => '25000.000',
-                'cargo_value' => '30000.00',
-                'origin' => ['ibge' => '3534609', 'name' => 'Osvaldo Cruz', 'uf' => 'SP'],
-                'destination' => ['ibge' => '3508504', 'name' => 'Caçapava', 'uf' => 'SP'],
-            ],
-        ]);
-        $payer = Company::factory()->create(['cnpj' => '14517191000925', 'name' => 'Copart Caçapava']);
-        $vehicle = CiotVehicle::factory()->forTank()->create();
-        $driver = MdfeDriver::factory()->create(['line' => CiotLineEnum::TankAlcohol->value]);
-        $ciotData = $this->newCiotFormData($payer, $vehicle);
-        $ciotData['line'] = CiotLineEnum::TankAlcohol->value;
-        $ciotData['status'] = CiotStatusEnum::ISSUED->value;
-
-        $queueService = \Mockery::mock(QueueDirectMdfeEmission::class);
-        $queueService->shouldReceive('handleForDocuments')
-            ->once()
-            ->withArgs(function (Collection $documents, Ciot $ciot, array $endorsements, array $routeUfs): bool {
-                $this->assertSame(CiotStatusEnum::ISSUED, $ciot->status);
-                $this->assertSame(CiotLineEnum::TankAlcohol, $ciot->line);
-                $this->assertTrue($ciot->response['homologation_fixture']['synthetic']);
-                $this->assertCount(1, $documents);
-                $this->assertSame(['AVERBACAO-ALCOOL-001'], $endorsements);
-                $this->assertSame([], $routeUfs);
-
-                return true;
-            })
-            ->andReturnUsing(fn (Collection $documents, Ciot $ciot): MdfeDocument => MdfeDocument::factory()->create([
-                'cte_emission_batch_id' => null,
-                'ciot_id' => $ciot->id,
-            ]));
-        $this->app->instance(QueueDirectMdfeEmission::class, $queueService);
-
-        $result = app(PrepareMdfeDocument::class)->handle([
-            'cte_document_ids' => [$document->id],
-            'line' => CiotLineEnum::TankAlcohol->value,
-            'driver_id' => $driver->id,
-            'ciot_mode' => 'synthetic',
-            'new_ciot' => $ciotData,
-            'endorsements' => [['number' => 'AVERBACAO-ALCOOL-001']],
-        ]);
-
-        $this->assertSame(CiotStatusEnum::ISSUED, $result->ciot->status);
-        $this->assertSame('99'.str_pad((string) $result->ciot->id, 10, '0', STR_PAD_LEFT), $result->ciot->ciot_number);
-        $this->assertNull($result->ciot->protocol);
-        $this->assertNotNull($result->mdfe);
-        $this->assertNull($result->ciotEmissionResult);
-        Http::assertNothingSent();
-        Queue::assertNothingPushed();
-    }
-
-    public function test_it_rejects_synthetic_ciot_creation_outside_sefaz_homologation(): void
-    {
-        config(['dfe.tp_amb' => '1']);
-
         $document = $this->controlledVehicleDocument();
-        $payer = Company::factory()->create(['cnpj' => '14517191000925', 'name' => 'Copart Caçapava']);
-        $vehicle = CiotVehicle::factory()->forRemoval()->create();
-        $queueService = \Mockery::mock(QueueDirectMdfeEmission::class);
-        $queueService->shouldNotReceive('handleForDocuments');
-        $this->app->instance(QueueDirectMdfeEmission::class, $queueService);
-
-        $this->expectException(DomainException::class);
-        $this->expectExceptionMessage('somente em homologação');
 
         try {
             app(PrepareMdfeDocument::class)->handle([
                 'cte_document_ids' => [$document->id],
                 'ciot_mode' => 'synthetic',
-                'new_ciot' => $this->newCiotFormData($payer, $vehicle),
-                'endorsements' => [['number' => 'AVERBACAO-001']],
             ]);
-        } finally {
-            $this->assertSame(0, Ciot::query()->count());
+            $this->fail('Expected DomainException.');
+        } catch (DomainException $exception) {
+            $this->assertStringContainsString('Escolha um CIOT emitido', $exception->getMessage());
         }
+
+        $this->assertSame(0, Ciot::query()->count());
     }
 
-    public function test_it_rejects_reusing_a_synthetic_ciot_when_the_homologation_option_is_disabled(): void
+    public function test_it_rejects_the_removed_synthetic_ciot_mode_in_production_too(): void
     {
-        config([
-            'dfe.tp_amb' => '1',
-            'dfe.ciot_synthetic_homologation_enabled' => false,
-        ]);
+        config(['dfe.tp_amb' => '1']);
 
+        $document = $this->controlledVehicleDocument();
+
+        try {
+            app(PrepareMdfeDocument::class)->handle([
+                'cte_document_ids' => [$document->id],
+                'ciot_mode' => 'synthetic',
+            ]);
+            $this->fail('Expected DomainException.');
+        } catch (DomainException $exception) {
+            $this->assertStringContainsString('Escolha um CIOT emitido', $exception->getMessage());
+        }
+
+        $this->assertSame(0, Ciot::query()->count());
+    }
+
+    public function test_it_always_rejects_reusing_a_previously_created_synthetic_ciot(): void
+    {
         $document = $this->controlledVehicleDocument();
         $ciot = Ciot::factory()->issued()->create([
             'line' => CiotLineEnum::VehicleRemoval,
@@ -166,7 +105,7 @@ class PrepareMdfeDocumentTest extends TestCase
             ]);
             $this->fail('Expected DomainException.');
         } catch (DomainException $exception) {
-            $this->assertStringContainsString('recurso habilitado em homologação', $exception->getMessage());
+            $this->assertStringContainsString('CIOT sintético local não pode ser usado', $exception->getMessage());
         }
     }
 

@@ -6,9 +6,6 @@ return [
     // regras de ambiente (nomes/CNPJs de teste, indIEToma, QR) daqui — nunca hardcoded.
     'tp_amb' => env('DFE_TP_AMB', '2'),
 
-    // Temporário: habilita CIOTs sintéticos somente para testes em homologação.
-    'ciot_synthetic_homologation_enabled' => (bool) env('DFE_CIOT_SYNTHETIC_HOMOLOGATION_ENABLED', false),
-
     // UF do emissor (SP): cUF do consStatServCTe e da chave de acesso.
     'cuf' => env('DFE_CUF', '35'),
 

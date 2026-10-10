@@ -36,7 +36,6 @@ class QueueDirectMdfeEmission
         array $routeUfs,
         ?MdfeDriver $driver = null,
         ?array $homologationFixture = null,
-        ?string $homologationCiotNumber = null,
         ?string $paymentMethod = null,
         ?string $paymentBankCode = null,
         ?string $paymentBankAgency = null,
@@ -44,16 +43,8 @@ class QueueDirectMdfeEmission
         $ciot = $batch->ciots()
             ->where('status', CiotStatusEnum::ISSUED->value)
             ->latest('id')
-            ->first();
-
-        if (! $ciot instanceof Ciot && $homologationCiotNumber !== null) {
-            $ciot = $batch->ciots()
-                ->where('status', CiotStatusEnum::FAILED->value)
-                ->where('error_code', '217')
-                ->whereNotNull('payload')
-                ->latest('id')
-                ->first();
-        }
+            ->get()
+            ->first(fn (Ciot $candidate): bool => ! $candidate->isSyntheticHomologation());
 
         if (! $ciot instanceof Ciot) {
             throw new DomainException('CIOT emitido não encontrado para este lote.');
@@ -67,7 +58,6 @@ class QueueDirectMdfeEmission
             batch: $batch,
             driver: $driver,
             homologationFixture: $homologationFixture,
-            homologationCiotNumber: $homologationCiotNumber,
             paymentMethod: $paymentMethod,
             paymentBankCode: $paymentBankCode,
             paymentBankAgency: $paymentBankAgency,
@@ -88,7 +78,6 @@ class QueueDirectMdfeEmission
         ?CteEmissionBatch $batch = null,
         ?MdfeDriver $driver = null,
         ?array $homologationFixture = null,
-        ?string $homologationCiotNumber = null,
         ?string $paymentMethod = null,
         ?string $paymentBankCode = null,
         ?string $paymentBankAgency = null,
@@ -101,7 +90,6 @@ class QueueDirectMdfeEmission
             $batch,
             $driver,
             $homologationFixture,
-            $homologationCiotNumber,
             $paymentMethod,
             $paymentBankCode,
             $paymentBankAgency,
@@ -110,7 +98,7 @@ class QueueDirectMdfeEmission
                 ? null
                 : CteEmissionBatch::query()->findOrFail($batch->id);
 
-            $this->selectionValidator->handle($documents, $ciot, $homologationCiotNumber);
+            $this->selectionValidator->handle($documents, $ciot);
             $snapshot = $this->snapshotBuilder->handleForDocuments(
                 documents: $documents,
                 ciot: $ciot,
@@ -119,7 +107,6 @@ class QueueDirectMdfeEmission
                 batch: $lockedBatch,
                 driver: $driver,
                 homologationFixture: $homologationFixture,
-                homologationCiotNumber: $homologationCiotNumber,
                 paymentMethod: $paymentMethod,
                 paymentBankCode: $paymentBankCode,
                 paymentBankAgency: $paymentBankAgency,

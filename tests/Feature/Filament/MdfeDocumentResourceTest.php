@@ -291,23 +291,12 @@ class MdfeDocumentResourceTest extends TestCase
         $this->assertFalse($page->get('data.new_ciot.indicators.composicao_veicular'));
     }
 
-    public function test_create_page_exposes_synthetic_ciot_only_when_explicitly_enabled_for_homologation(): void
+    public function test_create_page_does_not_offer_synthetic_ciot_creation(): void
     {
-        config([
-            'dfe.tp_amb' => '2',
-            'dfe.ciot_synthetic_homologation_enabled' => true,
-        ]);
-
         Livewire::test(CreateMdfeDocument::class)
-            ->assertSee('Criar CIOT sintético para homologação')
-            ->set('data.ciot_mode', 'synthetic')
-            ->assertSee('CIOT sintético de homologação')
-            ->assertSee('Nenhuma solicitação será enviada à ANTT.');
-
-        config(['dfe.ciot_synthetic_homologation_enabled' => false]);
-
-        Livewire::test(CreateMdfeDocument::class)
-            ->assertDontSee('Criar CIOT sintético para homologação');
+            ->assertDontSee('Criar CIOT sintético para homologação')
+            ->assertDontSee('CIOT sintético de homologação')
+            ->assertDontSee('Nenhuma solicitação será enviada à ANTT.');
     }
 
     public function test_create_page_prefills_the_new_ciot_from_selected_ctes_in_the_operator_order(): void
