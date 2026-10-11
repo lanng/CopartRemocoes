@@ -224,7 +224,9 @@ class CleanupOldRegistersTest extends TestCase
             'status' => RegisterStatusEnum::PAID,
             'updated_at' => now()->subDays(16),
         ]);
-        $batch = $this->createBatch();
+        $batch = CteEmissionBatch::factory()->create([
+            'status' => CteEmissionBatchStatusEnum::DRAFT,
+        ]);
         $authorized = CteDocument::factory()->authorized()->create([
             'cte_emission_batch_id' => $batch->id,
             'register_id' => $register->id,
@@ -245,6 +247,7 @@ class CleanupOldRegistersTest extends TestCase
 
         $this->artisan('app:cleanup-old-registers')->assertSuccessful();
 
+        $this->assertModelMissing($register);
         $this->assertModelExists($authorized->refresh());
         $this->assertNull($authorized->register_id);
         $this->assertModelMissing($draft);

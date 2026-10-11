@@ -460,7 +460,7 @@ class CteEmissionResourceTest extends TestCase
         $this->assertArrayHasKey('view', CteEmissionResource::getPages());
     }
 
-    public function test_destination_and_modality_are_read_from_the_emission_snapshot(): void
+    public function test_destination_is_read_from_the_emission_snapshot(): void
     {
         CteDocument::factory()->authorized()->create([
             'snapshot' => [
@@ -471,7 +471,7 @@ class CteEmissionResourceTest extends TestCase
 
         Livewire::test(ListCteEmissions::class)
             ->assertSee('Destino fiscal snapshot')
-            ->assertSee('Rodoviário');
+            ->assertDontSee('Rodoviário');
     }
 
     public function test_regenerates_the_dacte_from_the_stored_proc(): void

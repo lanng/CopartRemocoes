@@ -124,8 +124,8 @@ class MdfeDocumentResourceTest extends TestCase
         ]);
 
         Livewire::test(ManageMdfeDocuments::class)
-            ->assertTableActionVisible('downloadEventXml', $document)
-            ->callTableAction('downloadEventXml', $document, data: ['event_id' => $event->id])
+            ->assertTableActionVisible('downloadEventXml', $document->getKey())
+            ->callTableAction('downloadEventXml', $document->getKey(), data: ['event_id' => $event->id])
             ->assertFileDownloaded(basename($eventPath), '<procEventoMDFe>listed</procEventoMDFe>');
     }
 
