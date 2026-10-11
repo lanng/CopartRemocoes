@@ -101,7 +101,7 @@ class PrefillCiotFromBatchTest extends TestCase
         ]);
     }
 
-    public function test_prefills_freight_weight_vehicles_and_the_longest_route(): void
+    public function test_prefills_freight_weight_and_longest_route_without_selecting_vehicles(): void
     {
         $prefill = app(PrefillCiotFromBatch::class)->handle($this->batch);
 
@@ -120,9 +120,7 @@ class PrefillCiotFromBatchTest extends TestCase
         $this->assertSame('Caçapava', $form['destination']['cidade']);
         $this->assertSame(['48580847000208'], $form['additional_payers']);
 
-        // composição da linha de remoção: os 2 da remoção + o sem linha definida
-        // (disponível para todas); o caminhão de tanque fica de fora.
-        $this->assertCount(3, $form['vehicle_ids']);
+        $this->assertSame([], $form['vehicle_ids']);
 
         $this->assertStringContainsString('Osvaldo Cruz → Copart Caçapava: 716 km', $prefill['ranking']);
     }

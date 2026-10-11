@@ -18,6 +18,7 @@ use DomainException;
 use Filament\Facades\Filament;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\UploadedFile;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Facades\Storage;
 use Livewire\Livewire;
@@ -30,6 +31,8 @@ class CteEmissionResourceTest extends TestCase
     protected function setUp(): void
     {
         parent::setUp();
+
+        $this->travelTo(Carbon::parse('2026-10-01 12:00:00', 'America/Sao_Paulo'));
 
         Filament::setCurrentPanel(Filament::getPanel('admin'));
         /** @var User $user */
