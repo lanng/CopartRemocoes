@@ -87,7 +87,7 @@ class BuildCteXmlTest extends TestCase
         $this->assertStringContainsString('<cDV>'.substr($built->accessKey, -1).'</cDV>', $xml);
         $this->assertStringContainsString('<tpAmb>2</tpAmb>', $xml);
         $this->assertStringContainsString('<dhEmi>2026-10-01T09:00:00-03:00</dhEmi>', $xml);
-        $this->assertStringContainsString('<verProc>COPART-DFE-1.0</verProc>', $xml);
+        $this->assertStringContainsString('<verProc>Sistema interno 1.0</verProc>', $xml);
         $this->assertStringContainsString('<cMunIni>3504008</cMunIni><xMunIni>Assis</xMunIni><UFIni>SP</UFIni>', $xml);
         $this->assertStringContainsString('<cMunFim>3523107</cMunFim><xMunFim>Itaquaquecetuba</xMunFim><UFFim>SP</UFFim>', $xml);
         $this->assertStringContainsString('<indIEToma>9</indIEToma>', $xml);

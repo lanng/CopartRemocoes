@@ -265,6 +265,6 @@
     <div class="rule" style="left: 0; top: 11pt; width: 562pt"></div>
     <div class="divider" style="left: 374pt; top: 0; height: 50pt"></div>
 </div>
-<div class="field right" style="left: 17.5pt; top: 683pt; width: 550pt">Emitido por {{ config('dfe.cte.verProc') }}</div>
+<div class="field right" style="left: 17.5pt; top: 683pt; width: 550pt">Emitido por Sistema Interno</div>
 </body>
 </html>

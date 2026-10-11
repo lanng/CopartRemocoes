@@ -86,6 +86,7 @@ class BuildMdfeXmlTest extends TestCase
         $this->assertSame(44, strlen($built->accessKey));
         $this->assertStringContainsString('<tpAmb>2</tpAmb>', $built->xml);
         $this->assertStringContainsString('<tpEmit>1</tpEmit>', $built->xml);
+        $this->assertStringContainsString('<verProc>Sistema interno 1.0</verProc>', $built->xml);
         $this->assertStringNotContainsString('<tpTransp', $built->xml);
         $this->assertStringContainsString(
             '<prodPred><tpCarga>05</tpCarga><xProd>VEICULOS</xProd><infLotacao><infLocalCarrega><CEP>14810539</CEP></infLocalCarrega><infLocalDescarrega><CEP>06550000</CEP></infLocalDescarrega></infLotacao></prodPred>',

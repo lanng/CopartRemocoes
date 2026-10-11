@@ -69,7 +69,7 @@ return [
         'tpEmis' => env('DFE_CTE_TP_EMIS', '1'),
         'modal' => env('DFE_CTE_MODAL', '01'),
         'rntrc' => env('DFE_CTE_RNTRC', '45963122'),
-        'verProc' => env('DFE_CTE_VER_PROC', 'COPART-DFE-1.0'),
+        'verProc' => env('DFE_CTE_VER_PROC', 'Sistema interno 1.0'),
         // Peso default por veículo na linha de remoção (qCarga do infQ).
         'default_weight_kg' => env('DFE_CTE_DEFAULT_WEIGHT_KG', '2000.0000'),
     ],

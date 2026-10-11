@@ -73,7 +73,7 @@ class BuildMdfeXml
             .'<cMDF>'.$numericCode.'</cMDF><cDV>'.substr($accessKey, -1).'</cDV>'
             .'<modal>1</modal><dhEmi>'.Carbon::parse((string) $snapshot['issue_at'])->format('Y-m-d\TH:i:sP').'</dhEmi>'
             .'<tpEmis>'.e((string) config('dfe.mdfe.tp_emis')).'</tpEmis><procEmi>0</procEmi>'
-            .'<verProc>COPART-DFE-1.0</verProc>'
+            .'<verProc>Sistema interno 1.0</verProc>'
             .'<UFIni>'.e((string) $origin['uf']).'</UFIni><UFFim>'.e((string) $destination['uf']).'</UFFim>'
             .$this->loadingCities($snapshot['loading_cities'])
             .$this->routeGroups($routeUfs)

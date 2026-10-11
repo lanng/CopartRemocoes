@@ -47,6 +47,16 @@ class GenerateDactePdfTest extends TestCase
         $this->assertGreaterThan(3000, strlen((string) $pdf), 'DACTE com o leiaute completo não pode ser um PDF vazio.');
     }
 
+    public function test_prints_the_neutral_software_credit_in_the_footer(): void
+    {
+        $proc = (string) file_get_contents(__DIR__.'/../../../Fixtures/Dfe/cte-2962.xml');
+        $data = DacteData::fromProc($proc);
+        $html = view('dfe.dacte', ['dacte' => $data, 'qrImage' => null])->render();
+
+        $this->assertStringContainsString('Emitido por Sistema Interno', $html);
+        $this->assertStringNotContainsString('COPART-DFE-1.0', $html);
+    }
+
     public function test_regeneration_never_overwrites_it_versions_the_file(): void
     {
         $proc = (string) file_get_contents(__DIR__.'/../../../Fixtures/Dfe/cte-2962.xml');
