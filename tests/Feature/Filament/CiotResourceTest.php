@@ -10,10 +10,10 @@ use App\Filament\Resources\CiotResource\Pages\ListCiots;
 use App\Filament\Resources\CiotResource\Pages\ViewCiot;
 use App\Jobs\EmitCiotJob;
 use App\Models\Ciot;
-use App\Models\CiotPayer;
 use App\Models\CiotVehicle;
 use App\Models\City;
 use App\Models\CityDistance;
+use App\Models\Company;
 use App\Models\User;
 use Filament\Facades\Filament;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -58,8 +58,8 @@ class CiotResourceTest extends TestCase
 
     public function test_the_create_form_builds_a_draft_ciot_snapshot(): void
     {
-        $payer = CiotPayer::factory()->create(['cnpj' => '14517191000925', 'name' => 'Copart Caçapava']);
-        $delivery = CiotPayer::factory()->create(['cnpj' => '14517191000410', 'name' => 'Copart Osasco']);
+        $payer = Company::factory()->create(['cnpj' => '14517191000925', 'name' => 'Copart Caçapava']);
+        $delivery = Company::factory()->create(['cnpj' => '14517191000410', 'name' => 'Copart Osasco']);
         $tractor = CiotVehicle::factory()->create(['plate' => 'PUC8E55', 'type' => 'automotor', 'axles' => 3]);
         $trailer = CiotVehicle::factory()->trailer()->create(['plate' => 'TIX7D32', 'axles' => 2]);
 
@@ -101,8 +101,8 @@ class CiotResourceTest extends TestCase
 
     public function test_the_create_form_accepts_brazilian_number_formats(): void
     {
-        $payer = CiotPayer::factory()->create(['cnpj' => '14517191000925', 'name' => 'Copart Caçapava']);
-        $delivery = CiotPayer::factory()->create(['cnpj' => '14517191000410', 'name' => 'Copart Osasco']);
+        $payer = Company::factory()->create(['cnpj' => '14517191000925', 'name' => 'Copart Caçapava']);
+        $delivery = Company::factory()->create(['cnpj' => '14517191000410', 'name' => 'Copart Osasco']);
         $tractor = CiotVehicle::factory()->create(['plate' => 'PUC8E55', 'type' => 'automotor', 'axles' => 3]);
 
         Livewire::test(CreateCiot::class)
@@ -138,7 +138,7 @@ class CiotResourceTest extends TestCase
 
     public function test_the_create_form_rejects_ambiguous_number_formats(): void
     {
-        $payer = CiotPayer::factory()->create(['cnpj' => '14517191000925', 'name' => 'Copart Caçapava']);
+        $payer = Company::factory()->create(['cnpj' => '14517191000925', 'name' => 'Copart Caçapava']);
         $tractor = CiotVehicle::factory()->create(['plate' => 'PUC8E55', 'type' => 'automotor', 'axles' => 3]);
 
         Livewire::test(CreateCiot::class)
@@ -169,7 +169,7 @@ class CiotResourceTest extends TestCase
 
     public function test_the_create_form_rejects_a_freight_below_one_cent(): void
     {
-        $payer = CiotPayer::factory()->create(['cnpj' => '14517191000925', 'name' => 'Copart Caçapava']);
+        $payer = Company::factory()->create(['cnpj' => '14517191000925', 'name' => 'Copart Caçapava']);
         $tractor = CiotVehicle::factory()->create(['plate' => 'PUC8E55', 'type' => 'automotor', 'axles' => 3]);
 
         Livewire::test(CreateCiot::class)
@@ -335,7 +335,7 @@ class CiotResourceTest extends TestCase
     {
         Queue::fake();
 
-        $payer = CiotPayer::factory()->create(['cnpj' => '14517191000925']);
+        $payer = Company::factory()->create(['cnpj' => '14517191000925']);
         $tractor = CiotVehicle::factory()->create(['plate' => 'PUC8E55', 'type' => 'automotor', 'axles' => 3]);
 
         Http::fake([
@@ -559,7 +559,7 @@ class CiotResourceTest extends TestCase
 
     public function test_edit_updates_a_failed_ciot_without_recreating_it(): void
     {
-        $payer = CiotPayer::factory()->create(['cnpj' => '14517191000925']);
+        $payer = Company::factory()->create(['cnpj' => '14517191000925']);
         $tractor = CiotVehicle::factory()->create(['plate' => 'PUC8E55', 'type' => 'automotor', 'axles' => 3]);
 
         $ciot = Ciot::factory()->create([
@@ -589,8 +589,8 @@ class CiotResourceTest extends TestCase
 
     public function test_editing_prunes_the_payer_from_additional_payers_b119(): void
     {
-        $payer = CiotPayer::factory()->create(['cnpj' => '14517191000925']);
-        CiotPayer::factory()->create(['cnpj' => '14517191000410']);
+        $payer = Company::factory()->create(['cnpj' => '14517191000925']);
+        Company::factory()->create(['cnpj' => '14517191000410']);
         CiotVehicle::factory()->create(['plate' => 'PUC8E55', 'type' => 'automotor', 'axles' => 3]);
 
         $ciot = Ciot::factory()->create([
@@ -662,7 +662,7 @@ class CiotResourceTest extends TestCase
 
     public function test_selecting_the_delivery_payer_autocompletes_the_destination(): void
     {
-        $payer = CiotPayer::factory()->create([
+        $payer = Company::factory()->create([
             'name' => 'Copart Caçapava',
             'cnpj' => '14517191000925',
             'city' => 'Caçapava',
@@ -710,7 +710,7 @@ class CiotResourceTest extends TestCase
      */
     protected function editableCiot(): Ciot
     {
-        $payer = CiotPayer::factory()->create(['cnpj' => '14517191000925']);
+        $payer = Company::factory()->create(['cnpj' => '14517191000925']);
         CiotVehicle::factory()->create(['plate' => 'PUC8E55', 'type' => 'automotor', 'axles' => 3]);
 
         return Ciot::factory()->create([

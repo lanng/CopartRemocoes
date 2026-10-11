@@ -39,6 +39,56 @@ class CiotVehicleResource extends Resource
                     ->label('RNTRC')
                     ->numeric()
                     ->length(9),
+                Forms\Components\TextInput::make('renavam')
+                    ->label('RENAVAM')
+                    ->numeric()
+                    ->minLength(9)
+                    ->maxLength(11),
+                Forms\Components\TextInput::make('tare_kg')
+                    ->label('Tara (kg)')
+                    ->numeric()
+                    ->minValue(0)
+                    ->maxValue(999999)
+                    ->required(fn (Forms\Get $get): bool => filled($get('type'))),
+                Forms\Components\TextInput::make('capacity_kg')
+                    ->label('Capacidade (kg)')
+                    ->numeric()
+                    ->minValue(0)
+                    ->maxValue(999999)
+                    ->required(fn (Forms\Get $get): bool => $get('type') === CiotVehicle::TYPE_TRAILER),
+                Forms\Components\TextInput::make('capacity_m3')
+                    ->label('Capacidade (m³)')
+                    ->numeric()
+                    ->minValue(0)
+                    ->maxValue(999),
+                Forms\Components\Select::make('type_rod')
+                    ->label('Tipo de rodado')
+                    ->options([
+                        '01' => 'Truck',
+                        '02' => 'Toco',
+                        '03' => 'Cavalo mecânico',
+                        '04' => 'Van',
+                        '05' => 'Utilitário',
+                        '06' => 'Outros',
+                    ])
+                    ->required(fn (Forms\Get $get): bool => $get('type') === CiotVehicle::TYPE_AUTOMOTOR),
+                Forms\Components\Select::make('body_type')
+                    ->label('Tipo de carroceria')
+                    ->options([
+                        '00' => 'Não aplicável',
+                        '01' => 'Aberta',
+                        '02' => 'Fechada / baú',
+                        '03' => 'Graneleira',
+                        '04' => 'Porta-container',
+                        '05' => 'Sider',
+                    ])
+                    ->required(fn (Forms\Get $get): bool => filled($get('type'))),
+                Forms\Components\TextInput::make('uf')
+                    ->label('UF do licenciamento')
+                    ->length(2)
+                    ->maxLength(2)
+                    ->extraInputAttributes(['style' => 'text-transform: uppercase'])
+                    ->dehydrateStateUsing(fn (?string $state): ?string => filled($state) ? strtoupper(trim($state)) : null),
                 Forms\Components\TextInput::make('axles')
                     ->label('Eixos')
                     ->numeric()
@@ -88,6 +138,9 @@ class CiotVehicleResource extends Resource
                     ->formatStateUsing(fn (string $state): string => $state === CiotVehicle::TYPE_AUTOMOTOR ? 'Automotor' : 'Reboque'),
                 Tables\Columns\TextColumn::make('axles')->label('Eixos'),
                 Tables\Columns\TextColumn::make('rntrc')->label('RNTRC')->fontFamily('mono')->placeholder('—'),
+                Tables\Columns\TextColumn::make('renavam')->label('RENAVAM')->fontFamily('mono')->placeholder('—'),
+                Tables\Columns\TextColumn::make('tare_kg')->label('Tara (kg)')->placeholder('—'),
+                Tables\Columns\TextColumn::make('capacity_kg')->label('Capacidade (kg)')->placeholder('—'),
                 Tables\Columns\TextColumn::make('line')
                     ->label('Linha')
                     ->badge()

@@ -9,6 +9,7 @@ use DomainException;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Support\Facades\DB;
 use Spatie\Activitylog\LogOptions;
 use Spatie\Activitylog\Traits\LogsActivity;
@@ -54,12 +55,12 @@ class Ciot extends Model
 
     public function payer(): BelongsTo
     {
-        return $this->belongsTo(CiotPayer::class, 'payer_id');
+        return $this->belongsTo(Company::class, 'payer_id');
     }
 
     public function deliveryPayer(): BelongsTo
     {
-        return $this->belongsTo(CiotPayer::class, 'delivery_payer_id');
+        return $this->belongsTo(Company::class, 'delivery_payer_id');
     }
 
     public function cteEmissionBatch(): BelongsTo
@@ -67,9 +68,19 @@ class Ciot extends Model
         return $this->belongsTo(CteEmissionBatch::class);
     }
 
+    public function mdfeDocuments(): HasMany
+    {
+        return $this->hasMany(MdfeDocument::class);
+    }
+
     public function isOpen(): bool
     {
         return $this->status === CiotStatusEnum::ISSUED;
+    }
+
+    public function isSyntheticHomologation(): bool
+    {
+        return ($this->response['homologation_fixture']['synthetic'] ?? false) === true;
     }
 
     /**

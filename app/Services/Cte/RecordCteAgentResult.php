@@ -3,6 +3,7 @@
 namespace App\Services\Cte;
 
 use App\Enums\CteDocumentStatusEnum;
+use App\Enums\FiscalDocumentStatusEnum;
 use App\Models\CteAgent;
 use App\Models\CteDocument;
 use Carbon\Carbon;
@@ -58,6 +59,11 @@ class RecordCteAgentResult
             $error = $payload['error'] ?? [];
             $document->forceFill([
                 'result_payload_hash' => $payloadHash,
+                ...match ($outcome) {
+                    'authorized' => ['fiscal_status' => FiscalDocumentStatusEnum::AUTHORIZED],
+                    'rejected' => ['fiscal_status' => FiscalDocumentStatusEnum::NOT_AUTHORIZED],
+                    default => [],
+                },
                 'issued_at' => isset($cte['issued_at']) ? Carbon::parse($cte['issued_at']) : null,
                 'authorized_at' => isset($cte['authorized_at']) ? Carbon::parse($cte['authorized_at']) : null,
                 'cte_number' => $cte['number'] ?? null,
@@ -72,7 +78,11 @@ class RecordCteAgentResult
             ])->save();
 
             $document = $document->refresh();
-            app(CteBatchStatusUpdater::class)->handle($document->batch);
+            $batch = $document->batch;
+
+            if ($batch !== null) {
+                app(CteBatchStatusUpdater::class)->handle($batch);
+            }
 
             return $document;
         });

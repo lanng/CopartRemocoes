@@ -3,6 +3,7 @@
 namespace Tests\Feature\Models;
 
 use App\Enums\CteDocumentStatusEnum;
+use App\Enums\FiscalDocumentWorkflowOriginEnum;
 use App\Models\CteDocument;
 use App\Models\CteEmissionBatch;
 use App\Models\Register;
@@ -82,6 +83,24 @@ class CteDocumentTest extends TestCase
             'cte_number' => '002671',
             'access_key' => '35260812563112000130570010000026701338262343',
         ]);
+    }
+
+    public function test_new_mdfe_candidates_require_the_explicit_controlled_workflow_origin(): void
+    {
+        $legacyDirectDocument = CteDocument::factory()->authorized()->create([
+            'emitter' => 'direct',
+        ]);
+        $controlledDocument = CteDocument::factory()->authorized()->create([
+            'emitter' => 'direct',
+            'workflow_origin' => FiscalDocumentWorkflowOriginEnum::ControlledV1,
+        ]);
+
+        $this->assertSame(
+            [$controlledDocument->id],
+            CteDocument::query()->eligibleForNewMdfe()->orderBy('id')->pluck('id')->all(),
+        );
+        $this->assertFalse($legacyDirectDocument->isEligibleForNewMdfe());
+        $this->assertTrue($controlledDocument->isEligibleForNewMdfe());
     }
 
     /** @return array<string, mixed> */

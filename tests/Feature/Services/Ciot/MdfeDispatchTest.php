@@ -51,6 +51,7 @@ class MdfeDispatchTest extends TestCase
         )->create([
             'cte_emission_batch_id' => $this->batch->id,
             'status' => CteDocumentStatusEnum::AUTHORIZED,
+            'workflow_origin' => 'controlled_v1',
             'snapshot' => [
                 'company' => 'copart',
                 'vehicle_plate' => 'ABC1234',
@@ -84,7 +85,7 @@ class MdfeDispatchTest extends TestCase
 
     protected function deliveryPayerWithCep(): void
     {
-        $delivery = \App\Models\CiotPayer::factory()->create([
+        $delivery = \App\Models\Company::factory()->create([
             'cnpj' => '14517191000925',
             'zipcode' => '12286140',
         ]);
@@ -141,8 +142,13 @@ class MdfeDispatchTest extends TestCase
         $this->assertNotNull($mdfe);
         $this->assertSame('queued', $mdfe->status->value);
         $this->assertSame('live', $mdfe->execution_mode);
+        $this->assertSame(Ciot::query()->where('cte_emission_batch_id', $this->batch->id)->firstOrFail()->id, $mdfe->ciot_id);
         $this->assertSame('520032956638', $mdfe->snapshot['ciot']);
         $this->assertSame($this->keys, $mdfe->snapshot['cte_access_keys']);
+        $this->assertSame(
+            $this->batch->documents()->orderBy('id')->pluck('cte_documents.id')->all(),
+            $mdfe->cteDocuments()->orderBy('cte_document_mdfe_document.position')->pluck('cte_documents.id')->all(),
+        );
     }
 
     public function test_dispatch_is_idempotent(): void
@@ -171,5 +177,18 @@ class MdfeDispatchTest extends TestCase
         CteDocument::query()->first()->update(['status' => 'queued']);
 
         $this->assertNull(app(DispatchMdfeForBatch::class)->handle($this->batch));
+    }
+
+    public function test_dispatch_skips_legacy_ctes_even_when_authorized(): void
+    {
+        $this->deliveryPayerWithCep();
+        CteDocument::query()
+            ->where('cte_emission_batch_id', $this->batch->id)
+            ->update(['workflow_origin' => null]);
+
+        $this->assertNull(app(DispatchMdfeForBatch::class)->handle($this->batch));
+        $this->assertDatabaseMissing('mdfe_documents', [
+            'cte_emission_batch_id' => $this->batch->id,
+        ]);
     }
 }

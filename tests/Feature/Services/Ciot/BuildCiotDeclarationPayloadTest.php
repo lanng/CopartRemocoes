@@ -128,7 +128,7 @@ class BuildCiotDeclarationPayloadTest extends TestCase
         $this->assertSame('222', $payload['InfPagamento'][0]['NumeroConta']);
     }
 
-    public function test_natureza_fallback_switches_to_code_one(): void
+    public function test_natureza_fallback_preserves_the_line_cargo_type(): void
     {
         config(['ciot.natureza_fallback' => true]);
 
@@ -137,7 +137,14 @@ class BuildCiotDeclarationPayloadTest extends TestCase
         $payload = app(BuildCiotDeclarationPayload::class)->handle($ciot);
 
         $this->assertSame(1, $payload['DadosCarga']['CodigoNaturezaCarga']);
-        $this->assertSame(1, $payload['DadosCarga']['CodigoTipoCarga']);
+        $this->assertSame(5, $payload['DadosCarga']['CodigoTipoCarga']);
+
+        $tankCiot = Ciot::factory()->tankAlcohol()->create();
+
+        $tankPayload = app(BuildCiotDeclarationPayload::class)->handle($tankCiot);
+
+        $this->assertSame(1, $tankPayload['DadosCarga']['CodigoNaturezaCarga']);
+        $this->assertSame(2, $tankPayload['DadosCarga']['CodigoTipoCarga']);
     }
 
     public function test_fractioned_operation_includes_additional_payers(): void

@@ -4,8 +4,8 @@ namespace App\Console\Commands;
 
 use App\Enums\CiotStatusEnum;
 use App\Models\Ciot;
-use App\Models\CiotPayer;
 use App\Models\CiotVehicle;
+use App\Models\Company;
 use App\Services\Ciot\AnttCiotClient;
 use App\Services\Ciot\AnttCiotException;
 use App\Services\Ciot\AnttCiotResponse;
@@ -285,12 +285,12 @@ class CiotSmokeCommand extends Command
         return $ciot;
     }
 
-    protected function smokePayer(): ?CiotPayer
+    protected function smokePayer(): ?Company
     {
-        $payer = CiotPayer::query()->where('cnpj', '14517191000925')->first();
+        $payer = Company::query()->where('cnpj', '14517191000925')->first();
 
         if ($payer === null) {
-            $this->warn('Pátio Copart Caçapava (14517191000925) não encontrado. Rode o CiotPayerSeeder.');
+            $this->warn('Pátio Copart Caçapava (14517191000925) não encontrado. Rode o CompanySeeder.');
         }
 
         return $payer;

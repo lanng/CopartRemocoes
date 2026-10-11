@@ -3,6 +3,7 @@
 namespace App\Services\Cte;
 
 use App\Enums\CteDocumentStatusEnum;
+use App\Enums\FiscalDocumentStatusEnum;
 use App\Models\MdfeDocument;
 use DomainException;
 
@@ -32,6 +33,7 @@ class ReconcileMdfeDocument
 
         $mdfe->forceFill([
             'status' => CteDocumentStatusEnum::AUTHORIZED,
+            'fiscal_status' => FiscalDocumentStatusEnum::AUTHORIZED,
             'access_key' => $accessKey,
             'mdfe_number' => $number,
             'series' => $series,

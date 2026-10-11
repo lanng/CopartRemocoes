@@ -4,6 +4,8 @@ namespace App\Services\Cte;
 
 use App\Enums\CteDocumentStatusEnum;
 use App\Enums\CteEmissionBatchStatusEnum;
+use App\Enums\FiscalDocumentStatusEnum;
+use App\Jobs\EmitCteDirectJob;
 use App\Models\CteDocument;
 use App\Models\CteEmissionBatch;
 use Illuminate\Support\Collection;
@@ -13,37 +15,47 @@ use Illuminate\Validation\ValidationException;
 
 class CteDocumentRecoveryService
 {
-    /**
-     * Unico status de onde o documento nao volta para a fila: o CT-e ja foi
-     * autorizado, e reemitir geraria um documento duplicado.
-     */
-    public static function canBeRequeued(CteDocumentStatusEnum $status): bool
+    public static function canBeRequeued(CteDocument $document): bool
     {
-        return $status !== CteDocumentStatusEnum::AUTHORIZED;
+        if ($document->fiscal_status === FiscalDocumentStatusEnum::AUTHORIZED) {
+            return false;
+        }
+
+        if (in_array($document->status, [
+            CteDocumentStatusEnum::AUTHORIZED,
+            CteDocumentStatusEnum::AUTHORIZING,
+            CteDocumentStatusEnum::RECONCILIATION_REQUIRED,
+            CteDocumentStatusEnum::CANCELLED,
+            CteDocumentStatusEnum::SUPERSEDED,
+        ], true)) {
+            return false;
+        }
+
+        if ($document->status === CteDocumentStatusEnum::FAILED_BEFORE_AUTHORIZATION
+            && (filled($document->access_key) || filled($document->payload_xml))) {
+            return false;
+        }
+
+        return true;
     }
 
     public function retry(CteDocument $document): CteDocument
     {
-        if (! self::canBeRequeued($document->status)) {
-            throw ValidationException::withMessages([
-                'document' => 'Documentos autorizados nao podem ser reenfileirados.',
-            ]);
-        }
+        return DB::transaction(function () use ($document): CteDocument {
+            $document = CteDocument::query()->lockForUpdate()->findOrFail($document->id);
 
-        $this->resetForRetry($document);
+            if (! self::canBeRequeued($document)) {
+                throw ValidationException::withMessages([
+                    'document' => 'Este documento não pode ser reenfileirado com segurança; reconcilie o resultado fiscal ou aguarde a tentativa atual.',
+                ]);
+            }
 
-        CteEmissionBatch::query()
-            ->whereKey($document->cte_emission_batch_id)
-            ->whereIn('status', [
-                CteEmissionBatchStatusEnum::COMPLETED,
-                CteEmissionBatchStatusEnum::COMPLETED_WITH_ERRORS,
-            ])
-            ->update([
-                'status' => CteEmissionBatchStatusEnum::PROCESSING->value,
-                'completed_at' => null,
-            ]);
+            $this->resetForRetry($document);
+            $this->reopenBatch($document);
+            $this->dispatchDirectEmissionAfterCommit($document);
 
-        return $document->refresh();
+            return $document->refresh();
+        }, attempts: 3);
     }
 
     /** @param Collection<int, CteDocument> $documents */
@@ -56,16 +68,21 @@ class CteDocumentRecoveryService
             foreach ($documents as $document) {
                 $document = CteDocument::query()->lockForUpdate()->findOrFail($document->id);
 
-                if (! self::canBeRequeued($document->status)) {
+                if (! self::canBeRequeued($document)) {
                     continue;
                 }
 
                 $this->resetForRetry($document);
-                $batchIds[$document->cte_emission_batch_id] = true;
+                $this->dispatchDirectEmissionAfterCommit($document);
+
+                if ($document->cte_emission_batch_id !== null) {
+                    $batchIds[$document->cte_emission_batch_id] = true;
+                }
+
                 $retried++;
             }
 
-            if ($retried > 0) {
+            if ($batchIds !== []) {
                 CteEmissionBatch::query()
                     ->whereIn('id', array_keys($batchIds))
                     ->whereIn('status', [
@@ -99,11 +116,43 @@ class CteDocumentRecoveryService
             'protocol' => null,
             'fiscal_status_code' => null,
             'fiscal_status_message' => null,
+            'fiscal_status' => null,
+            'payload_xml' => null,
+            'response_xml' => null,
+            'digest_value' => null,
+            'xml_path' => null,
+            'pdf_path' => null,
+            'sha256' => null,
             'error_stage' => null,
             'error_code' => null,
             'error_message' => null,
             'result_payload_hash' => null,
         ])->save();
+    }
+
+    private function reopenBatch(CteDocument $document): void
+    {
+        if ($document->cte_emission_batch_id === null) {
+            return;
+        }
+
+        CteEmissionBatch::query()
+            ->whereKey($document->cte_emission_batch_id)
+            ->whereIn('status', [
+                CteEmissionBatchStatusEnum::COMPLETED,
+                CteEmissionBatchStatusEnum::COMPLETED_WITH_ERRORS,
+            ])
+            ->update([
+                'status' => CteEmissionBatchStatusEnum::PROCESSING->value,
+                'completed_at' => null,
+            ]);
+    }
+
+    private function dispatchDirectEmissionAfterCommit(CteDocument $document): void
+    {
+        if ($document->emitter === 'direct' && $document->execution_mode === 'live') {
+            EmitCteDirectJob::dispatch($document->id)->afterCommit();
+        }
     }
 
     /** @param array{number: string, access_key: string, protocol: string, reason: string} $data */
@@ -122,6 +171,7 @@ class CteDocumentRecoveryService
         return DB::transaction(function () use ($document, $data): CteDocument {
             $document->forceFill([
                 'status' => CteDocumentStatusEnum::AUTHORIZED,
+                'fiscal_status' => FiscalDocumentStatusEnum::AUTHORIZED,
                 'cte_number' => $data['number'],
                 'access_key' => $data['access_key'],
                 'protocol' => $data['protocol'],

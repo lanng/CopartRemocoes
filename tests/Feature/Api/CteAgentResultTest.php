@@ -26,6 +26,7 @@ class CteAgentResultTest extends TestCase
 
         $document->refresh();
         $this->assertSame(CteDocumentStatusEnum::AUTHORIZED, $document->status);
+        $this->assertSame('authorized', $document->fiscal_status->value);
         $this->assertSame('002670', $document->cte_number);
         $this->assertSame('35260812563112000130570010000026701338262343', $document->access_key);
         $this->assertSame('135263860830097', $document->protocol);

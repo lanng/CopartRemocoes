@@ -4,6 +4,8 @@ namespace App\Services\Ciot;
 
 use App\Enums\CiotStatusEnum;
 use App\Enums\CteDocumentStatusEnum;
+use App\Models\Ciot;
+use App\Models\CteDocument;
 use App\Models\CteEmissionBatch;
 use App\Models\MdfeDocument;
 use DomainException;
@@ -18,6 +20,8 @@ use Throwable;
  */
 class DispatchMdfeForBatch
 {
+    public function __construct(private readonly ValidateMdfeDocumentSelection $selectionValidator) {}
+
     public function handle(CteEmissionBatch $batch): ?MdfeDocument
     {
         try {
@@ -48,10 +52,27 @@ class DispatchMdfeForBatch
         $ciot = $batch->ciots()
             ->where('status', CiotStatusEnum::ISSUED->value)
             ->latest('id')
-            ->first();
+            ->get()
+            ->first(fn (Ciot $candidate): bool => ! $candidate->isSyntheticHomologation());
 
         if ($ciot === null) {
             $this->log("MDF-e do lote #{$batch->id} aguardando: sem CIOT emitido.");
+
+            return null;
+        }
+
+        $this->selectionValidator->handle($documents, $ciot);
+
+        $ciotHasActiveMdfe = $ciot->mdfeDocuments()
+            ->whereNotIn('status', [
+                CteDocumentStatusEnum::REJECTED->value,
+                CteDocumentStatusEnum::FAILED_BEFORE_AUTHORIZATION->value,
+                CteDocumentStatusEnum::CANCELLED->value,
+            ])
+            ->exists();
+
+        if ($ciotHasActiveMdfe) {
+            $this->log("MDF-e do lote #{$batch->id} aguardando: CIOT já vinculado a um MDF-e ativo.");
 
             return null;
         }
@@ -75,11 +96,20 @@ class DispatchMdfeForBatch
         $mdfe = MdfeDocument::query()->create([
             'public_id' => (string) Str::uuid(),
             'cte_emission_batch_id' => $batch->id,
+            'ciot_id' => $ciot->id,
             'status' => CteDocumentStatusEnum::QUEUED,
             'snapshot' => $snapshot,
             'idempotency_key' => (string) Str::uuid(),
             'execution_mode' => $batch->execution_mode,
+            'emitter' => 'agent',
         ]);
+
+        $mdfe->cteDocuments()->attach($documents
+            ->values()
+            ->mapWithKeys(fn (CteDocument $document, int $position): array => [
+                $document->id => ['position' => $position + 1],
+            ])
+            ->all());
 
         activity()
             ->performedOn($ciot)

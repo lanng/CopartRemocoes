@@ -3,6 +3,7 @@
 namespace App\Services\Ciot;
 
 use App\Enums\CiotStatusEnum;
+use App\Enums\CteDocumentStatusEnum;
 use App\Models\Ciot;
 
 /**
@@ -27,7 +28,12 @@ class DeclareCiot
                 throw $exception;
             }
 
-            return $this->markFailed($ciot, $exception->codigo, $exception->mensagem ?? $exception->getMessage());
+            return $this->markFailed(
+                $ciot,
+                $exception->codigo,
+                $exception->mensagem ?? $exception->getMessage(),
+                $exception->body,
+            );
         }
 
         if (! $response->isSuccess()) {
@@ -35,6 +41,7 @@ class DeclareCiot
                 $ciot,
                 $response->codigo(),
                 $response->mensagem() ?? json_encode($response->body, JSON_UNESCAPED_UNICODE),
+                $response->body,
             );
         }
 
@@ -49,20 +56,29 @@ class DeclareCiot
             'error_message' => null,
         ]) ?? $ciot->refresh();
 
-        // Viagem completa + CIOT emitido: despacha o MDF-e (idempotente — os
-        // guards internos pulam se algo ainda falta, spec mdfe-agent-payload).
-        if ($ciot->cte_emission_batch_id !== null) {
+        // O MDF-e do agente continua no modo legado; em F5 direto ele aguarda
+        // a ação manual de emissão na viagem.
+        $batchHasRejectedDirectMdfe = $ciot->cte_emission_batch_id !== null
+            && $ciot->cteEmissionBatch->mdfeDocuments()
+                ->where('emitter', 'direct')
+                ->where('status', CteDocumentStatusEnum::REJECTED->value)
+                ->exists();
+
+        if ($ciot->cte_emission_batch_id !== null
+            && (string) config('dfe.mdfe.emitter', 'agent') === 'agent'
+            && ! $batchHasRejectedDirectMdfe) {
             app(DispatchMdfeForBatch::class)->handle($ciot->cteEmissionBatch);
         }
 
         return $ciot;
     }
 
-    protected function markFailed(Ciot $ciot, ?string $codigo, string $mensagem): Ciot
+    protected function markFailed(Ciot $ciot, ?string $codigo, string $mensagem, array $response): Ciot
     {
         return $ciot->transitionFrom(CiotStatusEnum::PENDING, CiotStatusEnum::FAILED, fn (): array => [
             'error_code' => $codigo,
             'error_message' => $mensagem,
+            'response' => $response,
         ]) ?? $ciot->refresh();
     }
 }

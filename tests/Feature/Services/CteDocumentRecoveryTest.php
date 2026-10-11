@@ -4,11 +4,13 @@ namespace Tests\Feature\Services;
 
 use App\Enums\CteDocumentStatusEnum;
 use App\Enums\CteEmissionBatchStatusEnum;
+use App\Jobs\EmitCteDirectJob;
 use App\Models\CteAgent;
 use App\Models\CteDocument;
 use App\Models\CteEmissionBatch;
 use App\Services\Cte\CteDocumentRecoveryService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Queue;
 use Illuminate\Validation\ValidationException;
 use Tests\TestCase;
 
@@ -65,8 +67,8 @@ class CteDocumentRecoveryTest extends TestCase
         $this->assertNull($failed->claim_expires_at);
         $this->assertSame(CteDocumentStatusEnum::AUTHORIZED, $authorized->refresh()->status);
         $this->assertSame('2707', $authorized->cte_number);
-        $this->assertSame(CteDocumentStatusEnum::QUEUED, $reconciliation->refresh()->status);
-        $this->assertNull($reconciliation->error_code);
+        $this->assertSame(CteDocumentStatusEnum::RECONCILIATION_REQUIRED, $reconciliation->refresh()->status);
+        $this->assertSame('manual_review', $reconciliation->error_code);
         $this->assertSame(CteEmissionBatchStatusEnum::PROCESSING, $batch->refresh()->status);
     }
 
@@ -84,6 +86,7 @@ class CteDocumentRecoveryTest extends TestCase
         ]);
 
         $this->assertSame(CteDocumentStatusEnum::AUTHORIZED, $document->refresh()->status);
+        $this->assertSame('authorized', $document->refresh()->fiscal_status->value);
         $this->assertSame('2670', $document->cte_number);
         $this->assertNotNull($document->authorized_at);
     }
@@ -112,17 +115,27 @@ class CteDocumentRecoveryTest extends TestCase
         $this->assertSame(CteEmissionBatchStatusEnum::PROCESSING, $batch->refresh()->status);
     }
 
-    public function test_every_status_except_authorized_can_be_requeued(): void
+    public function test_only_known_safe_statuses_can_be_requeued(): void
     {
-        foreach (CteDocumentStatusEnum::cases() as $status) {
-            if ($status === CteDocumentStatusEnum::AUTHORIZED) {
-                continue;
-            }
-
+        foreach ([
+            CteDocumentStatusEnum::DRAFT,
+            CteDocumentStatusEnum::QUEUED,
+            CteDocumentStatusEnum::CLAIMED,
+            CteDocumentStatusEnum::FILLING,
+            CteDocumentStatusEnum::VALIDATING,
+            CteDocumentStatusEnum::READY_TO_AUTHORIZE,
+            CteDocumentStatusEnum::WAITING_FOR_XML,
+            CteDocumentStatusEnum::DRY_RUN_COMPLETED,
+            CteDocumentStatusEnum::REJECTED,
+            CteDocumentStatusEnum::FAILED_BEFORE_AUTHORIZATION,
+        ] as $status) {
             $document = CteDocument::factory()->create([
                 'status' => $status,
                 'cte_number' => '2701',
-                'access_key' => '35260812563112000130570010000027011338262343',
+                'access_key' => $status === CteDocumentStatusEnum::FAILED_BEFORE_AUTHORIZATION
+                    ? null
+                    : '35260812563112000130570010000027011338262343',
+                'payload_xml' => $status === CteDocumentStatusEnum::FAILED_BEFORE_AUTHORIZATION ? null : '<CTe/>',
                 'protocol' => '135263860830097',
                 'authorized_at' => now(),
                 'error_code' => 'SOME_ERROR',
@@ -137,6 +150,50 @@ class CteDocumentRecoveryTest extends TestCase
             $this->assertNull($document->protocol);
             $this->assertNull($document->authorized_at);
         }
+    }
+
+    public function test_a_standalone_failed_cte_can_be_requeued_without_a_batch(): void
+    {
+        Queue::fake();
+
+        $document = CteDocument::factory()->create([
+            'cte_emission_batch_id' => null,
+            'status' => CteDocumentStatusEnum::FAILED_BEFORE_AUTHORIZATION,
+            'error_code' => 'local_validation',
+            'emitter' => 'direct',
+            'execution_mode' => 'live',
+        ]);
+
+        app(CteDocumentRecoveryService::class)->retry($document);
+
+        $this->assertSame(CteDocumentStatusEnum::QUEUED, $document->refresh()->status);
+        $this->assertNull($document->cte_emission_batch_id);
+        $this->assertNull($document->error_code);
+        Queue::assertPushed(EmitCteDirectJob::class, fn (EmitCteDirectJob $job): bool => $job->afterCommit === true);
+    }
+
+    public function test_a_cte_with_a_burned_key_cannot_be_manually_requeued(): void
+    {
+        $document = CteDocument::factory()->create([
+            'status' => CteDocumentStatusEnum::AUTHORIZING,
+            'access_key' => '35260812563112000130570010000027011338262343',
+            'payload_xml' => '<CTe/>',
+        ]);
+
+        $this->assertFalse(CteDocumentRecoveryService::canBeRequeued($document));
+        $this->expectException(ValidationException::class);
+
+        app(CteDocumentRecoveryService::class)->retry($document);
+    }
+
+    public function test_a_fiscally_authorized_cte_cannot_be_requeued_even_if_workflow_status_is_inconsistent(): void
+    {
+        $document = CteDocument::factory()->create([
+            'status' => CteDocumentStatusEnum::FAILED_BEFORE_AUTHORIZATION,
+            'fiscal_status' => 'authorized',
+        ]);
+
+        $this->assertFalse(CteDocumentRecoveryService::canBeRequeued($document));
     }
 
     public function test_an_authorized_document_cannot_be_retried(): void

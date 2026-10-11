@@ -54,6 +54,7 @@ class ClaimNextCteDocument
 
             $mdfe = MdfeDocument::query()
                 ->where('status', CteDocumentStatusEnum::QUEUED)
+                ->where('emitter', 'agent')
                 ->where('execution_mode', $agent->is_dry_run ? 'dry_run' : 'live')
                 ->whereHas('batch', function ($query): void {
                     $query->whereIn('status', [

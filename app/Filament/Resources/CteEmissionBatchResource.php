@@ -2,14 +2,17 @@
 
 namespace App\Filament\Resources;
 
+use App\Enums\CiotStatusEnum;
 use App\Enums\CteEmissionBatchStatusEnum;
 use App\Filament\Resources\CteEmissionBatchResource\Pages;
 use App\Filament\Resources\CteEmissionBatchResource\RelationManagers;
 use App\Models\Ciot;
 use App\Models\CteEmissionBatch;
 use App\Models\MdfeDocument;
+use App\Services\Cte\CheckCteBatchParties;
 use App\Services\Cte\DeleteDraftCteEmissionBatch;
 use Filament\Forms\Form;
+use Filament\Infolists\Components\RepeatableEntry;
 use Filament\Infolists\Components\Section;
 use Filament\Infolists\Components\TextEntry;
 use Filament\Infolists\Infolist;
@@ -43,6 +46,13 @@ class CteEmissionBatchResource extends Resource
                 'wire:poll.5s' => 'refreshBatch',
             ])
             ->schema([
+                Section::make('Conferência para emissão')
+                    ->visible(fn (CteEmissionBatch $record): bool => $record->status === CteEmissionBatchStatusEnum::DRAFT)
+                    ->schema([
+                        TextEntry::make('party_review')
+                            ->label('Remetentes e destinatários')
+                            ->state(fn (CteEmissionBatch $record): string => app(CheckCteBatchParties::class)->summary($record)),
+                    ]),
                 Section::make('MDF-e da viagem')
                     ->visible(fn (CteEmissionBatch $record): bool => $record->mdfeDocuments()->exists())
                     ->schema([
@@ -61,31 +71,34 @@ class CteEmissionBatchResource extends Resource
                 Section::make('CIOT da viagem')
                     ->visible(fn (CteEmissionBatch $record): bool => $record->ciots()->exists())
                     ->schema([
-                        TextEntry::make('ciots')
-                            ->label('CIOT (número para o MDF-e)')
-                            ->state(fn (CteEmissionBatch $record): string => $record->ciots()->get()
-                                ->map(fn (Ciot $ciot): string => trim(sprintf(
-                                    '%s — %s (%s)',
-                                    $ciot->ciot_number ?? '(sem número)',
-                                    $ciot->fullNumber() ?? '',
-                                    $ciot->status->label(),
-                                )))
-                                ->implode("\n"))
-                            ->fontFamily('mono'),
-                        TextEntry::make('ciot_rejeicoes')
-                            ->label('Rejeição da ANTT')
-                            ->color('danger')
-                            ->visible(fn (CteEmissionBatch $record): bool => $record->ciots()
-                                ->where('status', 'failed')
-                                ->whereNotNull('error_message')
-                                ->exists())
-                            ->state(fn (CteEmissionBatch $record): string => $record->ciots()
-                                ->where('status', 'failed')
-                                ->whereNotNull('error_message')
-                                ->get()
-                                ->map(fn (Ciot $ciot): string => (string) $ciot->error_message)
-                                ->implode("\n"))
-                            ->columnSpanFull(),
+                        RepeatableEntry::make('ciots')
+                            ->label('CIOTs da viagem')
+                            ->columns(3)
+                            ->schema([
+                                TextEntry::make('ciot_number')
+                                    ->label('Número')
+                                    ->state(fn (Ciot $record): string => $record->fullNumber() ?? '(sem número)')
+                                    ->fontFamily('mono'),
+                                TextEntry::make('status')
+                                    ->label('Situação')
+                                    ->badge()
+                                    ->color(fn (CiotStatusEnum $state): string => $state->color())
+                                    ->formatStateUsing(fn (CiotStatusEnum $state): string => $state->label()),
+                                TextEntry::make('error_code')
+                                    ->label('Código ANTT')
+                                    ->visible(fn (Ciot $record): bool => $record->status === CiotStatusEnum::FAILED)
+                                    ->placeholder('—'),
+                                TextEntry::make('error_message')
+                                    ->label('Resposta da ANTT')
+                                    ->visible(fn (Ciot $record): bool => $record->status === CiotStatusEnum::FAILED
+                                        && filled($record->error_message))
+                                    ->columnSpanFull(),
+                                TextEntry::make('ciot_details')
+                                    ->label('Ação')
+                                    ->state('Ver detalhes do CIOT')
+                                    ->url(fn (Ciot $record): string => CiotResource::getUrl('view', ['record' => $record]))
+                                    ->visible(fn (Ciot $record): bool => $record->status === CiotStatusEnum::FAILED),
+                            ]),
                     ]),
                 Section::make('Resumo financeiro')
                     ->columns(2)
@@ -160,10 +173,10 @@ class CteEmissionBatchResource extends Resource
                     ->label('Excluir lote')
                     ->icon('heroicon-o-trash')
                     ->color('danger')
-                    ->visible(fn (CteEmissionBatch $record): bool => $record->status === CteEmissionBatchStatusEnum::DRAFT)
+                    ->visible(fn (CteEmissionBatch $record): bool => app(DeleteDraftCteEmissionBatch::class)->canDelete($record))
                     ->requiresConfirmation()
                     ->modalHeading('Excluir lote')
-                    ->modalDescription('Os documentos deste lote serão removidos. Os registros originais permanecerão disponíveis.')
+                    ->modalDescription('CT-es rascunho sem evidência de comunicação serão removidos. Os demais permanecerão como documentos avulsos; os XMLs originais das NF-es serão preservados.')
                     ->action(function (CteEmissionBatch $record): void {
                         app(DeleteDraftCteEmissionBatch::class)->handle($record);
                     })

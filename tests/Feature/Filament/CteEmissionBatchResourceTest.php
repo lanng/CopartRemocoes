@@ -6,19 +6,23 @@ use App\Enums\CiotStatusEnum;
 use App\Enums\CteDocumentStatusEnum;
 use App\Enums\CteEmissionBatchStatusEnum;
 use App\Enums\RegisterStatusEnum;
+use App\Filament\Resources\CiotResource;
 use App\Filament\Resources\CteEmissionBatchResource;
 use App\Filament\Resources\CteEmissionBatchResource\Pages\ListCteEmissionBatches;
 use App\Filament\Resources\CteEmissionBatchResource\Pages\ViewCteEmissionBatch;
 use App\Filament\Resources\CteEmissionBatchResource\RelationManagers\DocumentsRelationManager;
+use App\Filament\Resources\MdfeDocumentResource;
 use App\Filament\Resources\RegisterResource;
 use App\Models\Ciot;
-use App\Models\CiotPayer;
 use App\Models\CiotVehicle;
 use App\Models\City;
 use App\Models\CityDistance;
+use App\Models\Company;
 use App\Models\CteDocument;
 use App\Models\CteEmissionBatch;
 use App\Models\MdfeDocument;
+use App\Models\MdfeDriver;
+use App\Models\MdfeEvent;
 use App\Models\Register;
 use App\Models\User;
 use Filament\Facades\Filament;
@@ -74,6 +78,241 @@ class CteEmissionBatchResourceTest extends TestCase
             ->assertSuccessful()
             ->assertSee('MDF-e da viagem')
             ->assertSee('sem número');
+    }
+
+    public function test_the_batch_view_links_to_mdf_e_preparation_with_its_context(): void
+    {
+        $batch = CteEmissionBatch::factory()->create([
+            'status' => CteEmissionBatchStatusEnum::COMPLETED,
+        ]);
+        CteDocument::factory()->authorized()->create([
+            'cte_emission_batch_id' => $batch->id,
+            'workflow_origin' => 'controlled_v1',
+        ]);
+
+        Livewire::test(ViewCteEmissionBatch::class, ['record' => $batch->id])
+            ->assertSuccessful()
+            ->assertActionVisible('prepareMdfe')
+            ->assertActionHasUrl('prepareMdfe', MdfeDocumentResource::getUrl('create', ['batch' => $batch->id]));
+    }
+
+    public function test_the_damdfe_download_action_is_available_for_an_authorized_mdfe_with_stored_xml(): void
+    {
+        $batch = CteEmissionBatch::factory()->create([
+            'status' => CteEmissionBatchStatusEnum::COMPLETED,
+        ]);
+
+        MdfeDocument::factory()->create([
+            'cte_emission_batch_id' => $batch->id,
+            'status' => CteDocumentStatusEnum::AUTHORIZED,
+            'access_key' => str_repeat('1', 44),
+            'xml_path' => 'mdfe/'.str_repeat('1', 44).'/mdfe-proc.xml',
+        ]);
+
+        Livewire::test(ViewCteEmissionBatch::class, ['record' => $batch->id])
+            ->assertSuccessful()
+            ->assertActionVisible('downloadDamdfe');
+    }
+
+    public function test_the_close_mdfe_action_is_available_for_a_new_attempt_or_a_confirmed_correctable_rejection(): void
+    {
+        $batch = CteEmissionBatch::factory()->create([
+            'status' => CteEmissionBatchStatusEnum::COMPLETED,
+        ]);
+        $mdfe = MdfeDocument::factory()->create([
+            'cte_emission_batch_id' => $batch->id,
+            'status' => CteDocumentStatusEnum::AUTHORIZED,
+            'emitter' => 'direct',
+            'access_key' => str_repeat('1', 44),
+            'protocol' => '935260000000001',
+        ]);
+
+        Livewire::test(ViewCteEmissionBatch::class, ['record' => $batch->id])
+            ->assertSuccessful()
+            ->assertActionVisible('closeMdfe');
+
+        MdfeEvent::factory()->create([
+            'mdfe_document_id' => $mdfe->id,
+            'event_type' => '110112',
+            'sequence' => 1,
+            'attempt' => 1,
+            'event_id' => 'ID110112'.str_repeat('1', 44).'01',
+            'status' => 'rejected_retryable',
+            'error_code' => '614',
+        ]);
+
+        Livewire::test(ViewCteEmissionBatch::class, ['record' => $batch->id])
+            ->assertSuccessful()
+            ->assertActionVisible('closeMdfe');
+
+        $mdfe->events()->firstOrFail()->forceFill(['status' => 'registered', 'error_code' => null])->save();
+
+        Livewire::test(ViewCteEmissionBatch::class, ['record' => $batch->id])
+            ->assertSuccessful()
+            ->assertActionVisible('closeMdfe');
+    }
+
+    public function test_batch_offers_a_separate_resume_action_for_a_ciot_after_sefaz_closed_the_mdfe(): void
+    {
+        $batch = CteEmissionBatch::factory()->create([
+            'status' => CteEmissionBatchStatusEnum::COMPLETED,
+        ]);
+        $ciot = Ciot::factory()->issued()->create(['cte_emission_batch_id' => $batch->id]);
+        MdfeDocument::factory()->create([
+            'cte_emission_batch_id' => $batch->id,
+            'ciot_id' => $ciot->id,
+            'status' => CteDocumentStatusEnum::AUTHORIZED,
+            'emitter' => 'direct',
+            'access_key' => str_repeat('2', 44),
+            'protocol' => '935260000000002',
+            'fiscal_status_code' => '132',
+        ]);
+
+        Livewire::test(ViewCteEmissionBatch::class, ['record' => $batch->id])
+            ->assertActionVisible('resumeCiotClosure')
+            ->assertActionHidden('closeMdfe');
+
+        $ciot->forceFill(['status' => CiotStatusEnum::CLOSED])->save();
+
+        Livewire::test(ViewCteEmissionBatch::class, ['record' => $batch->id])
+            ->assertActionHidden('resumeCiotClosure');
+    }
+
+    public function test_the_direct_mdfe_action_is_shown_only_when_direct_emission_is_selected_and_ctes_are_authorized(): void
+    {
+        config(['dfe.mdfe.emitter' => 'direct']);
+        $batch = CteEmissionBatch::factory()->create([
+            'status' => CteEmissionBatchStatusEnum::COMPLETED,
+        ]);
+        Ciot::factory()->issued()->create(['cte_emission_batch_id' => $batch->id]);
+        CteDocument::factory()->authorized()->create([
+            'cte_emission_batch_id' => $batch->id,
+            'workflow_origin' => 'controlled_v1',
+        ]);
+
+        Livewire::test(ViewCteEmissionBatch::class, ['record' => $batch->id])
+            ->assertSuccessful()
+            ->assertActionVisible('emitMdfeDirect')
+            ->assertActionHidden('emitMdfe')
+            ->mountAction('emitMdfeDirect')
+            ->assertFormFieldExists('ciot_id', 'mountedActionForm')
+            ->assertFormFieldDoesNotExist('route_ufs', 'mountedActionForm')
+            ->assertFormFieldDoesNotExist('loading_cep', 'mountedActionForm')
+            ->assertFormFieldDoesNotExist('unloading_cep', 'mountedActionForm')
+            ->assertFormFieldDoesNotExist('payment_method', 'mountedActionForm');
+    }
+
+    public function test_the_direct_mdfe_action_prefills_the_configured_endorsement(): void
+    {
+        config([
+            'dfe.mdfe.emitter' => 'direct',
+            'dfe.mdfe.default_endorsement' => 'AVERBACAO-PADRAO',
+        ]);
+        $batch = CteEmissionBatch::factory()->create([
+            'status' => CteEmissionBatchStatusEnum::COMPLETED,
+        ]);
+        Ciot::factory()->issued()->create(['cte_emission_batch_id' => $batch->id]);
+        CteDocument::factory()->authorized()->create([
+            'cte_emission_batch_id' => $batch->id,
+            'workflow_origin' => 'controlled_v1',
+        ]);
+
+        $page = Livewire::test(ViewCteEmissionBatch::class, ['record' => $batch->id])
+            ->mountAction('emitMdfeDirect');
+        $endorsementRows = $page->get('mountedActionsData.0.endorsements');
+
+        $this->assertSame('AVERBACAO-PADRAO', collect($endorsementRows)->first()['number']);
+    }
+
+    public function test_the_direct_mdfe_action_explains_when_batch_ctes_are_not_eligible(): void
+    {
+        config(['dfe.mdfe.emitter' => 'direct']);
+        $batch = CteEmissionBatch::factory()->create([
+            'status' => CteEmissionBatchStatusEnum::COMPLETED,
+        ]);
+        Ciot::factory()->issued()->create(['cte_emission_batch_id' => $batch->id]);
+        CteDocument::factory()->authorized()->create([
+            'cte_emission_batch_id' => $batch->id,
+            'emitter' => 'direct',
+            'workflow_origin' => null,
+        ]);
+
+        Livewire::test(ViewCteEmissionBatch::class, ['record' => $batch->id])
+            ->assertSuccessful()
+            ->assertActionVisible('emitMdfeDirect')
+            ->assertActionDisabled('emitMdfeDirect');
+    }
+
+    public function test_the_direct_mdfe_action_stays_visible_but_disabled_when_a_batch_cte_failed(): void
+    {
+        config(['dfe.mdfe.emitter' => 'direct']);
+        $batch = CteEmissionBatch::factory()->create([
+            'status' => CteEmissionBatchStatusEnum::COMPLETED_WITH_ERRORS,
+        ]);
+        Ciot::factory()->issued()->create(['cte_emission_batch_id' => $batch->id]);
+        CteDocument::factory()->authorized()->create([
+            'cte_emission_batch_id' => $batch->id,
+            'workflow_origin' => 'controlled_v1',
+        ]);
+        CteDocument::factory()->create([
+            'cte_emission_batch_id' => $batch->id,
+            'status' => CteDocumentStatusEnum::FAILED_BEFORE_AUTHORIZATION,
+            'workflow_origin' => 'controlled_v1',
+            'error_message' => 'A placa do veículo não foi aceita para emissão.',
+        ]);
+
+        Livewire::test(ViewCteEmissionBatch::class, ['record' => $batch->id])
+            ->assertSuccessful()
+            ->assertActionVisible('prepareMdfe')
+            ->assertActionVisible('emitMdfeDirect')
+            ->assertActionDisabled('emitMdfeDirect');
+    }
+
+    public function test_the_direct_mdfe_action_prefills_a_unique_tank_driver_and_latest_batch_ciot(): void
+    {
+        config(['dfe.mdfe.emitter' => 'direct']);
+        $batch = CteEmissionBatch::factory()->create([
+            'status' => CteEmissionBatchStatusEnum::COMPLETED,
+        ]);
+        $ciot = Ciot::factory()->issued()->tankAlcohol()->create([
+            'cte_emission_batch_id' => $batch->id,
+        ]);
+        $driver = MdfeDriver::factory()->create(['line' => 'tank_alcohol']);
+        CteDocument::factory()->authorized()->create([
+            'cte_emission_batch_id' => $batch->id,
+            'workflow_origin' => 'controlled_v1',
+            'snapshot' => ['line' => 'tank_alcohol'],
+        ]);
+
+        Livewire::test(ViewCteEmissionBatch::class, ['record' => $batch->id])
+            ->mountAction('emitMdfeDirect')
+            ->assertSet('mountedActionsData.0.ciot_id', $ciot->id)
+            ->assertSet('mountedActionsData.0.driver_id', $driver->id);
+    }
+
+    public function test_the_documents_table_shows_the_latest_cte_emission_failure_reason(): void
+    {
+        $batch = CteEmissionBatch::factory()->create([
+            'status' => CteEmissionBatchStatusEnum::COMPLETED_WITH_ERRORS,
+        ]);
+        $failed = CteDocument::factory()->create([
+            'cte_emission_batch_id' => $batch->id,
+            'status' => CteDocumentStatusEnum::FAILED_BEFORE_AUTHORIZATION,
+            'error_message' => 'Falha ao emitir o CT-e: placa ABC1234 não cadastrada.',
+        ]);
+        $rejected = CteDocument::factory()->create([
+            'cte_emission_batch_id' => $batch->id,
+            'status' => CteDocumentStatusEnum::REJECTED,
+            'fiscal_status_code' => '539',
+            'fiscal_status_message' => 'Rejeição: placa do veículo incompatível.',
+        ]);
+
+        Livewire::test(DocumentsRelationManager::class, [
+            'ownerRecord' => $batch,
+            'pageClass' => ViewCteEmissionBatch::class,
+        ])
+            ->assertSee('Falha ao emitir o CT-e: placa ABC1234 não cadastrada.')
+            ->assertSee('539 · Rejeição: placa do veículo incompatível.');
     }
 
     public function test_the_requeue_mdfe_action_covers_a_document_stuck_with_an_expired_lease(): void
@@ -163,7 +402,7 @@ class CteEmissionBatchResourceTest extends TestCase
             'ibge_code' => '3508504', 'name' => 'Caçapava', 'state' => 'SP',
             'latitude' => -23.1006, 'longitude' => -45.6911,
         ]);
-        $payer = CiotPayer::factory()->create([
+        $payer = Company::factory()->create([
             'name' => 'Copart Caçapava', 'cnpj' => '14517191000925',
             'city' => 'Caçapava', 'state' => 'SP', 'ibge_code' => '3508504',
         ]);
@@ -201,7 +440,7 @@ class CteEmissionBatchResourceTest extends TestCase
 
         Queue::fake();
 
-        Livewire::test(ViewCteEmissionBatch::class, ['record' => $batch->id])
+        $page = Livewire::test(ViewCteEmissionBatch::class, ['record' => $batch->id])
             ->callAction('generateCiot', data: [
                 'operation_type' => 'lotation',
                 'payer_id' => $payer->id,
@@ -215,13 +454,17 @@ class CteEmissionBatchResourceTest extends TestCase
                 'travel_start_at' => now()->addDay()->format('Y-m-d'),
                 'travel_end_at' => now()->addDays(2)->format('Y-m-d'),
             ])
-            ->assertHasNoActionErrors();
+            ->assertHasNoActionErrors()
+            ->assertNoRedirect();
 
         $ciot = Ciot::query()->where('cte_emission_batch_id', $batch->id)->firstOrFail();
 
         $this->assertSame(CiotStatusEnum::ISSUED, $ciot->status);
         $this->assertSame('520032951111', $ciot->ciot_number);
         $this->assertSame('14517191000925', $ciot->payer_cnpj);
+        $page->assertSee('CIOT da viagem')
+            ->assertSee('5200329511110001')
+            ->assertSee('Emitido');
 
         Queue::assertNothingPushed();
     }
@@ -236,15 +479,15 @@ class CteEmissionBatchResourceTest extends TestCase
             'ibge_code' => '3508504', 'name' => 'Caçapava', 'state' => 'SP',
             'latitude' => -23.1006, 'longitude' => -45.6911,
         ]);
-        $payer = CiotPayer::factory()->create([
+        $payer = Company::factory()->create([
             'name' => 'Copart Caçapava', 'cnpj' => '14517191000925',
             'city' => 'Caçapava', 'state' => 'SP', 'ibge_code' => '3508504',
         ]);
-        CiotPayer::factory()->create([
+        Company::factory()->create([
             'name' => 'Copart Pirapora do Bom Jesus', 'cnpj' => '14517191000330',
             'city' => 'Pirapora do Bom Jesus', 'state' => 'SP', 'ibge_code' => '3539506',
         ]);
-        CiotPayer::factory()->create([
+        Company::factory()->create([
             'name' => 'Copart Osasco', 'cnpj' => '14517191000410',
             'city' => 'Osasco', 'state' => 'SP', 'ibge_code' => '3518800',
         ]);
@@ -325,11 +568,11 @@ class CteEmissionBatchResourceTest extends TestCase
             'ibge_code' => '3508504', 'name' => 'Caçapava', 'state' => 'SP',
             'latitude' => -23.1006, 'longitude' => -45.6911,
         ]);
-        $payer = CiotPayer::factory()->create([
+        $payer = Company::factory()->create([
             'name' => 'Copart Caçapava', 'cnpj' => '14517191000925',
             'city' => 'Caçapava', 'state' => 'SP', 'ibge_code' => '3508504',
         ]);
-        CiotPayer::factory()->create([
+        Company::factory()->create([
             'name' => 'Copart Osasco', 'cnpj' => '14517191000410',
             'city' => 'Osasco', 'state' => 'SP', 'ibge_code' => '3518800',
         ]);
@@ -410,9 +653,12 @@ class CteEmissionBatchResourceTest extends TestCase
             ], 200),
         ]);
 
-        Livewire::test(ViewCteEmissionBatch::class, ['record' => $batch->id])
+        $page = Livewire::test(ViewCteEmissionBatch::class, ['record' => $batch->id])
             ->callAction('reemitCiot')
-            ->assertNotified('CIOT reemitido: 5200329522220002');
+            ->assertNotified('CIOT reemitido: 5200329522220002')
+            ->assertNoRedirect()
+            ->assertSee('5200329522220002')
+            ->assertSee('Emitido');
 
         $ciot->refresh();
 
@@ -588,6 +834,42 @@ class CteEmissionBatchResourceTest extends TestCase
             ->assertSee('Concluído com erros');
     }
 
+    public function test_refresh_batch_updates_ciot_status_and_failed_ciot_has_a_detail_link(): void
+    {
+        $batch = CteEmissionBatch::factory()->create([
+            'status' => CteEmissionBatchStatusEnum::COMPLETED_WITH_ERRORS,
+        ]);
+        $ciot = Ciot::factory()->create([
+            'cte_emission_batch_id' => $batch->id,
+            'status' => CiotStatusEnum::PENDING,
+            'ciot_number' => '520032959999',
+        ]);
+        $page = Livewire::test(ViewCteEmissionBatch::class, ['record' => $batch->getRouteKey()])
+            ->assertSee('Emitindo');
+
+        $ciot->forceFill([
+            'status' => CiotStatusEnum::ISSUED,
+            'ciot_number' => '520032951234',
+            'verifier_code' => '0001',
+        ])->save();
+
+        $page->call('refreshBatch')
+            ->assertSee('Emitido')
+            ->assertSee('5200329512340001');
+
+        $ciot->forceFill([
+            'status' => CiotStatusEnum::FAILED,
+            'error_code' => '217',
+            'error_message' => 'Rejeição atual da ANTT.',
+        ])->save();
+
+        $page->call('refreshBatch')
+            ->assertSee('Falhou')
+            ->assertSee('Rejeição atual da ANTT.')
+            ->assertSee('Ver detalhes do CIOT')
+            ->assertSee(CiotResource::getUrl('view', ['record' => $ciot]), false);
+    }
+
     public function test_the_delete_action_is_only_available_for_draft_batches(): void
     {
         $draft = CteEmissionBatch::factory()->create([
@@ -602,6 +884,26 @@ class CteEmissionBatchResourceTest extends TestCase
             ->assertTableActionHidden('delete', $approved);
     }
 
+    public function test_batch_deletion_preserves_a_draft_cte_with_transmission_evidence_as_a_standalone_document(): void
+    {
+        $batch = CteEmissionBatch::factory()->create([
+            'status' => CteEmissionBatchStatusEnum::DRAFT,
+        ]);
+        $document = CteDocument::factory()->create([
+            'cte_emission_batch_id' => $batch->id,
+            'status' => CteDocumentStatusEnum::DRAFT,
+            'payload_xml' => '<CTe/>',
+        ]);
+
+        Livewire::test(ListCteEmissionBatches::class)
+            ->assertTableActionVisible('delete', $batch)
+            ->callTableAction('delete', $batch);
+
+        $this->assertModelMissing($batch);
+        $this->assertModelExists($document);
+        $this->assertNull($document->fresh()->cte_emission_batch_id);
+    }
+
     public function test_a_draft_batch_can_be_deleted_from_the_batch_list(): void
     {
         $batch = CteEmissionBatch::factory()->create([
@@ -609,6 +911,7 @@ class CteEmissionBatchResourceTest extends TestCase
         ]);
         $document = CteDocument::factory()->create([
             'cte_emission_batch_id' => $batch->id,
+            'status' => CteDocumentStatusEnum::DRAFT,
         ]);
 
         Livewire::test(ListCteEmissionBatches::class)
@@ -625,6 +928,7 @@ class CteEmissionBatchResourceTest extends TestCase
         ]);
         $document = CteDocument::factory()->create([
             'cte_emission_batch_id' => $batch->id,
+            'status' => CteDocumentStatusEnum::DRAFT,
         ]);
 
         Livewire::test(ViewCteEmissionBatch::class, ['record' => $batch->getRouteKey()])

@@ -16,6 +16,7 @@ class CiotVehicle extends Model
 
     protected $fillable = [
         'plate', 'rntrc', 'axles', 'type', 'line', 'description', 'is_active',
+        'renavam', 'tare_kg', 'capacity_kg', 'capacity_m3', 'type_rod', 'body_type', 'uf',
     ];
 
     protected function casts(): array
@@ -23,6 +24,9 @@ class CiotVehicle extends Model
         return [
             'is_active' => 'boolean',
             'axles' => 'integer',
+            'tare_kg' => 'integer',
+            'capacity_kg' => 'integer',
+            'capacity_m3' => 'integer',
         ];
     }
 
@@ -51,6 +55,25 @@ class CiotVehicle extends Model
             'rntrc' => $this->rntrc,
             'eixos' => $this->axles,
             'tipo' => $this->type,
+        ];
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    public function mdfeSnapshot(): array
+    {
+        return [
+            'plate' => $this->plate,
+            'rntrc' => $this->rntrc,
+            'renavam' => $this->renavam,
+            'tare_kg' => $this->tare_kg,
+            'capacity_kg' => $this->capacity_kg,
+            'capacity_m3' => $this->capacity_m3,
+            'type_rod' => $this->type_rod,
+            'body_type' => $this->body_type,
+            'uf' => $this->uf,
+            'type' => $this->type,
         ];
     }
 }

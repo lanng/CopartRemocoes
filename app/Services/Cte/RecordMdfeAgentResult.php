@@ -3,6 +3,7 @@
 namespace App\Services\Cte;
 
 use App\Enums\CteDocumentStatusEnum;
+use App\Enums\FiscalDocumentStatusEnum;
 use App\Models\CteAgent;
 use App\Models\MdfeDocument;
 use Carbon\Carbon;
@@ -61,6 +62,11 @@ class RecordMdfeAgentResult
             $error = $payload['error'] ?? [];
             $document->forceFill([
                 'result_payload_hash' => $payloadHash,
+                ...match ($outcome) {
+                    'authorized' => ['fiscal_status' => FiscalDocumentStatusEnum::AUTHORIZED],
+                    'rejected' => ['fiscal_status' => FiscalDocumentStatusEnum::NOT_AUTHORIZED],
+                    default => [],
+                },
                 'issued_at' => isset($mdfe['issued_at']) ? Carbon::parse($mdfe['issued_at']) : null,
                 'authorized_at' => isset($mdfe['authorized_at']) ? Carbon::parse($mdfe['authorized_at']) : null,
                 'mdfe_number' => $mdfe['number'] ?? null,

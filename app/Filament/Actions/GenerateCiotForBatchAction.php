@@ -4,9 +4,10 @@ namespace App\Filament\Actions;
 
 use App\Enums\CiotStatusEnum;
 use App\Enums\CteEmissionBatchStatusEnum;
+use App\Filament\Resources\CteEmissionBatchResource\Pages\ViewCteEmissionBatch;
 use App\Filament\Support\CiotEmissionNotice;
-use App\Models\CiotPayer;
 use App\Models\City;
+use App\Models\Company;
 use App\Models\CteEmissionBatch;
 use App\Services\Ciot\CityDistanceCalculator;
 use App\Services\Ciot\CreateCiotForBatch;
@@ -52,8 +53,9 @@ class GenerateCiotForBatchAction
                 ? 'Maior rota pré-selecionada. Distâncias calculadas:<br>'.nl2br(e($prefill['ranking']))
                 : 'Sem distâncias calculáveis — revise origem e destino.'))
             ->form(static::form($batch, $form, $prefill))
-            ->action(function (array $data) use ($batch): void {
+            ->action(function (array $data, ViewCteEmissionBatch $livewire) use ($batch): void {
                 static::submit($batch, $data);
+                $livewire->refreshBatch();
             });
     }
 
@@ -64,14 +66,14 @@ class GenerateCiotForBatchAction
      */
     protected static function form(CteEmissionBatch $batch, array $form, array $prefill): array
     {
-        $payers = CiotPayer::query()->where('is_active', true)->orderBy('name')->get();
+        $payers = Company::query()->where('is_active', true)->orderBy('name')->get();
 
         $originOptions = $prefill['origins']
             ->mapWithKeys(fn (City $city): array => [$city->ibge_code => "{$city->name} - {$city->state}"])
             ->all();
 
         $payerOptions = $payers
-            ->mapWithKeys(fn (CiotPayer $payer): array => [$payer->id => sprintf('%s — %s/%s', $payer->name, $payer->city, $payer->state)])
+            ->mapWithKeys(fn (Company $payer): array => [$payer->id => sprintf('%s — %s/%s', $payer->name, $payer->city, $payer->state)])
             ->all();
 
         $destination = $form['destination'] ?? [];
@@ -101,7 +103,7 @@ class GenerateCiotForBatchAction
                 ->live()
                 ->default($form['payer_id'])
                 ->afterStateUpdated(function (Get $get, Set $set, ?string $state): void {
-                    $cnpj = CiotPayer::query()->find($state)?->cnpj;
+                    $cnpj = Company::query()->find($state)?->cnpj;
 
                     if (filled($cnpj)) {
                         $set('additional_payers', \App\Filament\Resources\CiotResource::withoutPayerCnpjs($get('additional_payers') ?? [], [$cnpj]));
@@ -126,7 +128,7 @@ class GenerateCiotForBatchAction
                 ->live()
                 ->default($form['delivery_payer_id'])
                 ->afterStateUpdated(function (Get $get, ?string $state, callable $set): void {
-                    $payer = CiotPayer::query()->find($state);
+                    $payer = Company::query()->find($state);
 
                     if ($payer === null) {
                         return;
@@ -292,7 +294,7 @@ class GenerateCiotForBatchAction
     {
         try {
             $ciot = app(CreateCiotForBatch::class)->handle($batch, $data);
-        } catch (DomainException) {
+        } catch (DomainException $exception) {
             Notification::make()
                 ->title('Este lote já possui um CIOT ativo')
                 ->body('Cancele o CIOT existente para emitir outro para esta viagem.')
@@ -305,7 +307,5 @@ class GenerateCiotForBatchAction
         $result = app(EmitCiotDeclaration::class)->emit($ciot);
 
         (new CiotEmissionNotice)->send($result);
-
-        redirect()->to(\App\Filament\Resources\CiotResource::getUrl('view', ['record' => $result->ciot]));
     }
 }

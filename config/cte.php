@@ -1,6 +1,10 @@
 <?php
 
 return [
+    // Emissor do CT-e: 'lab' (agente, default e fallback durante a migração)
+    // ou 'direct' (SEFAZ direta — spec dfe §1.1).
+    'emitter' => env('CTE_EMITTER', 'lab'),
+
     'api_version' => '1',
     'poll_after_seconds' => 10,
     'heartbeat_stale_after_seconds' => 120,

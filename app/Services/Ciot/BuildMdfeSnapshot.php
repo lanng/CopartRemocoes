@@ -25,7 +25,8 @@ class BuildMdfeSnapshot
         $ciot = $batch->ciots()
             ->where('status', 'issued')
             ->latest('id')
-            ->first();
+            ->get()
+            ->first(fn (Ciot $candidate): bool => ! $candidate->isSyntheticHomologation());
 
         if ($ciot === null) {
             throw new DomainException('CIOT emitido não encontrado para este lote.');

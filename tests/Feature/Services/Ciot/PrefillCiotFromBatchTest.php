@@ -4,9 +4,9 @@ namespace Tests\Feature\Services\Ciot;
 
 use App\Enums\CteEmissionBatchStatusEnum;
 use App\Models\Ciot;
-use App\Models\CiotPayer;
 use App\Models\CiotVehicle;
 use App\Models\City;
+use App\Models\Company;
 use App\Models\CteDocument;
 use App\Models\CteEmissionBatch;
 use App\Services\Ciot\PrefillCiotFromBatch;
@@ -43,11 +43,11 @@ class PrefillCiotFromBatchTest extends TestCase
             'latitude' => -21.0178, 'longitude' => -47.7639,
         ]);
 
-        $cacapava = CiotPayer::factory()->create([
+        $cacapava = Company::factory()->create([
             'name' => 'Copart Caçapava', 'cnpj' => '14517191000925',
             'city' => 'Caçapava', 'state' => 'SP', 'ibge_code' => '3508504',
         ]);
-        CiotPayer::factory()->create([
+        Company::factory()->create([
             'name' => 'AVANT', 'cnpj' => '48580847000208',
             'city' => 'Jardinópolis', 'state' => 'SP', 'ibge_code' => '3525102',
         ]);

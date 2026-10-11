@@ -4,6 +4,7 @@ namespace App\Services\Cte;
 
 use App\Enums\CteDocumentStatusEnum;
 use App\Enums\CteEmissionBatchStatusEnum;
+use App\Jobs\EmitCteDirectJob;
 use App\Models\CteDocument;
 use App\Models\CteEmissionBatch;
 use App\Models\Register;
@@ -30,7 +31,7 @@ class ApproveCteEmissionBatch
                 $this->ensureSnapshotStillMatches($document->register, $document->snapshot);
             }
 
-            $this->supersedeReplacedDocuments($batch);
+            app(CheckCteBatchParties::class)->prepare($batch);
 
             $batch->forceFill([
                 'status' => CteEmissionBatchStatusEnum::APPROVED,
@@ -40,33 +41,35 @@ class ApproveCteEmissionBatch
 
             $batch->documents()->update(['status' => CteDocumentStatusEnum::QUEUED]);
 
+            // Emissor direto (spec dfe §1.1): um job por documento (estilo
+            // EmitCiotJob). O agente Lab permanece intacto como fallback —
+            // o emissor de cada documento é o carimbo gravado na criação.
+            if ($batch->documents->contains(fn (CteDocument $document): bool => $document->emitter === 'direct')) {
+                $this->dispatchDirectEmission($batch->refresh());
+            }
+
             return $batch->refresh()->load('documents');
         });
     }
 
-    /**
-     * Substitui formalmente o CT-e autorizado anterior de cada documento de
-     * reemissao: so torna o antigo SUPERSEDED quando o novo lote e aprovado,
-     * de modo que um rascunho abandonado nao altera nada.
-     */
-    private function supersedeReplacedDocuments(CteEmissionBatch $batch): void
+    protected function dispatchDirectEmission(CteEmissionBatch $batch): void
     {
         foreach ($batch->documents as $document) {
-            if ($document->replaced_document_id === null) {
+            if ($document->emitter !== 'direct') {
                 continue;
             }
 
-            /** @var CteDocument $replaced */
-            $replaced = CteDocument::query()->lockForUpdate()->findOrFail($document->replaced_document_id);
+            if ($document->execution_mode !== 'live') {
+                // dry_run no emissor direto: nada transmite à SEFAZ.
+                app(DirectCteDocumentWorkflow::class)->transition($document, CteDocumentStatusEnum::DRY_RUN_COMPLETED);
 
-            if ($replaced->status !== CteDocumentStatusEnum::AUTHORIZED) {
-                throw ValidationException::withMessages([
-                    'batch' => "O CT-e {$replaced->cte_number} da remocao {$document->register_id} nao esta mais autorizado. Crie um novo lote.",
-                ]);
+                continue;
             }
 
-            app(CteDocumentWorkflow::class)->transition($replaced, CteDocumentStatusEnum::SUPERSEDED);
+            EmitCteDirectJob::dispatch($document->id)->afterCommit();
         }
+
+        app(CteBatchStatusUpdater::class)->handle($batch);
     }
 
     /** @param array<string, mixed> $snapshot */

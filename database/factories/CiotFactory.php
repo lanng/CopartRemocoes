@@ -6,7 +6,7 @@ use App\Enums\CiotLineEnum;
 use App\Enums\CiotOperationTypeEnum;
 use App\Enums\CiotStatusEnum;
 use App\Models\Ciot;
-use App\Models\CiotPayer;
+use App\Models\Company;
 use Illuminate\Database\Eloquent\Factories\Factory;
 
 /**
@@ -23,7 +23,7 @@ class CiotFactory extends Factory
      */
     public function definition(): array
     {
-        $payer = CiotPayer::factory()->create();
+        $payer = Company::factory()->create();
 
         return [
             'public_id' => fake()->uuid(),

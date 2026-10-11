@@ -6,11 +6,16 @@ use App\Enums\CiotOperationTypeEnum;
 use App\Enums\CiotStatusEnum;
 use App\Models\Ciot;
 use DomainException;
+use Illuminate\Support\Facades\DB;
 
 class CloseCiot
 {
     public function handle(Ciot $ciot): Ciot
     {
+        if ($ciot->isSyntheticHomologation()) {
+            throw new DomainException('CIOT sintético de homologação não pode ser encerrado pela ANTT.');
+        }
+
         $fullNumber = $ciot->fullNumber();
 
         if ($ciot->status !== CiotStatusEnum::ISSUED || $fullNumber === null) {
@@ -27,21 +32,76 @@ class CloseCiot
             throw new DomainException('O encerramento exige o peso da carga: preencha o peso no CIOT antes de encerrar.');
         }
 
-        $response = app(AnttCiotClient::class)->encerrar($fullNumber, $pesoCarga);
+        try {
+            $response = app(AnttCiotClient::class)->encerrar($fullNumber, $pesoCarga);
+        } catch (AnttCiotException $exception) {
+            $this->recordFailedAttempt($ciot, $exception);
+
+            throw $exception;
+        }
 
         if (! $response->isSuccess() || blank($response->dataEncerramento())) {
-            throw new AnttCiotException(
+            $exception = new AnttCiotException(
                 sprintf('Encerramento rejeitado pela ANTT (código %s): %s', $response->codigo() ?? '?', $response->mensagem()),
                 codigo: $response->codigo(),
                 mensagem: $response->mensagem(),
                 httpStatus: $response->httpStatus,
                 body: $response->body,
             );
+
+            $this->recordFailedAttempt($ciot, $exception);
+
+            throw $exception;
         }
 
-        return $ciot->transitionFrom(CiotStatusEnum::ISSUED, CiotStatusEnum::CLOSED, fn (Ciot $locked): array => [
+        $ciot = $ciot->transitionFrom(CiotStatusEnum::ISSUED, CiotStatusEnum::CLOSED, fn (Ciot $locked): array => [
             'closed_at' => now(),
-            'response' => array_merge($locked->response ?? [], ['encerramento' => $response->body]),
+            'response' => $this->responseAfterSuccessfulClosure($locked, $response->body),
         ]) ?? $ciot->refresh();
+
+        app(\App\Services\Dfe\ReserveMdfeDocuments::class)->releaseCiotIfTerminal($ciot);
+
+        return $ciot;
+    }
+
+    private function recordFailedAttempt(Ciot $ciot, AnttCiotException $exception): void
+    {
+        DB::transaction(function () use ($ciot, $exception): void {
+            $lockedCiot = Ciot::query()
+                ->whereKey($ciot->getKey())
+                ->lockForUpdate()
+                ->firstOrFail();
+
+            if ($lockedCiot->status !== CiotStatusEnum::ISSUED) {
+                return;
+            }
+
+            $response = $lockedCiot->response ?? [];
+            $response['ultima_tentativa_encerramento'] = [
+                'resultado' => $exception->retryable() ? 'inconclusivo' : 'rejeitado',
+                'tentado_em' => now()->toIso8601String(),
+                'codigo' => $exception->codigo,
+                'mensagem' => $exception->mensagem,
+                'http_status' => $exception->httpStatus,
+                'erro' => $exception->getMessage(),
+                'body' => $exception->body,
+            ];
+
+            $lockedCiot->forceFill(['response' => $response])->save();
+        });
+
+        $ciot->refresh();
+    }
+
+    /** @param array<string, mixed> $body
+     * @return array<string, mixed>
+     */
+    private function responseAfterSuccessfulClosure(Ciot $ciot, array $body): array
+    {
+        $response = $ciot->response ?? [];
+        unset($response['ultima_tentativa_encerramento']);
+        $response['encerramento'] = $body;
+
+        return $response;
     }
 }
