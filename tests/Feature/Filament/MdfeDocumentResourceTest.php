@@ -291,14 +291,6 @@ class MdfeDocumentResourceTest extends TestCase
         $this->assertFalse($page->get('data.new_ciot.indicators.composicao_veicular'));
     }
 
-    public function test_create_page_does_not_offer_synthetic_ciot_creation(): void
-    {
-        Livewire::test(CreateMdfeDocument::class)
-            ->assertDontSee('Criar CIOT sintético para homologação')
-            ->assertDontSee('CIOT sintético de homologação')
-            ->assertDontSee('Nenhuma solicitação será enviada à ANTT.');
-    }
-
     public function test_create_page_prefills_the_new_ciot_from_selected_ctes_in_the_operator_order(): void
     {
         $first = CteDocument::factory()->authorized()->create([

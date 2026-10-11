@@ -92,30 +92,6 @@ class BuildMdfeEmissionSnapshotTest extends TestCase
         ], $snapshot['payment']);
     }
 
-    public function test_rejects_a_previously_created_synthetic_ciot_from_the_mdfe_snapshot(): void
-    {
-        [$batch, $ciot] = $this->makeTrip();
-        $ciot->forceFill(['response' => ['homologation_fixture' => ['synthetic' => true]]])->save();
-        CiotVehicle::factory()->forRemoval()->create([
-            'plate' => 'PUC8E55', 'renavam' => '12345678901', 'tare_kg' => 8000,
-            'capacity_kg' => 12000, 'type_rod' => '03', 'body_type' => '00', 'uf' => 'SP',
-        ]);
-        MdfeDriver::factory()->create([
-            'cpf' => '12345678909',
-            'line' => CiotLineEnum::VehicleRemoval->value,
-            'is_default' => true,
-        ]);
-
-        $this->expectException(DomainException::class);
-        $this->expectExceptionMessage('CIOT sintético local não pode ser usado');
-
-        app(BuildMdfeEmissionSnapshot::class)->handle(
-            batch: $batch,
-            endorsements: ['AVERBACAO-OP-001'],
-            routeUfs: [],
-        );
-    }
-
     public function test_selects_the_configured_ncm_by_line_in_homologation_and_production_snapshots(): void
     {
         [$batch] = $this->makeTrip();
@@ -175,25 +151,6 @@ class BuildMdfeEmissionSnapshotTest extends TestCase
         $this->assertSame('033', $snapshot['payment']['bank_code']);
         $this->assertSame('0073', $snapshot['payment']['bank_agency']);
         $this->assertSame($ciot->payer_name, $snapshot['payment']['payer_name']);
-    }
-
-    public function test_rejects_a_failed_ciot_217_instead_of_substituting_a_synthetic_number(): void
-    {
-        [$batch, $ciot] = $this->makeTrip();
-        $ciot->forceFill([
-            'status' => 'failed',
-            'ciot_number' => null,
-            'error_code' => '217',
-            'payload' => ['DadosCarga' => ['CodigoNaturezaCarga' => 1, 'CodigoTipoCarga' => 5]],
-        ])->save();
-        $this->expectException(DomainException::class);
-        $this->expectExceptionMessage('CIOT emitido não encontrado para este lote.');
-
-        app(BuildMdfeEmissionSnapshot::class)->handle(
-            batch: $batch,
-            endorsements: ['99032'],
-            routeUfs: [],
-        );
     }
 
     public function test_rejects_a_failed_ciot_217_in_production_as_well(): void

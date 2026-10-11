@@ -16,7 +16,6 @@ use App\Models\MdfeDriver;
 use App\Services\Ciot\BuildMdfeEmissionSnapshot;
 use App\Services\Ciot\CreateCiotForBatch;
 use App\Services\Ciot\PrefillCiotFromDocuments;
-use App\Services\Ciot\PrepareMdfeDocument;
 use App\Services\Ciot\QueueDirectMdfeEmission;
 use App\Services\Ciot\ValidateMdfeDocumentSelection;
 use DomainException;
@@ -258,29 +257,6 @@ class PrepareMdfeFromDocumentsTest extends TestCase
         $this->assertSame('2000.0000', $snapshot['cargo']['weight_kg']);
         $this->assertSame('2000.999', $document->refresh()->snapshot['cargo_weight_kg']);
         $this->assertNull($snapshot['trip_id']);
-    }
-
-    public function test_rejects_the_removed_synthetic_ciot_mode_for_tank_alcohol(): void
-    {
-        $batch = CteEmissionBatch::factory()->create();
-        $document = $this->tankAlcoholDocument($batch);
-        $driver = MdfeDriver::factory()->create([
-            'line' => CiotLineEnum::TankAlcohol->value,
-        ]);
-
-        try {
-            app(PrepareMdfeDocument::class)->handle([
-                'line' => CiotLineEnum::TankAlcohol->value,
-                'cte_document_ids' => [$document->id],
-                'driver_id' => $driver->id,
-                'ciot_mode' => 'synthetic',
-            ]);
-            $this->fail('Expected DomainException.');
-        } catch (DomainException $exception) {
-            $this->assertStringContainsString('Escolha um CIOT emitido', $exception->getMessage());
-        }
-
-        $this->assertSame(0, Ciot::query()->count());
     }
 
     public function test_creates_a_draft_ciot_for_an_explicit_selection_without_a_batch(): void

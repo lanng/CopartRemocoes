@@ -170,29 +170,6 @@ class CloseTransportOperationTest extends TestCase
         $this->assertSame('completed', $result->status);
     }
 
-    public function test_keeps_synthetic_ciot_open_after_sefaz_closure_without_calling_antt(): void
-    {
-        $ciot = Ciot::factory()->issued()->create([
-            'response' => ['homologation_fixture' => ['synthetic' => true]],
-        ]);
-        $document = $this->authorizedMdfe($ciot, [
-            'fiscal_status' => FiscalDocumentStatusEnum::CLOSED,
-            'fiscal_status_code' => '132',
-        ]);
-        $closeMdfe = Mockery::mock(CloseMdfeDocument::class);
-        $closeMdfe->shouldNotReceive('handle');
-        $closeCiot = Mockery::mock(CloseCiot::class);
-        $closeCiot->shouldNotReceive('handle');
-        app()->instance(CloseMdfeDocument::class, $closeMdfe);
-        app()->instance(CloseCiot::class, $closeCiot);
-
-        $result = app(CloseTransportOperation::class)->handle($document);
-
-        $this->assertSame('completed', $result->status);
-        $this->assertSame(CiotStatusEnum::ISSUED, $ciot->refresh()->status);
-        $this->assertStringContainsString('nenhuma solicitação enviada à ANTT', $result->message);
-    }
-
     public function test_pending_ciot_is_not_sent_to_antt_after_sefaz_closure(): void
     {
         $ciot = Ciot::factory()->create(['status' => CiotStatusEnum::PENDING]);

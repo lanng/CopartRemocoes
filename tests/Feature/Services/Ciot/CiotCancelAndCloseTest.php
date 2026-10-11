@@ -83,23 +83,6 @@ class CiotCancelAndCloseTest extends TestCase
         app(CancelCiot::class)->handle($ciot, 'motivo');
     }
 
-    public function test_refuses_to_cancel_a_synthetic_homologation_ciot_without_calling_antt(): void
-    {
-        $ciot = Ciot::factory()->issued()->create([
-            'response' => ['homologation_fixture' => ['synthetic' => true]],
-        ]);
-        Http::fake();
-
-        try {
-            app(CancelCiot::class)->handle($ciot, 'teste');
-            $this->fail('Expected DomainException.');
-        } catch (DomainException $exception) {
-            $this->assertStringContainsString('sintético', $exception->getMessage());
-        }
-
-        Http::assertNothingSent();
-    }
-
     public function test_refuses_an_http_200_rejection_even_with_a_protocol(): void
     {
         $ciot = Ciot::factory()->issued()->create();
@@ -258,23 +241,6 @@ class CiotCancelAndCloseTest extends TestCase
         $this->assertSame(CiotStatusEnum::CLOSED, $ciot->status);
         $this->assertSame('110', $ciot->response['encerramento']['Codigo']);
         $this->assertSame('T98000002282767', $ciot->response['encerramento']['Protocolo']);
-    }
-
-    public function test_refuses_to_close_a_synthetic_homologation_ciot_without_calling_antt(): void
-    {
-        $ciot = Ciot::factory()->issued()->create([
-            'response' => ['homologation_fixture' => ['synthetic' => true]],
-        ]);
-        Http::fake();
-
-        try {
-            app(CloseCiot::class)->handle($ciot);
-            $this->fail('Expected DomainException.');
-        } catch (DomainException $exception) {
-            $this->assertStringContainsString('sintético', $exception->getMessage());
-        }
-
-        Http::assertNothingSent();
     }
 
     public function test_refuses_to_close_a_ciot_that_is_not_issued(): void

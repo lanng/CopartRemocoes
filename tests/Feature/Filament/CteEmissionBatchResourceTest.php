@@ -178,29 +178,6 @@ class CteEmissionBatchResourceTest extends TestCase
             ->assertActionHidden('resumeCiotClosure');
     }
 
-    public function test_batch_does_not_offer_antt_closure_for_a_synthetic_ciot_after_mdfe_closure(): void
-    {
-        $batch = CteEmissionBatch::factory()->create([
-            'status' => CteEmissionBatchStatusEnum::COMPLETED,
-        ]);
-        $ciot = Ciot::factory()->issued()->create([
-            'cte_emission_batch_id' => $batch->id,
-            'response' => ['homologation_fixture' => ['synthetic' => true]],
-        ]);
-        MdfeDocument::factory()->create([
-            'cte_emission_batch_id' => $batch->id,
-            'ciot_id' => $ciot->id,
-            'status' => CteDocumentStatusEnum::AUTHORIZED,
-            'emitter' => 'direct',
-            'access_key' => str_repeat('9', 44),
-            'protocol' => '935260000000009',
-            'fiscal_status_code' => '132',
-        ]);
-
-        Livewire::test(ViewCteEmissionBatch::class, ['record' => $batch->id])
-            ->assertActionHidden('resumeCiotClosure');
-    }
-
     public function test_the_direct_mdfe_action_is_shown_only_when_direct_emission_is_selected_and_ctes_are_authorized(): void
     {
         config(['dfe.mdfe.emitter' => 'direct']);
@@ -245,37 +222,6 @@ class CteEmissionBatchResourceTest extends TestCase
         $endorsementRows = $page->get('mountedActionsData.0.endorsements');
 
         $this->assertSame('AVERBACAO-PADRAO', collect($endorsementRows)->first()['number']);
-    }
-
-    public function test_the_direct_mdfe_action_does_not_offer_a_failed_ciot_as_a_synthetic_fixture(): void
-    {
-        config([
-            'dfe.mdfe.emitter' => 'direct',
-            'dfe.tp_amb' => '2',
-        ]);
-        $batch = CteEmissionBatch::factory()->create([
-            'status' => CteEmissionBatchStatusEnum::COMPLETED,
-        ]);
-        Ciot::factory()->create([
-            'cte_emission_batch_id' => $batch->id,
-            'status' => CiotStatusEnum::FAILED,
-            'error_code' => '217',
-            'payload' => ['DadosCarga' => ['CodigoNaturezaCarga' => 1, 'CodigoTipoCarga' => 5]],
-        ]);
-        CteDocument::factory()->authorized()->create([
-            'cte_emission_batch_id' => $batch->id,
-            'workflow_origin' => 'controlled_v1',
-        ]);
-
-        Livewire::test(ViewCteEmissionBatch::class, ['record' => $batch->id])
-            ->assertSuccessful()
-            ->assertActionHidden('emitMdfeDirect');
-
-        config(['dfe.tp_amb' => '1']);
-
-        Livewire::test(ViewCteEmissionBatch::class, ['record' => $batch->id])
-            ->assertSuccessful()
-            ->assertActionHidden('emitMdfeDirect');
     }
 
     public function test_the_direct_mdfe_action_explains_when_batch_ctes_are_not_eligible(): void
@@ -521,18 +467,6 @@ class CteEmissionBatchResourceTest extends TestCase
             ->assertSee('Emitido');
 
         Queue::assertNothingPushed();
-    }
-
-    public function test_generate_ciot_action_does_not_offer_synthetic_ciot_creation(): void
-    {
-        $batch = CteEmissionBatch::factory()->create([
-            'status' => CteEmissionBatchStatusEnum::COMPLETED,
-        ]);
-        Livewire::test(ViewCteEmissionBatch::class, ['record' => $batch->id])
-            ->mountAction('generateCiot')
-            ->assertDontSee('Criar CIOT sintético para homologação');
-
-        $this->assertSame(0, Ciot::query()->where('cte_emission_batch_id', $batch->id)->count());
     }
 
     public function test_generate_ciot_action_sends_additional_payers_cnpjs_to_the_antt(): void

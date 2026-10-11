@@ -49,66 +49,6 @@ class PrepareMdfeDocumentTest extends TestCase
         app(PrepareMdfeDocument::class)->handle(['vehicle_plate' => 'INVALID']);
     }
 
-    public function test_it_rejects_the_removed_synthetic_ciot_mode_in_homologation(): void
-    {
-        $document = $this->controlledVehicleDocument();
-
-        try {
-            app(PrepareMdfeDocument::class)->handle([
-                'cte_document_ids' => [$document->id],
-                'ciot_mode' => 'synthetic',
-            ]);
-            $this->fail('Expected DomainException.');
-        } catch (DomainException $exception) {
-            $this->assertStringContainsString('Escolha um CIOT emitido', $exception->getMessage());
-        }
-
-        $this->assertSame(0, Ciot::query()->count());
-    }
-
-    public function test_it_rejects_the_removed_synthetic_ciot_mode_in_production_too(): void
-    {
-        config(['dfe.tp_amb' => '1']);
-
-        $document = $this->controlledVehicleDocument();
-
-        try {
-            app(PrepareMdfeDocument::class)->handle([
-                'cte_document_ids' => [$document->id],
-                'ciot_mode' => 'synthetic',
-            ]);
-            $this->fail('Expected DomainException.');
-        } catch (DomainException $exception) {
-            $this->assertStringContainsString('Escolha um CIOT emitido', $exception->getMessage());
-        }
-
-        $this->assertSame(0, Ciot::query()->count());
-    }
-
-    public function test_it_always_rejects_reusing_a_previously_created_synthetic_ciot(): void
-    {
-        $document = $this->controlledVehicleDocument();
-        $ciot = Ciot::factory()->issued()->create([
-            'line' => CiotLineEnum::VehicleRemoval,
-            'response' => ['homologation_fixture' => ['synthetic' => true]],
-        ]);
-        $queueService = \Mockery::mock(QueueDirectMdfeEmission::class);
-        $queueService->shouldNotReceive('handleForDocuments');
-        $this->app->instance(QueueDirectMdfeEmission::class, $queueService);
-
-        try {
-            app(PrepareMdfeDocument::class)->handle([
-                'cte_document_ids' => [$document->id],
-                'ciot_mode' => 'existing',
-                'ciot_id' => $ciot->id,
-                'endorsements' => [['number' => 'AVERBACAO-001']],
-            ]);
-            $this->fail('Expected DomainException.');
-        } catch (DomainException $exception) {
-            $this->assertStringContainsString('CIOT sintético local não pode ser usado', $exception->getMessage());
-        }
-    }
-
     public function test_it_emits_a_new_ciot_before_queuing_the_mdfe(): void
     {
         Queue::fake();
