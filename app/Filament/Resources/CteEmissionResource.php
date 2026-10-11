@@ -36,15 +36,15 @@ class CteEmissionResource extends Resource
 
     protected static ?string $navigationIcon = 'heroicon-o-document-text';
 
-    protected static ?string $navigationGroup = 'CT-e';
+    protected static ?string $navigationGroup = 'Emissões';
 
-    protected static ?string $navigationLabel = 'Emissões';
+    protected static ?string $navigationLabel = 'CT-e';
 
     protected static ?string $modelLabel = 'CT-e emitido';
 
     protected static ?string $pluralModelLabel = 'CT-es emitidos';
 
-    protected static ?int $navigationSort = 2;
+    protected static ?int $navigationSort = 3;
 
     public static function canCreate(): bool
     {

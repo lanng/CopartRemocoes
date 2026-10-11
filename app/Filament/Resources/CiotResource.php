@@ -39,9 +39,11 @@ class CiotResource extends Resource
 
     protected static ?string $navigationIcon = 'heroicon-o-ticket';
 
-    protected static ?string $navigationGroup = 'CIOT';
+    protected static ?string $navigationGroup = 'Emissões';
 
     protected static ?string $navigationLabel = 'CIOTs';
+
+    protected static ?int $navigationSort = 5;
 
     protected static ?string $modelLabel = 'CIOT';
 

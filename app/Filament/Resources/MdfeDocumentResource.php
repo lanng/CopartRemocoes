@@ -38,9 +38,11 @@ class MdfeDocumentResource extends Resource
 
     protected static ?string $navigationIcon = 'heroicon-o-document-text';
 
-    protected static ?string $navigationGroup = 'MDF-e';
+    protected static ?string $navigationGroup = 'Emissões';
 
     protected static ?string $navigationLabel = 'Manifestos';
+
+    protected static ?int $navigationSort = 4;
 
     protected static ?string $modelLabel = 'MDF-e';
 

@@ -16,7 +16,7 @@ class CiotVehicleResource extends Resource
 
     protected static ?string $navigationIcon = 'heroicon-o-truck';
 
-    protected static ?string $navigationGroup = 'CIOT';
+    protected static ?string $navigationGroup = 'Cadastro';
 
     protected static ?string $navigationLabel = 'Frota';
 

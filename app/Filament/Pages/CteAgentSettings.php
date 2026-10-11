@@ -26,9 +26,11 @@ class CteAgentSettings extends Page implements HasForms
 
     protected static ?string $navigationIcon = 'heroicon-o-cpu-chip';
 
-    protected static ?string $navigationGroup = 'CT-e';
+    protected static ?string $navigationGroup = 'Emissões';
 
     protected static ?string $navigationLabel = 'Agente CT-e';
+
+    protected static ?int $navigationSort = 1;
 
     protected static ?string $title = 'Agente CT-e';
 

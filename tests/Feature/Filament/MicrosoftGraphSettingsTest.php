@@ -19,6 +19,7 @@ class MicrosoftGraphSettingsTest extends TestCase
         Filament::setCurrentPanel(Filament::getPanel('admin'));
         /** @var User $user */
         $user = User::factory()->create();
+        config(['authuser.user' => $user->email]);
         $this->actingAs($user);
         MicrosoftGraphConnection::factory()->create([
             'last_synced_at' => '2026-08-13 20:50:00',

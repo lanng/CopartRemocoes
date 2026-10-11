@@ -17,7 +17,7 @@ class MdfeDriverResource extends Resource
 
     protected static ?string $navigationIcon = 'heroicon-o-rectangle-stack';
 
-    protected static ?string $navigationGroup = 'Cadastros';
+    protected static ?string $navigationGroup = 'Cadastro';
 
     protected static ?string $navigationLabel = 'Motoristas MDF-e';
 
