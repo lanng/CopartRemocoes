@@ -236,7 +236,7 @@ class CteEmissionResource extends Resource
                     ->color('warning')
                     ->requiresConfirmation()
                     ->label('Regenerar e baixar DACTE')
-                    ->visible(fn (CteDocument $record): bool => self::hasArchivedFile($record->xml_path))
+                    ->visible(fn (CteDocument $record): bool => filled($record->xml_path))
                     ->action(function (CteDocument $record): ?StreamedResponse {
                         $store = app(DfeDocumentStore::class);
 
@@ -261,8 +261,8 @@ class CteEmissionResource extends Resource
                     ->label('PDF')
                     ->icon('heroicon-o-arrow-down-tray')
                     ->color('gray')
-                    ->visible(fn (CteDocument $record): bool => self::hasArchivedFile($record->pdf_path)
-                        || self::hasArchivedFile($record->xml_path))
+                    ->visible(fn (CteDocument $record): bool => filled($record->pdf_path)
+                        || filled($record->xml_path))
                     ->action(fn (CteDocument $record): ?StreamedResponse => self::downloadPdf($record)),
             ])
             ->defaultSort('authorized_at', 'desc')
@@ -289,7 +289,7 @@ class CteEmissionResource extends Resource
             ->label($label)
             ->icon('heroicon-o-arrow-down-tray')
             ->color('gray')
-            ->visible(fn (CteDocument $record): bool => self::hasArchivedFile($record->{$pathField}))
+            ->visible(fn (CteDocument $record): bool => filled($record->{$pathField}))
             ->action(function (CteDocument $record) use ($pathField, $filenameSuffix): ?StreamedResponse {
                 $path = (string) $record->{$pathField};
 
@@ -330,10 +330,6 @@ class CteEmissionResource extends Resource
         );
     }
 
-    /**
-     * Old host paths do not exist on the current DFE disk and should not be advertised.
-     * Keep historical issuer values readable while new documents use the internal issuer.
-     */
     private static function hasArchivedFile(?string $path): bool
     {
         return filled($path) && app(DfeDocumentStore::class)->exists($path);
