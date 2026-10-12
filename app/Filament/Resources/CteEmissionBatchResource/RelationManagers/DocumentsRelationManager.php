@@ -117,7 +117,7 @@ class DocumentsRelationManager extends RelationManager
                     ->color('warning')
                     ->visible(fn (CteDocument $record): bool => CteDocumentRecoveryService::canBeRequeued($record))
                     ->requiresConfirmation()
-                    ->modalDescription('O documento voltará para a fila de emissão e será preenchido e emitido novamente pela máquina host.')
+                    ->modalDescription('O CT-e será validado e enviado novamente pela emissão interna do sistema.')
                     ->action(function (CteDocument $record): void {
                         app(CteDocumentRecoveryService::class)->retry($record);
                     }),
@@ -125,7 +125,8 @@ class DocumentsRelationManager extends RelationManager
                     ->label('Conciliar')
                     ->icon('heroicon-o-check-badge')
                     ->color('success')
-                    ->visible(fn (CteDocument $record): bool => $record->status === CteDocumentStatusEnum::RECONCILIATION_REQUIRED)
+                    ->visible(fn (CteDocument $record): bool => $record->emitter === 'direct'
+                        && $record->status === CteDocumentStatusEnum::RECONCILIATION_REQUIRED)
                     ->form([
                         TextInput::make('number')->label('Número do CT-e')->required()->maxLength(20),
                         TextInput::make('access_key')->label('Chave de acesso')->required()->length(44),

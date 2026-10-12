@@ -180,6 +180,11 @@ class CteEmissionResource extends Resource
                             ->label('Emissor')
                             ->description('Emissor', position: 'above')
                             ->badge()
+                            ->formatStateUsing(fn (string $state): string => match ($state) {
+                                'direct' => 'Sistema',
+                                'lab', 'agent' => 'Emissor antigo',
+                                default => '—',
+                            })
                             ->color(fn (string $state): string => $state === 'direct' ? 'success' : 'gray'),
                         TextColumn::make('register.vehicle_plate')
                             ->label('Placa')
@@ -217,7 +222,7 @@ class CteEmissionResource extends Resource
             ->filters([
                 SelectFilter::make('emitter')
                     ->label('Emissor')
-                    ->options(['direct' => 'Sistema (SEFAZ direta)', 'lab' => 'Lab']),
+                    ->options(['direct' => 'Sistema', 'lab' => 'Emissor antigo', 'agent' => 'Emissor antigo']),
                 SelectFilter::make('status')
                     ->label('Situação')
                     ->options(collect(CteDocumentStatusEnum::cases())->mapWithKeys(
@@ -327,7 +332,7 @@ class CteEmissionResource extends Resource
 
     /**
      * Old host paths do not exist on the current DFE disk and should not be advertised.
-     * Revisit the dual-emitter setup when the old system is retired so only one issuer remains active.
+     * Keep historical issuer values readable while new documents use the internal issuer.
      */
     private static function hasArchivedFile(?string $path): bool
     {

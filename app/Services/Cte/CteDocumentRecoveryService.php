@@ -17,7 +17,7 @@ class CteDocumentRecoveryService
 {
     public static function canBeRequeued(CteDocument $document): bool
     {
-        if ($document->fiscal_status === FiscalDocumentStatusEnum::AUTHORIZED) {
+        if ($document->emitter !== 'direct' || $document->fiscal_status === FiscalDocumentStatusEnum::AUTHORIZED) {
             return false;
         }
 
@@ -103,10 +103,6 @@ class CteDocumentRecoveryService
     {
         $document->forceFill([
             'status' => CteDocumentStatusEnum::QUEUED,
-            'claimed_by' => null,
-            'claim_token_hash' => null,
-            'claimed_at' => null,
-            'claim_expires_at' => null,
             'authorization_started_at' => null,
             'issued_at' => null,
             'authorized_at' => null,
@@ -158,6 +154,12 @@ class CteDocumentRecoveryService
     /** @param array{number: string, access_key: string, protocol: string, reason: string} $data */
     public function reconcile(CteDocument $document, array $data): CteDocument
     {
+        if ($document->emitter !== 'direct') {
+            throw ValidationException::withMessages([
+                'document' => 'Documentos do emissor antigo estão disponíveis somente para consulta.',
+            ]);
+        }
+
         if ($document->status !== CteDocumentStatusEnum::RECONCILIATION_REQUIRED) {
             throw ValidationException::withMessages([
                 'document' => 'Somente documentos em conciliacao podem ser regularizados.',

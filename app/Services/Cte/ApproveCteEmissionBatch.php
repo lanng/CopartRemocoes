@@ -4,6 +4,7 @@ namespace App\Services\Cte;
 
 use App\Enums\CteDocumentStatusEnum;
 use App\Enums\CteEmissionBatchStatusEnum;
+use App\Enums\FiscalDocumentWorkflowOriginEnum;
 use App\Jobs\EmitCteDirectJob;
 use App\Models\CteDocument;
 use App\Models\CteEmissionBatch;
@@ -31,6 +32,13 @@ class ApproveCteEmissionBatch
                 $this->ensureSnapshotStillMatches($document->register, $document->snapshot);
             }
 
+            if ($batch->documents->contains(fn (CteDocument $document): bool => $document->emitter !== 'direct'
+                || $document->workflow_origin !== FiscalDocumentWorkflowOriginEnum::ControlledV1)) {
+                throw ValidationException::withMessages([
+                    'batch' => 'Este lote contém CT-e do emissor antigo e está disponível somente para consulta.',
+                ]);
+            }
+
             app(CheckCteBatchParties::class)->prepare($batch);
 
             $batch->forceFill([
@@ -41,12 +49,7 @@ class ApproveCteEmissionBatch
 
             $batch->documents()->update(['status' => CteDocumentStatusEnum::QUEUED]);
 
-            // Emissor direto (spec dfe §1.1): um job por documento (estilo
-            // EmitCiotJob). O agente Lab permanece intacto como fallback —
-            // o emissor de cada documento é o carimbo gravado na criação.
-            if ($batch->documents->contains(fn (CteDocument $document): bool => $document->emitter === 'direct')) {
-                $this->dispatchDirectEmission($batch->refresh());
-            }
+            $this->dispatchDirectEmission($batch->refresh());
 
             return $batch->refresh()->load('documents');
         });
@@ -55,10 +58,6 @@ class ApproveCteEmissionBatch
     protected function dispatchDirectEmission(CteEmissionBatch $batch): void
     {
         foreach ($batch->documents as $document) {
-            if ($document->emitter !== 'direct') {
-                continue;
-            }
-
             if ($document->execution_mode !== 'live') {
                 // dry_run no emissor direto: nada transmite à SEFAZ.
                 app(DirectCteDocumentWorkflow::class)->transition($document, CteDocumentStatusEnum::DRY_RUN_COMPLETED);

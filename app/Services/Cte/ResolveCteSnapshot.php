@@ -11,13 +11,13 @@ use Illuminate\Database\Eloquent\Collection;
 
 /**
  * Enriquece o snapshot v1 do documento (dados da remocao) com os blocos
- * fiscais de rem/dest e os códigos IBGE — o que o Lab digitava à mão
+ * fiscais de remetente/destinatário e os códigos IBGE
  * (spec dfe §2.5, decisões do cadastro companies).
  *
  * Cidades: nomes dos registros chegam abreviados/sem acento da extração de
  * PDF; a resolução é case/acento-insensível sobre a base IBGE local (cities),
- * com aliases configuráveis (dfe.city_aliases, portado do CITY_CONFIG do
- * script Python) e preferência SP → PR → único match nacional.
+ * com aliases configuráveis (dfe.city_aliases) e preferência SP → PR → único
+ * match nacional.
  *
  * Partes: rem = seguradora do registro, dest = empresa no IBGE do destino —
  * sempre no cadastro companies; dado faltante é erro explícito, nunca chute.

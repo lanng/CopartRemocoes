@@ -12,7 +12,6 @@ use App\Filament\Support\CiotEmissionNotice;
 use App\Models\Ciot;
 use App\Models\MdfeDocument;
 use App\Models\MdfeDriver;
-use App\Services\Ciot\DispatchMdfeForBatch;
 use App\Services\Ciot\EmitCiotDeclaration;
 use App\Services\Ciot\QueueDirectMdfeEmission;
 use App\Services\Cte\ApproveCteEmissionBatch;
@@ -33,7 +32,6 @@ use Filament\Forms\Get;
 use Filament\Forms\Set;
 use Filament\Notifications\Notification;
 use Filament\Resources\Pages\ViewRecord;
-use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Support\Facades\Storage;
 use Livewire\Attributes\On;
 
@@ -134,33 +132,6 @@ class ViewCteEmissionBatch extends ViewRecord
             ->latest('id')
             ->get()
             ->first(fn (MdfeDocument $document): bool => ! $document->ciot?->isSyntheticHomologation());
-    }
-
-    /**
-     * MDF-es reiniciáveis: falhos/rejeitados OU presos em estado intermediário
-     * com lease expirado (agent morreu/pausou no meio do fluxo sem reportar
-     * falha terminal — o documento nunca sairia daí pelos próprios meios).
-     */
-    protected function restartableMdfeDocuments(): HasMany
-    {
-        return $this->record->mdfeDocuments()
-            ->where(function ($query): void {
-                $query->whereIn('status', [
-                    CteDocumentStatusEnum::REJECTED->value,
-                    CteDocumentStatusEnum::FAILED_BEFORE_AUTHORIZATION->value,
-                    CteDocumentStatusEnum::DRY_RUN_COMPLETED->value,
-                ])
-                    ->orWhere(fn ($query) => $query
-                        ->whereIn('status', [
-                            CteDocumentStatusEnum::CLAIMED->value,
-                            CteDocumentStatusEnum::FILLING->value,
-                            CteDocumentStatusEnum::VALIDATING->value,
-                            CteDocumentStatusEnum::READY_TO_AUTHORIZE->value,
-                            CteDocumentStatusEnum::AUTHORIZING->value,
-                            CteDocumentStatusEnum::WAITING_FOR_XML->value,
-                        ])
-                        ->where('claim_expires_at', '<', now()));
-            });
     }
 
     private function runTransportClosure(MdfeDocument $mdfe): void
@@ -308,41 +279,11 @@ class ViewCteEmissionBatch extends ViewRecord
 
                     $this->refreshBatch();
                 }),
-            Actions\Action::make('emitMdfe')
-                ->label('Emitir MDF-e pelo agente (legado)')
-                ->icon('heroicon-m-document-check')
-                ->color('warning')
-                ->visible(fn (): bool => config('dfe.mdfe.emitter', 'agent') === 'agent'
-                    && in_array($this->record->refresh()->status?->value, ['completed', 'completed_with_errors'], true)
-                    && $this->directMdfeCiotOptions() !== []
-                    && ! $this->record->mdfeDocuments()
-                        ->whereNotIn('status', ['rejected', 'failed_before_authorization', 'cancelled'])
-                        ->exists())
-                ->requiresConfirmation()
-                ->modalHeading('Emitir MDF-e da viagem')
-                ->modalDescription('Despacha o claim de MDF-e para o agente com o snapshot da viagem.')
-                ->action(function (): void {
-                    $mdfe = app(DispatchMdfeForBatch::class)->handle($this->record);
-
-                    if ($mdfe === null) {
-                        $this->redirect(CteEmissionBatchResource::getUrl('view', ['record' => $this->record]));
-
-                        return;
-                    }
-
-                    Notification::make()
-                        ->title('MDF-e enfileirado para o agente.')
-                        ->success()
-                        ->send();
-
-                    $this->redirect(CteEmissionBatchResource::getUrl('view', ['record' => $this->record]));
-                }),
             Actions\Action::make('emitMdfeDirect')
-                ->label('Emitir MDF-e direto')
+                ->label('Emitir MDF-e')
                 ->icon('heroicon-m-paper-airplane')
                 ->color('warning')
-                ->visible(fn (): bool => config('dfe.mdfe.emitter') === 'direct'
-                    && in_array($this->record->refresh()->status?->value, ['completed', 'completed_with_errors'], true)
+                ->visible(fn (): bool => in_array($this->record->refresh()->status?->value, ['completed', 'completed_with_errors'], true)
                     && $this->directMdfeCiotOptions() !== []
                     && $this->record->documents()->exists()
                     && ! $this->record->mdfeDocuments()
@@ -445,51 +386,12 @@ class ViewCteEmissionBatch extends ViewRecord
                     Notification::make()->title('MDF-e enviado à fila de emissão direta.')->success()->send();
                     $this->redirect(CteEmissionBatchResource::getUrl('view', ['record' => $this->record]));
                 }),
-            Actions\Action::make('requeueMdfe')
-                ->label('Reenviar MDF-e')
-                ->icon('heroicon-m-arrow-path')
-                ->color('warning')
-                ->visible(fn (): bool => self::restartableMdfeDocuments()->exists())
-                ->requiresConfirmation()
-                ->modalHeading('Reenviar MDF-e')
-                ->modalDescription('O documento volta para a fila do agente para nova tentativa.')
-                ->action(function (): void {
-                    self::restartableMdfeDocuments()
-                        ->each(fn ($mdfe) => $mdfe->forceFill([
-                            'status' => 'queued',
-                            'claimed_by' => null,
-                            'claim_token_hash' => null,
-                            'claimed_at' => null,
-                            'claim_expires_at' => null,
-                            'error_stage' => null,
-                            'error_code' => null,
-                            'error_message' => null,
-                            // Resultado da tentativa anterior: sem limpar o hash,
-                            // toda nova tentativa esbarrava no 409 "a different
-                            // result was already recorded".
-                            'result_payload_hash' => null,
-                            'issued_at' => null,
-                            'authorized_at' => null,
-                            'mdfe_number' => null,
-                            'access_key' => null,
-                            'series' => null,
-                            'protocol' => null,
-                            'fiscal_status_code' => null,
-                            'fiscal_status_message' => null,
-                        ])->save());
-
-                    Notification::make()
-                        ->title('MDF-e reenfileirado.')
-                        ->success()
-                        ->send();
-
-                    $this->redirect(CteEmissionBatchResource::getUrl('view', ['record' => $this->record]));
-                }),
             Actions\Action::make('reconcileMdfe')
                 ->label('Conciliar MDF-e')
                 ->icon('heroicon-o-clipboard-document-check')
                 ->color('success')
                 ->visible(fn (): bool => $this->record->mdfeDocuments()
+                    ->where('emitter', 'direct')
                     ->where('status', CteDocumentStatusEnum::RECONCILIATION_REQUIRED->value)
                     ->exists())
                 ->form([
@@ -503,9 +405,10 @@ class ViewCteEmissionBatch extends ViewRecord
                         ->maxLength(60),
                 ])
                 ->modalHeading('Conciliar MDF-e da viagem')
-                ->modalDescription('Use quando o agente autorizou o MDF-e no Lab mas não conseguiu reportar o resultado. O número e a série são derivados da chave de acesso.')
+                ->modalDescription('Informe a chave de acesso do MDF-e autorizado para registrar o resultado. O número e a série são derivados da chave.')
                 ->action(function (array $data): void {
                     $mdfe = $this->record->mdfeDocuments()
+                        ->where('emitter', 'direct')
                         ->where('status', CteDocumentStatusEnum::RECONCILIATION_REQUIRED->value)
                         ->latest('id')
                         ->first();

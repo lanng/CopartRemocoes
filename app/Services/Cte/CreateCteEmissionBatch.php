@@ -45,8 +45,6 @@ class CreateCteEmissionBatch
                 ->lockForUpdate()
                 ->get()
                 ->keyBy('id');
-            $emitter = (string) config('cte.emitter', 'lab');
-
             foreach ($registers as $selected) {
                 $register = $lockedRegisters->get($selected->id);
 
@@ -77,12 +75,8 @@ class CreateCteEmissionBatch
                     'snapshot' => $this->snapshot($register),
                     'idempotency_key' => (string) Str::uuid(),
                     'execution_mode' => $executionMode,
-                    // O documento nasce com o emissor que vai processá-lo
-                    // (spec dfe §1.1): lab (default) ou direct.
-                    'emitter' => $emitter,
-                    'workflow_origin' => $emitter === 'direct'
-                        ? FiscalDocumentWorkflowOriginEnum::ControlledV1
-                        : null,
+                    'emitter' => 'direct',
+                    'workflow_origin' => FiscalDocumentWorkflowOriginEnum::ControlledV1,
                     'replaced_document_id' => $authorizedDocument?->id,
                     'replacement_reason' => $authorizedDocument !== null ? $reemissionReason : null,
                 ]);

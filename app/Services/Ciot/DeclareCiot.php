@@ -3,7 +3,6 @@
 namespace App\Services\Ciot;
 
 use App\Enums\CiotStatusEnum;
-use App\Enums\CteDocumentStatusEnum;
 use App\Models\Ciot;
 
 /**
@@ -55,20 +54,6 @@ class DeclareCiot
             'error_code' => null,
             'error_message' => null,
         ]) ?? $ciot->refresh();
-
-        // O MDF-e do agente continua no modo legado; em F5 direto ele aguarda
-        // a ação manual de emissão na viagem.
-        $batchHasRejectedDirectMdfe = $ciot->cte_emission_batch_id !== null
-            && $ciot->cteEmissionBatch->mdfeDocuments()
-                ->where('emitter', 'direct')
-                ->where('status', CteDocumentStatusEnum::REJECTED->value)
-                ->exists();
-
-        if ($ciot->cte_emission_batch_id !== null
-            && (string) config('dfe.mdfe.emitter', 'agent') === 'agent'
-            && ! $batchHasRejectedDirectMdfe) {
-            app(DispatchMdfeForBatch::class)->handle($ciot->cteEmissionBatch);
-        }
 
         return $ciot;
     }

@@ -73,7 +73,7 @@ class AllocateCteNumber
         // não há default: a seed manual no switch é obrigatória.
         if ((string) config('dfe.tp_amb') === '1') {
             throw new DomainException(
-                'Numeração de produção não semeada: defina DFE_CTE_NUMBER_START com o último nCT do Lab + 1 antes de emitir (spec §7).',
+                'Numeração de produção não semeada: defina DFE_CTE_NUMBER_START com o próximo número fiscal disponível antes de emitir (spec §7).',
             );
         }
 

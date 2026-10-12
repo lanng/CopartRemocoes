@@ -51,7 +51,7 @@ class QueueCteDocumentEmission
             $this->assertNfeOriginalsArchived->handle($lockedDocument);
             $this->assertSnapshotReady($snapshot);
 
-            app(CteDocumentWorkflow::class)->transition($lockedDocument, CteDocumentStatusEnum::QUEUED);
+            app(DirectCteDocumentWorkflow::class)->transition($lockedDocument, CteDocumentStatusEnum::QUEUED);
             EmitCteDirectJob::dispatch($lockedDocument->id)->afterCommit();
 
             return $lockedDocument->load('nfeDocuments');
