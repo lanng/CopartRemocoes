@@ -178,9 +178,8 @@ class CteEmissionBatchResourceTest extends TestCase
             ->assertActionHidden('resumeCiotClosure');
     }
 
-    public function test_the_direct_mdfe_action_is_shown_only_when_direct_emission_is_selected_and_ctes_are_authorized(): void
+    public function test_the_mdfe_action_is_shown_when_ctes_are_authorized(): void
     {
-        config(['dfe.mdfe.emitter' => 'direct']);
         $batch = CteEmissionBatch::factory()->create([
             'status' => CteEmissionBatchStatusEnum::COMPLETED,
         ]);
@@ -193,7 +192,7 @@ class CteEmissionBatchResourceTest extends TestCase
         Livewire::test(ViewCteEmissionBatch::class, ['record' => $batch->id])
             ->assertSuccessful()
             ->assertActionVisible('emitMdfeDirect')
-            ->assertActionHidden('emitMdfe')
+            ->assertActionDoesNotExist('emitMdfe')
             ->mountAction('emitMdfeDirect')
             ->assertFormFieldExists('ciot_id', 'mountedActionForm')
             ->assertFormFieldDoesNotExist('route_ufs', 'mountedActionForm')
@@ -205,7 +204,6 @@ class CteEmissionBatchResourceTest extends TestCase
     public function test_the_direct_mdfe_action_prefills_the_configured_endorsement(): void
     {
         config([
-            'dfe.mdfe.emitter' => 'direct',
             'dfe.mdfe.default_endorsement' => 'AVERBACAO-PADRAO',
         ]);
         $batch = CteEmissionBatch::factory()->create([
@@ -226,7 +224,6 @@ class CteEmissionBatchResourceTest extends TestCase
 
     public function test_the_direct_mdfe_action_explains_when_batch_ctes_are_not_eligible(): void
     {
-        config(['dfe.mdfe.emitter' => 'direct']);
         $batch = CteEmissionBatch::factory()->create([
             'status' => CteEmissionBatchStatusEnum::COMPLETED,
         ]);
@@ -245,7 +242,6 @@ class CteEmissionBatchResourceTest extends TestCase
 
     public function test_the_direct_mdfe_action_stays_visible_but_disabled_when_a_batch_cte_failed(): void
     {
-        config(['dfe.mdfe.emitter' => 'direct']);
         $batch = CteEmissionBatch::factory()->create([
             'status' => CteEmissionBatchStatusEnum::COMPLETED_WITH_ERRORS,
         ]);
@@ -270,7 +266,6 @@ class CteEmissionBatchResourceTest extends TestCase
 
     public function test_the_direct_mdfe_action_prefills_a_unique_tank_driver_and_latest_batch_ciot(): void
     {
-        config(['dfe.mdfe.emitter' => 'direct']);
         $batch = CteEmissionBatch::factory()->create([
             'status' => CteEmissionBatchStatusEnum::COMPLETED,
         ]);
@@ -315,55 +310,6 @@ class CteEmissionBatchResourceTest extends TestCase
             ->assertSee('539 · Rejeição: placa do veículo incompatível.');
     }
 
-    public function test_the_requeue_mdfe_action_covers_a_document_stuck_with_an_expired_lease(): void
-    {
-        $batch = CteEmissionBatch::factory()->create([
-            'status' => CteEmissionBatchStatusEnum::COMPLETED,
-        ]);
-
-        MdfeDocument::factory()->create([
-            'cte_emission_batch_id' => $batch->id,
-            'status' => CteDocumentStatusEnum::AUTHORIZING,
-            'claim_expires_at' => now()->subMinutes(5),
-        ]);
-
-        Livewire::test(ViewCteEmissionBatch::class, ['record' => $batch->id])
-            ->assertSuccessful()
-            ->assertActionVisible('requeueMdfe')
-            ->callAction('requeueMdfe');
-
-        $mdfe = MdfeDocument::query()->where('cte_emission_batch_id', $batch->id)->firstOrFail();
-
-        $this->assertSame('queued', $mdfe->status->value);
-        $this->assertNull($mdfe->claim_expires_at);
-    }
-
-    public function test_the_requeue_mdfe_action_clears_a_previously_recorded_result(): void
-    {
-        $batch = CteEmissionBatch::factory()->create([
-            'status' => CteEmissionBatchStatusEnum::COMPLETED,
-        ]);
-
-        MdfeDocument::factory()->create([
-            'cte_emission_batch_id' => $batch->id,
-            'status' => CteDocumentStatusEnum::REJECTED,
-            'result_payload_hash' => hash('sha256', 'resultado-anterior'),
-            'fiscal_status_code' => '203',
-            'fiscal_status_message' => 'Rejeição antiga',
-        ]);
-
-        Livewire::test(ViewCteEmissionBatch::class, ['record' => $batch->id])
-            ->assertActionVisible('requeueMdfe')
-            ->callAction('requeueMdfe');
-
-        $mdfe = MdfeDocument::query()->where('cte_emission_batch_id', $batch->id)->firstOrFail();
-
-        $this->assertSame('queued', $mdfe->status->value);
-        $this->assertNull($mdfe->result_payload_hash);
-        $this->assertNull($mdfe->fiscal_status_code);
-        $this->assertNull($mdfe->fiscal_status_message);
-    }
-
     public function test_the_reconcile_mdfe_action_closes_a_reconciliation_with_the_access_key(): void
     {
         $batch = CteEmissionBatch::factory()->create([
@@ -388,6 +334,23 @@ class CteEmissionBatchResourceTest extends TestCase
         $this->assertSame('000000123', $mdfe->mdfe_number);
         $this->assertSame('001', $mdfe->series);
         $this->assertSame('135260000123456', $mdfe->protocol);
+    }
+
+    public function test_the_reconcile_mdfe_action_is_hidden_for_legacy_documents(): void
+    {
+        $batch = CteEmissionBatch::factory()->create([
+            'status' => CteEmissionBatchStatusEnum::COMPLETED,
+        ]);
+
+        MdfeDocument::factory()->create([
+            'cte_emission_batch_id' => $batch->id,
+            'emitter' => 'agent',
+            'status' => CteDocumentStatusEnum::RECONCILIATION_REQUIRED,
+        ]);
+
+        Livewire::test(ViewCteEmissionBatch::class, ['record' => $batch->id])
+            ->assertSuccessful()
+            ->assertActionHidden('reconcileMdfe');
     }
 
     public function test_generate_ciot_action_creates_and_emits_a_linked_ciot(): void
@@ -1025,35 +988,21 @@ class CteEmissionBatchResourceTest extends TestCase
         $this->assertSame(CteEmissionBatchStatusEnum::PROCESSING, $batch->refresh()->status);
     }
 
-    public function test_a_document_stuck_in_filling_can_be_retried_from_the_documents_table(): void
+    public function test_legacy_documents_cannot_be_retried_or_reconciled_from_the_documents_table(): void
     {
-        $batch = CteEmissionBatch::factory()->create([
-            'status' => CteEmissionBatchStatusEnum::COMPLETED_WITH_ERRORS,
-        ]);
-        $stuck = CteDocument::factory()->create([
+        $batch = CteEmissionBatch::factory()->create();
+        $legacy = CteDocument::factory()->create([
             'cte_emission_batch_id' => $batch->id,
-            'status' => CteDocumentStatusEnum::FILLING,
-            'claimed_at' => now(),
-            'claim_expires_at' => now()->addMinutes(10),
-        ]);
-        $authorized = CteDocument::factory()->create([
-            'cte_emission_batch_id' => $batch->id,
-            'status' => CteDocumentStatusEnum::AUTHORIZED,
-            'cte_number' => '2707',
+            'emitter' => 'lab',
+            'status' => CteDocumentStatusEnum::RECONCILIATION_REQUIRED,
         ]);
 
         Livewire::test(DocumentsRelationManager::class, [
             'ownerRecord' => $batch,
             'pageClass' => ViewCteEmissionBatch::class,
         ])
-            ->assertTableActionVisible('retry', $stuck)
-            ->assertTableActionHidden('retry', $authorized)
-            ->callTableAction('retry', $stuck);
-
-        $this->assertSame(CteDocumentStatusEnum::QUEUED, $stuck->refresh()->status);
-        $this->assertNull($stuck->claim_expires_at);
-        $this->assertSame(CteDocumentStatusEnum::AUTHORIZED, $authorized->refresh()->status);
-        $this->assertSame(CteEmissionBatchStatusEnum::PROCESSING, $batch->refresh()->status);
+            ->assertTableActionHidden('retry', $legacy)
+            ->assertTableActionHidden('reconcile', $legacy);
     }
 
     public function test_the_register_action_links_to_the_complete_register(): void

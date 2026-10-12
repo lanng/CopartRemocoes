@@ -5,7 +5,6 @@ namespace Tests\Feature\Services;
 use App\Enums\CteDocumentStatusEnum;
 use App\Enums\CteEmissionBatchStatusEnum;
 use App\Jobs\EmitCteDirectJob;
-use App\Models\CteAgent;
 use App\Models\CteDocument;
 use App\Models\CteEmissionBatch;
 use App\Services\Cte\CteDocumentRecoveryService;
@@ -26,7 +25,7 @@ class CteDocumentRecoveryTest extends TestCase
         $document = CteDocument::factory()->create([
             'cte_emission_batch_id' => $batch->id,
             'status' => CteDocumentStatusEnum::FAILED_BEFORE_AUTHORIZATION,
-            'error_code' => 'LAB_FIELD_MISMATCH',
+            'error_code' => 'FIELD_MISMATCH',
         ]);
 
         app(CteDocumentRecoveryService::class)->retry($document);
@@ -46,8 +45,6 @@ class CteDocumentRecoveryTest extends TestCase
             'status' => CteDocumentStatusEnum::FAILED_BEFORE_AUTHORIZATION,
             'error_code' => 'COMError',
             'error_message' => 'Falha temporária',
-            'claimed_at' => now(),
-            'claim_expires_at' => now()->addMinute(),
         ]);
         $authorized = CteDocument::factory()->create([
             'cte_emission_batch_id' => $batch->id,
@@ -64,7 +61,6 @@ class CteDocumentRecoveryTest extends TestCase
 
         $this->assertSame(CteDocumentStatusEnum::QUEUED, $failed->refresh()->status);
         $this->assertNull($failed->error_code);
-        $this->assertNull($failed->claim_expires_at);
         $this->assertSame(CteDocumentStatusEnum::AUTHORIZED, $authorized->refresh()->status);
         $this->assertSame('2707', $authorized->cte_number);
         $this->assertSame(CteDocumentStatusEnum::RECONCILIATION_REQUIRED, $reconciliation->refresh()->status);
@@ -82,7 +78,7 @@ class CteDocumentRecoveryTest extends TestCase
             'number' => '2670',
             'access_key' => '35260812563112000130570010000026701338262343',
             'protocol' => '135263860830097',
-            'reason' => 'XML confirmado manualmente no Lab.',
+            'reason' => 'XML confirmado manualmente.',
         ]);
 
         $this->assertSame(CteDocumentStatusEnum::AUTHORIZED, $document->refresh()->status);
@@ -91,40 +87,11 @@ class CteDocumentRecoveryTest extends TestCase
         $this->assertNotNull($document->authorized_at);
     }
 
-    public function test_a_document_stuck_in_filling_can_be_requeued(): void
-    {
-        $batch = CteEmissionBatch::factory()->create([
-            'status' => CteEmissionBatchStatusEnum::COMPLETED_WITH_ERRORS,
-        ]);
-        $document = CteDocument::factory()->create([
-            'cte_emission_batch_id' => $batch->id,
-            'status' => CteDocumentStatusEnum::FILLING,
-            'claimed_by' => CteAgent::factory(),
-            'claim_token_hash' => hash('sha256', 'token'),
-            'claimed_at' => now(),
-            'claim_expires_at' => now()->addMinutes(10),
-        ]);
-
-        app(CteDocumentRecoveryService::class)->retry($document);
-
-        $this->assertSame(CteDocumentStatusEnum::QUEUED, $document->refresh()->status);
-        $this->assertNull($document->claimed_by);
-        $this->assertNull($document->claim_token_hash);
-        $this->assertNull($document->claimed_at);
-        $this->assertNull($document->claim_expires_at);
-        $this->assertSame(CteEmissionBatchStatusEnum::PROCESSING, $batch->refresh()->status);
-    }
-
     public function test_only_known_safe_statuses_can_be_requeued(): void
     {
         foreach ([
             CteDocumentStatusEnum::DRAFT,
             CteDocumentStatusEnum::QUEUED,
-            CteDocumentStatusEnum::CLAIMED,
-            CteDocumentStatusEnum::FILLING,
-            CteDocumentStatusEnum::VALIDATING,
-            CteDocumentStatusEnum::READY_TO_AUTHORIZE,
-            CteDocumentStatusEnum::WAITING_FOR_XML,
             CteDocumentStatusEnum::DRY_RUN_COMPLETED,
             CteDocumentStatusEnum::REJECTED,
             CteDocumentStatusEnum::FAILED_BEFORE_AUTHORIZATION,
@@ -181,6 +148,7 @@ class CteDocumentRecoveryTest extends TestCase
         ]);
 
         $this->assertFalse(CteDocumentRecoveryService::canBeRequeued($document));
+        $this->assertSame(0, app(CteDocumentRecoveryService::class)->retryMany(collect([$document])));
         $this->expectException(ValidationException::class);
 
         app(CteDocumentRecoveryService::class)->retry($document);
@@ -194,6 +162,34 @@ class CteDocumentRecoveryTest extends TestCase
         ]);
 
         $this->assertFalse(CteDocumentRecoveryService::canBeRequeued($document));
+    }
+
+    public function test_a_legacy_cte_cannot_be_retried_or_reconciled(): void
+    {
+        $document = CteDocument::factory()->create([
+            'emitter' => 'lab',
+            'status' => CteDocumentStatusEnum::FAILED_BEFORE_AUTHORIZATION,
+        ]);
+
+        $this->assertFalse(CteDocumentRecoveryService::canBeRequeued($document));
+        $this->expectException(ValidationException::class);
+        app(CteDocumentRecoveryService::class)->retry($document);
+    }
+
+    public function test_a_legacy_cte_cannot_be_manually_reconciled(): void
+    {
+        $document = CteDocument::factory()->create([
+            'emitter' => 'lab',
+            'status' => CteDocumentStatusEnum::RECONCILIATION_REQUIRED,
+        ]);
+
+        $this->expectException(ValidationException::class);
+        app(CteDocumentRecoveryService::class)->reconcile($document, [
+            'number' => '2670',
+            'access_key' => '35260812563112000130570010000026701338262343',
+            'protocol' => '135263860830097',
+            'reason' => 'Registro histórico do emissor antigo.',
+        ]);
     }
 
     public function test_an_authorized_document_cannot_be_retried(): void

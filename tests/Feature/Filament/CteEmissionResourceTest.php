@@ -42,13 +42,15 @@ class CteEmissionResourceTest extends TestCase
         Storage::fake('dfe');
     }
 
-    public function test_lists_emissions_from_both_emitters(): void
+    public function test_lists_internal_and_legacy_emissions_with_clear_labels(): void
     {
         $direct = CteDocument::factory()->authorized()->create(['emitter' => 'direct']);
         $lab = CteDocument::factory()->authorized()->create(['emitter' => 'lab']);
 
         Livewire::test(ListCteEmissions::class)
-            ->assertCanSeeTableRecords([$direct, $lab]);
+            ->assertCanSeeTableRecords([$direct, $lab])
+            ->assertSee('Sistema')
+            ->assertSee('Emissor antigo');
     }
 
     public function test_empty_emission_list_still_offers_to_create_a_cte(): void

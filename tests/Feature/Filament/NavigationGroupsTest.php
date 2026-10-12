@@ -2,7 +2,6 @@
 
 namespace Tests\Feature\Filament;
 
-use App\Filament\Pages\CteAgentSettings;
 use App\Filament\Pages\MicrosoftGraphSettings;
 use App\Filament\Resources\ActivityLogResource;
 use App\Filament\Resources\CiotResource;
@@ -24,14 +23,12 @@ class NavigationGroupsTest extends TestCase
         $this->assertSame('Emissões', MdfeDocumentResource::getNavigationGroup());
         $this->assertSame('Emissões', CteEmissionResource::getNavigationGroup());
         $this->assertSame('Emissões', CteEmissionBatchResource::getNavigationGroup());
-        $this->assertSame('Emissões', CteAgentSettings::getNavigationGroup());
         $this->assertSame('CT-e', CteEmissionResource::getNavigationLabel());
     }
 
     public function test_emissions_items_follow_the_requested_order(): void
     {
         $items = collect([
-            [CteAgentSettings::getNavigationSort(), CteAgentSettings::getNavigationLabel()],
             [CteEmissionBatchResource::getNavigationSort(), CteEmissionBatchResource::getNavigationLabel()],
             [CteEmissionResource::getNavigationSort(), CteEmissionResource::getNavigationLabel()],
             [MdfeDocumentResource::getNavigationSort(), MdfeDocumentResource::getNavigationLabel()],
@@ -42,7 +39,7 @@ class NavigationGroupsTest extends TestCase
             ->values()
             ->all();
 
-        $this->assertSame(['Agente CT-e', 'Lotes de CT-e', 'CT-e', 'Manifestos', 'CIOTs'], $items);
+        $this->assertSame(['Lotes de CT-e', 'CT-e', 'Manifestos', 'CIOTs'], $items);
     }
 
     public function test_fleet_and_register_resources_use_the_cadastro_group(): void

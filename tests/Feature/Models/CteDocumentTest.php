@@ -90,6 +90,9 @@ class CteDocumentTest extends TestCase
         $legacyDirectDocument = CteDocument::factory()->authorized()->create([
             'emitter' => 'direct',
         ]);
+        $legacyLabDocument = CteDocument::factory()->authorized()->create([
+            'emitter' => 'lab',
+        ]);
         $controlledDocument = CteDocument::factory()->authorized()->create([
             'emitter' => 'direct',
             'workflow_origin' => FiscalDocumentWorkflowOriginEnum::ControlledV1,
@@ -100,6 +103,7 @@ class CteDocumentTest extends TestCase
             CteDocument::query()->eligibleForNewMdfe()->orderBy('id')->pluck('id')->all(),
         );
         $this->assertFalse($legacyDirectDocument->isEligibleForNewMdfe());
+        $this->assertFalse($legacyLabDocument->isEligibleForNewMdfe());
         $this->assertTrue($controlledDocument->isEligibleForNewMdfe());
     }
 

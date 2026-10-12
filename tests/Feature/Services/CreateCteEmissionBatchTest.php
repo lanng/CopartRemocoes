@@ -34,10 +34,8 @@ class CreateCteEmissionBatchTest extends TestCase
         $this->assertSame('T691299', $batch->documents->first()->snapshot['payment_code']);
     }
 
-    public function test_it_marks_ctes_created_by_the_direct_emitter_as_controlled_workflow_documents(): void
+    public function test_it_creates_ctes_for_the_internal_emitter_as_controlled_workflow_documents(): void
     {
-        config(['cte.emitter' => 'direct']);
-
         $batch = app(CreateCteEmissionBatch::class)->handle(
             Register::factory()->count(1)->create(),
             User::factory()->create(),
@@ -45,20 +43,6 @@ class CreateCteEmissionBatchTest extends TestCase
         );
 
         $this->assertSame('controlled_v1', $batch->documents->first()->getRawOriginal('workflow_origin'));
-    }
-
-    public function test_it_leaves_lab_emissions_unclassified_for_new_mdfe_selection(): void
-    {
-        config(['cte.emitter' => 'lab']);
-
-        $batch = app(CreateCteEmissionBatch::class)->handle(
-            Register::factory()->count(1)->create(),
-            User::factory()->create(),
-            'live',
-        );
-
-        $this->assertSame('lab', $batch->documents->first()->emitter);
-        $this->assertNull($batch->documents->first()->getRawOriginal('workflow_origin'));
     }
 
     public function test_it_rejects_a_register_that_already_has_an_authorized_cte(): void
@@ -76,6 +60,8 @@ class CreateCteEmissionBatchTest extends TestCase
             'snapshot' => [],
             'idempotency_key' => fake()->uuid(),
             'execution_mode' => 'live',
+            'emitter' => 'lab',
+            'workflow_origin' => null,
         ]);
 
         $this->expectException(ValidationException::class);

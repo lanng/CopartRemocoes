@@ -81,4 +81,17 @@ class ReconcileMdfeDocumentTest extends TestCase
 
         app(ReconcileMdfeDocument::class)->handle($mdfe, self::ACCESS_KEY);
     }
+
+    public function test_rejects_reconciliation_of_a_legacy_mdfe(): void
+    {
+        $mdfe = MdfeDocument::factory()->create([
+            'emitter' => 'agent',
+            'status' => CteDocumentStatusEnum::RECONCILIATION_REQUIRED,
+        ]);
+
+        $this->expectException(DomainException::class);
+        $this->expectExceptionMessage('emissor antigo');
+
+        app(ReconcileMdfeDocument::class)->handle($mdfe, self::ACCESS_KEY);
+    }
 }
