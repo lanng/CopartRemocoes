@@ -160,17 +160,27 @@ class CteDocumentRecoveryService
             ]);
         }
 
-        if ($document->status !== CteDocumentStatusEnum::RECONCILIATION_REQUIRED) {
-            throw ValidationException::withMessages([
-                'document' => 'Somente documentos em conciliacao podem ser regularizados.',
-            ]);
-        }
-
         if (! preg_match('/^\d{44}$/', $data['access_key'])) {
             throw ValidationException::withMessages(['access_key' => 'A chave deve conter 44 digitos.']);
         }
 
         return DB::transaction(function () use ($document, $data): CteDocument {
+            $document = CteDocument::query()->lockForUpdate()->findOrFail($document->id);
+
+            if ($document->emitter !== 'direct') {
+                throw ValidationException::withMessages([
+                    'document' => 'Documentos do emissor antigo estão disponíveis somente para consulta.',
+                ]);
+            }
+
+            if ($document->status !== CteDocumentStatusEnum::RECONCILIATION_REQUIRED) {
+                throw ValidationException::withMessages([
+                    'document' => 'Somente documentos em conciliacao podem ser regularizados.',
+                ]);
+            }
+
+            $firstFiscalAuthorization = $document->fiscal_status !== FiscalDocumentStatusEnum::AUTHORIZED;
+
             $document->forceFill([
                 'status' => CteDocumentStatusEnum::AUTHORIZED,
                 'fiscal_status' => FiscalDocumentStatusEnum::AUTHORIZED,
@@ -182,6 +192,10 @@ class CteDocumentRecoveryService
                 'authorized_at' => now(),
                 'result_payload_hash' => hash('sha256', Str::uuid()->toString()),
             ])->save();
+
+            if ($firstFiscalAuthorization) {
+                app(MarkRegisterInvoicedForCte::class)->handle($document);
+            }
 
             return $document->refresh();
         });
