@@ -20,8 +20,7 @@ class MdfeDocument extends Model
 
     protected $fillable = [
         'public_id', 'cte_emission_batch_id', 'ciot_id', 'status', 'fiscal_status', 'workflow_origin', 'snapshot', 'idempotency_key',
-        'execution_mode', 'emitter', 'claimed_by', 'claim_token_hash', 'claimed_at',
-        'claim_expires_at', 'authorization_started_at', 'issued_at', 'authorized_at',
+        'execution_mode', 'emitter', 'authorization_started_at', 'issued_at', 'authorized_at',
         'mdfe_number', 'access_key', 'series', 'protocol', 'fiscal_status_code',
         'fiscal_status_message', 'error_stage', 'error_code', 'error_message',
         'result_payload_hash', 'payload_xml', 'response_xml', 'digest_value', 'xml_path', 'pdf_path', 'sha256',
@@ -34,8 +33,6 @@ class MdfeDocument extends Model
             'fiscal_status' => FiscalDocumentStatusEnum::class,
             'workflow_origin' => FiscalDocumentWorkflowOriginEnum::class,
             'snapshot' => 'array',
-            'claimed_at' => 'datetime',
-            'claim_expires_at' => 'datetime',
             'authorization_started_at' => 'datetime',
             'issued_at' => 'datetime',
             'authorized_at' => 'datetime',
@@ -45,11 +42,6 @@ class MdfeDocument extends Model
     public function batch(): BelongsTo
     {
         return $this->belongsTo(CteEmissionBatch::class, 'cte_emission_batch_id');
-    }
-
-    public function agent(): BelongsTo
-    {
-        return $this->belongsTo(CteAgent::class, 'claimed_by');
     }
 
     public function events(): HasMany

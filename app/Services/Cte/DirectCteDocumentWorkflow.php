@@ -7,8 +7,8 @@ use App\Models\CteDocument;
 use DomainException;
 
 /**
- * Coreografia do emissor direto (spec §1.2): sem os estágios de digitação do
- * Lab — queued → authorizing → authorized|rejected. Falhas locais sem artifacts
+ * Coreografia do emissor direto: draft → queued → authorizing → authorized|rejected.
+ * Falhas locais sem artifacts
  * vão para failed_before_authorization; resultado de transmissão incerto ou
  * divergência de digVal exige reconciliation_required.
  */
@@ -18,6 +18,7 @@ class DirectCteDocumentWorkflow
      * @var array<string, list<CteDocumentStatusEnum>>
      */
     private const TRANSITIONS = [
+        'draft' => [CteDocumentStatusEnum::QUEUED],
         'queued' => [
             CteDocumentStatusEnum::AUTHORIZING,
             CteDocumentStatusEnum::DRY_RUN_COMPLETED,

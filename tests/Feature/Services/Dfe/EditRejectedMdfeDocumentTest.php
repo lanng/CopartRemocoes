@@ -223,7 +223,6 @@ class EditRejectedMdfeDocumentTest extends TestCase
             'ciot.company.rntrc' => '45963122',
             'ciot.lines.vehicle_removal.bank_code' => '756',
             'ciot.lines.vehicle_removal.bank_agency' => '0001',
-            'dfe.mdfe.emitter' => 'agent',
         ]);
         $source = $this->rejected(withBatch: true);
         $oldCiot = $source->ciot;

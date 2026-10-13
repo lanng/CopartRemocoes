@@ -15,9 +15,8 @@ use Illuminate\Support\Facades\Log;
 use Throwable;
 
 /**
- * Resultado da transmissão direta (spec dfe §4.3) — irmão do
- * RecordCteAgentResult, sem as evidências do Lab (placa/payment_code/filename),
- * mas com o cross-check do digVal: a SEFAZ ecoa o DigestValue que assinamos —
+ * Resultado da transmissão direta (spec dfe §4.3), com o cross-check do digVal:
+ * a SEFAZ ecoa o DigestValue que assinamos —
  * divergência é gravíssima e marca reconciliation_required (spec §1.3).
  */
 class RecordDirectCteResult

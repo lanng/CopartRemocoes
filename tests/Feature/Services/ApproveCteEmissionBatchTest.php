@@ -26,7 +26,7 @@ class ApproveCteEmissionBatchTest extends TestCase
     {
         parent::setUp();
 
-        config(['cte.emitter' => 'lab']);
+        Queue::fake();
         City::factory()->create(['ibge_code' => '3534708', 'name' => 'Ourinhos', 'state' => 'SP']);
         City::factory()->create(['ibge_code' => '3539103', 'name' => 'Pirapora do Bom Jesus', 'state' => 'SP']);
         Company::factory()->create(['name' => 'ALLIANZ SEGUROS SA', 'ibge_code' => '3550308']);
@@ -62,6 +62,28 @@ class ApproveCteEmissionBatchTest extends TestCase
         $this->expectException(ValidationException::class);
 
         app(ApproveCteEmissionBatch::class)->handle($batch, $user);
+    }
+
+    public function test_approval_rejects_a_legacy_batch(): void
+    {
+        $user = User::factory()->create();
+        $batch = app(CreateCteEmissionBatch::class)->handle(
+            Register::factory()->count(1)->create(),
+            $user,
+            'live',
+        );
+        $document = $batch->documents->firstOrFail();
+        $document->forceFill(['emitter' => 'lab', 'workflow_origin' => null])->save();
+
+        try {
+            app(ApproveCteEmissionBatch::class)->handle($batch, $user);
+            $this->fail('Legacy batches must remain read-only.');
+        } catch (ValidationException $exception) {
+            $this->assertArrayHasKey('batch', $exception->errors());
+        }
+
+        $this->assertSame(CteEmissionBatchStatusEnum::DRAFT, $batch->refresh()->status);
+        $this->assertSame(CteDocumentStatusEnum::DRAFT, $document->refresh()->status);
     }
 
     public function test_approval_preserves_the_fiscal_status_of_the_previous_cte_of_a_reemission(): void
@@ -113,15 +135,14 @@ class ApproveCteEmissionBatchTest extends TestCase
 
         $approved = app(ApproveCteEmissionBatch::class)->handle($batch, $user);
 
-        $this->assertSame(CteEmissionBatchStatusEnum::APPROVED, $approved->status);
+        $this->assertSame(CteEmissionBatchStatusEnum::COMPLETED, $approved->status);
         $this->assertSame(CteDocumentStatusEnum::CANCELLED, $oldDocument->refresh()->status);
-        $this->assertSame(CteDocumentStatusEnum::QUEUED, $batch->documents->first()->refresh()->status);
+        $this->assertSame(CteDocumentStatusEnum::DRY_RUN_COMPLETED, $batch->documents->first()->refresh()->status);
     }
 
-    public function test_direct_emitter_dispatches_one_job_per_live_document(): void
+    public function test_approval_dispatches_one_internal_emission_job_per_live_document(): void
     {
         Queue::fake();
-        config(['cte.emitter' => 'direct']);
 
         $user = User::factory()->create();
         $batch = app(CreateCteEmissionBatch::class)->handle(
@@ -140,10 +161,9 @@ class ApproveCteEmissionBatchTest extends TestCase
         ));
     }
 
-    public function test_direct_emitter_completes_dry_run_documents_without_transmitting(): void
+    public function test_approval_completes_dry_run_documents_without_transmitting(): void
     {
         Queue::fake();
-        config(['cte.emitter' => 'direct']);
 
         $user = User::factory()->create();
         $batch = app(CreateCteEmissionBatch::class)->handle(

@@ -6,6 +6,8 @@ use App\Enums\CiotEmissionOutcome;
 use App\Enums\CiotStatusEnum;
 use App\Jobs\EmitCiotJob;
 use App\Models\Ciot;
+use App\Models\CteDocument;
+use App\Models\CteEmissionBatch;
 use App\Services\Ciot\AnttCiotException;
 use App\Services\Ciot\EmitCiotDeclaration;
 use Illuminate\Contracts\Debug\ExceptionHandler;
@@ -51,6 +53,24 @@ class EmitCiotOutcomeTest extends TestCase
         $this->assertSame(CiotStatusEnum::ISSUED, $result->ciot->status);
         $this->assertNull($result->message);
 
+        Queue::assertNothingPushed();
+    }
+
+    public function test_issuing_a_ciot_does_not_automatically_create_an_mdfe(): void
+    {
+        Queue::fake();
+        $this->fakeAnttAcceptingTheDeclaration();
+
+        $batch = CteEmissionBatch::factory()->create();
+        CteDocument::factory()->authorized()->create([
+            'cte_emission_batch_id' => $batch->id,
+            'workflow_origin' => 'controlled_v1',
+        ]);
+        $ciot = Ciot::factory()->create(['cte_emission_batch_id' => $batch->id]);
+
+        app(EmitCiotDeclaration::class)->emit($ciot);
+
+        $this->assertSame(0, $batch->mdfeDocuments()->count());
         Queue::assertNothingPushed();
     }
 

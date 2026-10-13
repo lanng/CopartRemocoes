@@ -27,6 +27,7 @@ class CteDocumentFactory extends Factory
             'cte_emission_batch_id' => CteEmissionBatch::factory(),
             'register_id' => Register::factory(),
             'status' => CteDocumentStatusEnum::QUEUED,
+            'emitter' => 'direct',
             'snapshot' => [
                 'vehicle_id' => '1146609',
                 'vehicle_plate' => 'ESN4A20',

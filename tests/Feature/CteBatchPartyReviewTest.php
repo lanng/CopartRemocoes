@@ -42,7 +42,6 @@ class CteBatchPartyReviewTest extends TestCase
     {
         parent::setUp();
         Queue::fake();
-        config(['cte.emitter' => 'direct']);
         config(['ciot.distance.api_key' => null]);
         Filament::setCurrentPanel(Filament::getPanel('admin'));
         $this->user = User::factory()->create();

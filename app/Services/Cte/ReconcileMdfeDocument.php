@@ -8,9 +8,8 @@ use App\Models\MdfeDocument;
 use DomainException;
 
 /**
- * Conciliação manual de um MDF-e em `reconciliation_required`: o agente
- * emitiu e autorizou no Lab, mas não conseguiu reportar o resultado (ex.:
- * falha lendo o XML de saída). O operador informa a chave de acesso; número
+ * Conciliação manual de um MDF-e do emissor atual em `reconciliation_required`.
+ * O operador informa a chave de acesso; número
  * e série são derivados das posições da própria chave (layout do MDF-e:
  * série nas posições 23–25, número nas 26–34).
  */
@@ -18,6 +17,10 @@ class ReconcileMdfeDocument
 {
     public function handle(MdfeDocument $mdfe, string $accessKey, ?string $protocol = null): MdfeDocument
     {
+        if ($mdfe->emitter !== 'direct') {
+            throw new DomainException('Documentos do emissor antigo estão disponíveis somente para consulta.');
+        }
+
         $accessKey = preg_replace('/\D/', '', $accessKey) ?? '';
 
         if (strlen($accessKey) !== 44) {

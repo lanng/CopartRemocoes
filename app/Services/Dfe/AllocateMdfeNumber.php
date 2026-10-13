@@ -56,7 +56,7 @@ class AllocateMdfeNumber
         }
 
         if ((string) config('dfe.tp_amb') === '1') {
-            throw new DomainException('Numeração de MDF-e em produção não semeada; informe DFE_MDFE_NUMBER_START com a sequência real após conferir o último número do Lab.');
+            throw new DomainException('Numeração de MDF-e em produção não semeada; informe DFE_MDFE_NUMBER_START com o próximo número fiscal disponível.');
         }
 
         return 900000001;

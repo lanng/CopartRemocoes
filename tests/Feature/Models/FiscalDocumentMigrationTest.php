@@ -3,6 +3,7 @@
 namespace Tests\Feature\Models;
 
 use App\Models\CteDocument;
+use App\Models\CteEmissionBatch;
 use App\Models\MdfeDocument;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -127,5 +128,118 @@ class FiscalDocumentMigrationTest extends TestCase
 
         $this->assertNull($cte->getRawOriginal('workflow_origin'));
         $this->assertNull($mdfe->getRawOriginal('workflow_origin'));
+    }
+
+    public function test_legacy_emitter_migration_preserves_fiscal_history_and_removes_only_agent_schema(): void
+    {
+        $migration = require database_path('migrations/2026_10_12_005447_remove_legacy_emitter_agent_schema.php');
+        $migration->down();
+
+        $agentId = DB::table('cte_agents')->insertGetId([
+            'singleton_key' => 'host',
+            'name' => 'Emissor legado',
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+        $batch = CteEmissionBatch::factory()->create();
+        $cte = CteDocument::factory()->create([
+            'cte_emission_batch_id' => $batch->id,
+            'emitter' => 'lab',
+            'status' => 'authorized',
+            'workflow_origin' => null,
+            'cte_number' => '123456',
+            'access_key' => '35261012563112000130570010000012341000000000',
+            'protocol' => '135260000123456',
+            'payload_xml' => '<CTe/>',
+            'response_xml' => '<retCTe/>',
+            'authorization_started_at' => now()->subMinute(),
+            'result_payload_hash' => hash('sha256', 'cte-result'),
+        ]);
+        $currentCte = CteDocument::factory()->authorized()->create([
+            'cte_emission_batch_id' => $batch->id,
+            'emitter' => 'direct',
+            'workflow_origin' => 'controlled_v1',
+        ]);
+        $mdfe = MdfeDocument::factory()->create([
+            'cte_emission_batch_id' => $batch->id,
+            'emitter' => 'agent',
+            'status' => 'authorized',
+            'mdfe_number' => '000000123',
+            'access_key' => '35261012563112000130580010000001231000000000',
+            'protocol' => '135260000123457',
+            'snapshot' => ['historical' => 'kept'],
+            'authorization_started_at' => now()->subMinute(),
+            'result_payload_hash' => hash('sha256', 'mdfe-result'),
+        ]);
+        $currentMdfe = MdfeDocument::factory()->create([
+            'cte_emission_batch_id' => $batch->id,
+            'emitter' => 'direct',
+        ]);
+
+        foreach ([$cte, $mdfe] as $document) {
+            DB::table($document->getTable())->where('id', $document->id)->update([
+                'claimed_by' => $agentId,
+                'claim_token_hash' => hash('sha256', 'old-claim'),
+                'claimed_at' => now(),
+                'claim_expires_at' => now()->addMinute(),
+            ]);
+        }
+
+        DB::table('cte_document_mdfe_document')->insert([
+            'cte_document_id' => $cte->id,
+            'mdfe_document_id' => $mdfe->id,
+            'position' => 0,
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        $legacyTokenId = DB::table('personal_access_tokens')->insertGetId([
+            'tokenable_type' => 'App\\Models\\CteAgent',
+            'tokenable_id' => $agentId,
+            'name' => 'legacy',
+            'token' => hash('sha256', 'legacy-token'),
+            'abilities' => '["*"]',
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+        $userTokenId = DB::table('personal_access_tokens')->insertGetId([
+            'tokenable_type' => 'App\\Models\\User',
+            'tokenable_id' => 999,
+            'name' => 'preserved',
+            'token' => hash('sha256', 'preserved-token'),
+            'abilities' => '["*"]',
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        $migration->up();
+
+        $this->assertSame('lab', $cte->fresh()->emitter);
+        $this->assertSame('123456', $cte->fresh()->cte_number);
+        $this->assertSame('35261012563112000130570010000012341000000000', $cte->fresh()->access_key);
+        $this->assertSame('<retCTe/>', $cte->fresh()->response_xml);
+        $this->assertSame(hash('sha256', 'cte-result'), $cte->fresh()->result_payload_hash);
+        $this->assertNotNull($cte->fresh()->authorization_started_at);
+        $this->assertSame('direct', $currentCte->fresh()->emitter);
+        $this->assertSame('agent', $mdfe->fresh()->emitter);
+        $this->assertSame('000000123', $mdfe->fresh()->mdfe_number);
+        $this->assertSame(['historical' => 'kept'], $mdfe->fresh()->snapshot);
+        $this->assertSame(hash('sha256', 'mdfe-result'), $mdfe->fresh()->result_payload_hash);
+        $this->assertNotNull($mdfe->fresh()->authorization_started_at);
+        $this->assertSame('direct', $currentMdfe->fresh()->emitter);
+        $this->assertSame(1, DB::table('cte_document_mdfe_document')->where('cte_document_id', $cte->id)->count());
+        $this->assertFalse(Schema::hasTable('cte_agents'));
+
+        foreach (['cte_documents', 'mdfe_documents'] as $tableName) {
+            foreach (['claimed_by', 'claim_token_hash', 'claimed_at', 'claim_expires_at'] as $column) {
+                $this->assertFalse(Schema::hasColumn($tableName, $column));
+            }
+
+            $emitter = collect(Schema::getColumns($tableName))->firstWhere('name', 'emitter');
+            $this->assertSame('direct', trim((string) $emitter['default'], "'\""));
+        }
+
+        $this->assertDatabaseMissing('personal_access_tokens', ['id' => $legacyTokenId]);
+        $this->assertDatabaseHas('personal_access_tokens', ['id' => $userTokenId]);
     }
 }

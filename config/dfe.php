@@ -74,11 +74,8 @@ return [
         'default_weight_kg' => env('DFE_CTE_DEFAULT_WEIGHT_KG', '2000.0000'),
     ],
 
-    // Nomes abreviados/alternativos que chegam dos registros (extração de PDF)
-    // → nome canônico na base IBGE local (cities). Chaves já normalizadas
-    // (maiúsculas, sem acento). A resolução é case/acento-insensível; aqui
-    // ficam só as diferenças reais de nome (portado do CITY_CONFIG do script
-    // Python de emissão; teclas do Lab ignoradas).
+    // Nomes abreviados/alternativos dos registros mapeados para a base IBGE local.
+    // As chaves estão normalizadas em maiúsculas e sem acentos.
     'city_aliases' => [
         'PIRAPORA' => 'Pirapora do Bom Jesus',
         'EMBU' => 'Embu das Artes',
@@ -89,7 +86,6 @@ return [
     'numbering_start' => env('DFE_CTE_NUMBER_START'),
 
     'mdfe' => [
-        'emitter' => env('DFE_MDFE_EMITTER', 'agent'),
         'version' => env('DFE_MDFE_VERSION', '3.00'),
         'series' => (int) env('DFE_MDFE_SERIE', 1),
         'tp_emit' => env('DFE_MDFE_TP_EMIT', '1'),

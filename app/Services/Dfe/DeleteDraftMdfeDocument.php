@@ -55,8 +55,7 @@ class DeleteDraftMdfeDocument
             'authorization_started_at', 'issued_at', 'authorized_at', 'mdfe_number', 'access_key',
             'protocol', 'fiscal_status_code', 'fiscal_status_message', 'payload_xml', 'response_xml',
             'digest_value', 'xml_path', 'pdf_path', 'sha256', 'error_stage', 'error_code',
-            'error_message', 'result_payload_hash', 'claimed_by', 'claim_token_hash', 'claimed_at',
-            'claim_expires_at',
+            'error_message', 'result_payload_hash',
         ] as $attribute) {
             if (filled($document->{$attribute})) {
                 return false;

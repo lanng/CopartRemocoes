@@ -23,12 +23,7 @@ class CteBatchStatusUpdater
         $activeStatuses = [
             CteDocumentStatusEnum::DRAFT,
             CteDocumentStatusEnum::QUEUED,
-            CteDocumentStatusEnum::CLAIMED,
-            CteDocumentStatusEnum::FILLING,
-            CteDocumentStatusEnum::VALIDATING,
-            CteDocumentStatusEnum::READY_TO_AUTHORIZE,
             CteDocumentStatusEnum::AUTHORIZING,
-            CteDocumentStatusEnum::WAITING_FOR_XML,
         ];
 
         if ($statuses->contains(fn (CteDocumentStatusEnum $status): bool => in_array($status, $activeStatuses, true))) {
@@ -54,10 +49,6 @@ class CteBatchStatusUpdater
             'status' => $hasErrors ? CteEmissionBatchStatusEnum::COMPLETED_WITH_ERRORS : CteEmissionBatchStatusEnum::COMPLETED,
             'completed_at' => now(),
         ])->save();
-
-        if ((string) config('dfe.mdfe.emitter', 'agent') === 'agent') {
-            app(\App\Services\Ciot\DispatchMdfeForBatch::class)->handle($batch->refresh());
-        }
 
         return $batch->refresh();
     }

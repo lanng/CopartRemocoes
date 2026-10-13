@@ -62,7 +62,6 @@ trait BuildsCteWorld
 
     protected function liveDirectDocument(): CteDocument
     {
-        config(['cte.emitter' => 'direct']);
 
         Queue::fake();
 

@@ -19,8 +19,8 @@ class CteDocument extends Model
 
     protected $fillable = [
         'public_id', 'cte_emission_batch_id', 'register_id', 'replaced_document_id',
-        'replacement_reason', 'status', 'fiscal_status', 'workflow_origin', 'snapshot', 'idempotency_key', 'execution_mode', 'emitter', 'claimed_by',
-        'claim_token_hash', 'claimed_at', 'claim_expires_at', 'authorization_started_at',
+        'replacement_reason', 'status', 'fiscal_status', 'workflow_origin', 'snapshot', 'idempotency_key', 'execution_mode', 'emitter',
+        'authorization_started_at',
         'issued_at', 'authorized_at', 'cte_number', 'access_key', 'series', 'protocol',
         'fiscal_status_code', 'fiscal_status_message', 'payload_xml', 'response_xml',
         'digest_value', 'xml_path', 'pdf_path', 'sha256', 'error_stage', 'error_code',
@@ -34,8 +34,6 @@ class CteDocument extends Model
             'fiscal_status' => FiscalDocumentStatusEnum::class,
             'workflow_origin' => FiscalDocumentWorkflowOriginEnum::class,
             'snapshot' => 'array',
-            'claimed_at' => 'datetime',
-            'claim_expires_at' => 'datetime',
             'authorization_started_at' => 'datetime',
             'issued_at' => 'datetime',
             'authorized_at' => 'datetime',
@@ -62,11 +60,6 @@ class CteDocument extends Model
         return $this->hasMany(self::class, 'replaced_document_id');
     }
 
-    public function agent(): BelongsTo
-    {
-        return $this->belongsTo(CteAgent::class, 'claimed_by');
-    }
-
     public function mdfeDocuments(): BelongsToMany
     {
         return $this->belongsToMany(MdfeDocument::class, 'cte_document_mdfe_document')
@@ -87,12 +80,15 @@ class CteDocument extends Model
     /** @param  Builder<CteDocument>  $query */
     public function scopeEligibleForNewMdfe(Builder $query): Builder
     {
-        return $query->where('workflow_origin', FiscalDocumentWorkflowOriginEnum::ControlledV1->value);
+        return $query
+            ->where('emitter', 'direct')
+            ->where('workflow_origin', FiscalDocumentWorkflowOriginEnum::ControlledV1->value);
     }
 
     public function isEligibleForNewMdfe(): bool
     {
-        return $this->workflow_origin === FiscalDocumentWorkflowOriginEnum::ControlledV1;
+        return $this->emitter === 'direct'
+            && $this->workflow_origin === FiscalDocumentWorkflowOriginEnum::ControlledV1;
     }
 
     public function isCancellationAvailable(): bool

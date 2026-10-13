@@ -14,6 +14,7 @@ use App\Models\MdfeDocument;
 use App\Models\User;
 use App\Services\Cte\CreateAlcoholCteDocument;
 use App\Services\Cte\QueueCteDocumentEmission;
+use App\Services\Dfe\DfeDocumentStore;
 use DomainException;
 use Filament\Facades\Filament;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -42,13 +43,15 @@ class CteEmissionResourceTest extends TestCase
         Storage::fake('dfe');
     }
 
-    public function test_lists_emissions_from_both_emitters(): void
+    public function test_lists_internal_and_legacy_emissions_with_clear_labels(): void
     {
         $direct = CteDocument::factory()->authorized()->create(['emitter' => 'direct']);
         $lab = CteDocument::factory()->authorized()->create(['emitter' => 'lab']);
 
         Livewire::test(ListCteEmissions::class)
-            ->assertCanSeeTableRecords([$direct, $lab]);
+            ->assertCanSeeTableRecords([$direct, $lab])
+            ->assertSee('Sistema')
+            ->assertSee('Emissor antigo');
     }
 
     public function test_empty_emission_list_still_offers_to_create_a_cte(): void
@@ -58,7 +61,7 @@ class CteEmissionResourceTest extends TestCase
             ->assertSee('Novo CT-e de álcool');
     }
 
-    public function test_download_actions_only_appear_when_the_file_exists(): void
+    public function test_download_actions_appear_when_file_paths_are_present(): void
     {
         $withoutFiles = CteDocument::factory()->authorized()->create(['emitter' => 'direct']);
 
@@ -82,17 +85,47 @@ class CteEmissionResourceTest extends TestCase
             ->assertTableActionVisible('downloadPdf', $withFiles);
     }
 
-    public function test_legacy_host_paths_do_not_advertise_unavailable_downloads(): void
+    public function test_listing_actions_are_shown_for_non_empty_paths_without_checking_storage(): void
     {
-        $legacy = CteDocument::factory()->authorized()->create([
+        $documents = CteDocument::factory()->count(2)->authorized()->create([
             'xml_path' => 'C:\\old-host\\fiscal\\cte-proc.xml',
             'pdf_path' => '/var/lib/legacy/dacte.pdf',
         ]);
 
+        $store = \Mockery::mock(DfeDocumentStore::class);
+        $store->shouldNotReceive('exists');
+        $this->app->instance(DfeDocumentStore::class, $store);
+
         Livewire::test(ListCteEmissions::class)
-            ->assertTableActionHidden('downloadXml', $legacy)
-            ->assertTableActionHidden('downloadPdf', $legacy)
-            ->assertTableActionHidden('regenerateDacte', $legacy);
+            ->assertCanSeeTableRecords($documents)
+            ->assertTableActionVisible('downloadXml', $documents[0])
+            ->assertTableActionVisible('downloadPdf', $documents[0])
+            ->assertTableActionVisible('regenerateDacte', $documents[0]);
+    }
+
+    public function test_listing_hides_download_actions_when_paths_are_empty(): void
+    {
+        $document = CteDocument::factory()->authorized()->create([
+            'xml_path' => null,
+            'pdf_path' => null,
+        ]);
+
+        Livewire::test(ListCteEmissions::class)
+            ->assertTableActionHidden('downloadXml', $document)
+            ->assertTableActionHidden('downloadPdf', $document)
+            ->assertTableActionHidden('regenerateDacte', $document);
+    }
+
+    public function test_missing_file_download_click_still_notifies_user(): void
+    {
+        $document = CteDocument::factory()->authorized()->create([
+            'xml_path' => 'C:\\old-host\\fiscal\\cte-proc.xml',
+            'pdf_path' => null,
+        ]);
+
+        Livewire::test(ListCteEmissions::class)
+            ->callTableAction('downloadXml', $document)
+            ->assertNotified('Arquivo fiscal indisponível');
     }
 
     public function test_download_xml_action_returns_the_archived_file(): void
