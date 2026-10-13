@@ -3,6 +3,7 @@
 namespace Tests\Feature\Services\Cte;
 
 use App\Enums\CteDocumentStatusEnum;
+use App\Enums\RegisterStatusEnum;
 use App\Jobs\EmitCteDirectJob;
 use App\Services\Cte\CreateAlcoholCteDocument;
 use App\Services\Cte\EmitCteDocument;
@@ -47,6 +48,13 @@ class EmitCteDocumentTest extends TestCase
         $this->seedCteWorld();
     }
 
+    public function test_approving_a_batch_does_not_change_the_register_status(): void
+    {
+        $document = $this->liveDirectDocument();
+
+        $this->assertSame(RegisterStatusEnum::PENDING, $document->register->refresh()->status);
+    }
+
     public function test_attempt_authorizes_the_document_and_stores_the_cte_proc(): void
     {
         DfeSoapResponses::fakeOnline($this->baseUrl);
@@ -64,6 +72,7 @@ class EmitCteDocumentTest extends TestCase
         $this->assertSame('135260007132708', $authorized->protocol);
         $this->assertSame(44, strlen((string) $authorized->access_key));
         $this->assertSame('900000001', $authorized->cte_number);
+        $this->assertSame(RegisterStatusEnum::INVOICED, $authorized->register->refresh()->status);
         $this->assertSame('1', $authorized->series);
         $this->assertStringContainsString('<Signature', (string) $authorized->payload_xml);
         $this->assertStringContainsString('<retCTe', (string) $authorized->response_xml);
@@ -85,6 +94,22 @@ class EmitCteDocumentTest extends TestCase
         // Lote com um único documento autorizado fecha como completed.
         $this->assertSame('completed', $authorized->batch->refresh()->status->value);
         $this->assertNotNull($authorized->batch->completed_at);
+    }
+
+    public function test_authorizing_an_already_invoiced_register_does_not_save_it_again(): void
+    {
+        DfeSoapResponses::fakeOnline($this->baseUrl);
+        DfeSoapResponses::fakeTransmission($this->baseUrl);
+
+        $document = $this->liveDirectDocument();
+        $register = $document->register;
+        $register->update(['status' => RegisterStatusEnum::INVOICED]);
+        $updatedAt = $register->fresh()->updated_at;
+        $this->travel(5)->seconds();
+
+        app(EmitCteDocument::class)->attempt($document);
+
+        $this->assertSame($updatedAt?->toDateTimeString(), $register->fresh()->updated_at?->toDateTimeString());
     }
 
     #[DataProvider('productionDocumentScopes')]
@@ -156,6 +181,7 @@ class EmitCteDocumentTest extends TestCase
         $this->assertSame(CteDocumentStatusEnum::REJECTED, $rejected->status);
         $this->assertSame('not_authorized', $rejected->fiscal_status->value);
         $this->assertNull($rejected->cte_emission_batch_id);
+        $this->assertNotSame(RegisterStatusEnum::INVOICED, $rejected->register->refresh()->status);
     }
 
     public function test_a_digval_mismatch_marks_reconciliation_required_and_skips_the_store(): void
@@ -164,6 +190,8 @@ class EmitCteDocumentTest extends TestCase
         DfeSoapResponses::fakeTransmission($this->baseUrl, forcedDigVal: base64_encode(str_repeat('x', 20)));
 
         $document = $this->liveDirectDocument();
+        $register = $document->register;
+        $initialRegisterStatus = $register->status;
 
         $document = app(EmitCteDocument::class)->attempt($document)->refresh();
 
@@ -173,6 +201,7 @@ class EmitCteDocumentTest extends TestCase
         $this->assertSame('100', $document->fiscal_status_code);
         $this->assertNotNull($document->payload_xml);
         $this->assertNull($document->xml_path);
+        $this->assertSame($initialRegisterStatus, $register->refresh()->status);
     }
 
     public function test_a_content_rejection_marks_the_document_as_rejected(): void
@@ -317,6 +346,7 @@ class EmitCteDocumentTest extends TestCase
         DfeSoapResponses::fakeTransmission($this->baseUrl);
 
         $document = $this->liveDirectDocument();
+        $register = $document->register;
 
         $job = new EmitCteDirectJob($document->id);
         $job->handle(app(EmitCteDocument::class));
@@ -333,6 +363,11 @@ class EmitCteDocumentTest extends TestCase
         Http::assertNothingSent();
 
         $this->assertSame(CteDocumentStatusEnum::AUTHORIZED, $document->refresh()->status);
+        $register->refresh()->update(['status' => RegisterStatusEnum::AVAILABLE]);
+
+        $job->handle(app(EmitCteDocument::class));
+
+        $this->assertSame(RegisterStatusEnum::AVAILABLE, $register->refresh()->status);
     }
 
     /**
@@ -367,6 +402,9 @@ class EmitCteDocumentTest extends TestCase
         $this->assertNotNull($document->response_xml);
         $this->assertSame('artifact', $document->error_stage);
         $this->assertSame('archive_pending', $document->error_code);
+        $register = $document->register->refresh();
+        $this->assertSame(RegisterStatusEnum::INVOICED, $register->status);
+        $register->update(['status' => RegisterStatusEnum::AVAILABLE]);
 
         // ...mas o número QUEIMOU: a sequência avançou.
         $this->assertDatabaseHas('cte_number_sequences', [
@@ -399,6 +437,7 @@ class EmitCteDocumentTest extends TestCase
         $this->assertSame('900000001', $authorized->cte_number, 'O número queimado é recuperado pela consulta.');
         $this->assertSame('135260007139999', $authorized->protocol);
         $this->assertNotNull($authorized->xml_path, 'O cteProc é gravado agora que o S3 voltou.');
+        $this->assertSame(RegisterStatusEnum::AVAILABLE, $authorized->register->refresh()->status);
 
         Http::assertSentCount(1);
         $this->assertDatabaseHas('cte_number_sequences', [

@@ -58,6 +58,78 @@ class RegisterResourceTest extends TestCase
             ->assertCanNotSeeTableRecords([$unlinkedRegister]);
     }
 
+    public function test_registers_can_be_searched_by_a_list_of_exact_vehicle_plates(): void
+    {
+        $plates = [
+            'ABC1234', 'ABC1D23', 'DEF5678', 'DEF5G78', 'GHI9012', 'GHI9J12',
+            'JKL3456', 'JKL3M56', 'MNO7890', 'MNO7P90', 'PQR1234', 'PQR1S34', 'TUV5678',
+        ];
+        $registers = collect($plates)->map(fn (string $plate): Register => Register::factory()->create([
+            'vehicle_plate' => $plate,
+        ]));
+        $partial = Register::factory()->create(['vehicle_plate' => 'ZZABC1234']);
+        $other = Register::factory()->create(['vehicle_plate' => 'WXY9876']);
+
+        Livewire::test(ListRegisters::class)
+            ->searchTable("abc-1234\nabc1d23, DEF-5678; def5g78 ghi9012\nghi9j12 JKL3456; JKL3M56 MNO7890, MNO7P90 PQR1234\nPQR1S34 TUV5678")
+            ->assertCanSeeTableRecords($registers->all())
+            ->assertCanNotSeeTableRecords([$partial, $other]);
+    }
+
+    public function test_register_plate_list_search_combines_with_table_filters(): void
+    {
+        $matching = Register::factory()->create(['vehicle_plate' => 'ABC1234', 'status' => 'pending']);
+        $filteredOut = Register::factory()->create(['vehicle_plate' => 'ABC1D23', 'status' => 'paid']);
+
+        Livewire::test(ListRegisters::class)
+            ->filterTable('status', 'pending')
+            ->searchTable('ABC1234; ABC1D23')
+            ->assertCanSeeTableRecords([$matching])
+            ->assertCanNotSeeTableRecords([$filteredOut]);
+    }
+
+    public function test_duplicate_plate_tokens_still_use_plate_list_search(): void
+    {
+        $exact = Register::factory()->create(['vehicle_plate' => 'ABC1234']);
+        $partial = Register::factory()->create(['vehicle_plate' => 'ZZABC1234']);
+
+        Livewire::test(ListRegisters::class)
+            ->searchTable('ABC1234, abc-1234')
+            ->assertCanSeeTableRecords([$exact])
+            ->assertCanNotSeeTableRecords([$partial]);
+    }
+
+    public function test_single_plate_search_keeps_existing_partial_search_behavior(): void
+    {
+        $exact = Register::factory()->create(['vehicle_plate' => 'ABC1234']);
+        $partial = Register::factory()->create(['vehicle_plate' => 'ZZABC1234']);
+
+        Livewire::test(ListRegisters::class)
+            ->searchTable('ABC1234')
+            ->assertCanSeeTableRecords([$exact])
+            ->assertCanSeeTableRecords([$partial]);
+    }
+
+    public function test_register_search_keeps_existing_city_and_model_search_behavior(): void
+    {
+        $register = Register::factory()->create([
+            'vehicle_model' => 'Honda Civic',
+            'origin_city' => 'Campinas',
+        ]);
+        $other = Register::factory()->create([
+            'vehicle_model' => 'Toyota Corolla',
+            'origin_city' => 'Santos',
+        ]);
+
+        Livewire::test(ListRegisters::class)
+            ->searchTable('Campinas')
+            ->assertCanSeeTableRecords([$register])
+            ->assertCanNotSeeTableRecords([$other])
+            ->searchTable('Honda')
+            ->assertCanSeeTableRecords([$register])
+            ->assertCanNotSeeTableRecords([$other]);
+    }
+
     public function test_register_view_shows_the_latest_authorized_cte_and_delivery_date(): void
     {
         $register = Register::factory()->create([

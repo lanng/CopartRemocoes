@@ -123,6 +123,8 @@ class RecordDirectCteResult
             throw new DomainException('Resposta autorizada do CT-e sem protocolo.');
         }
 
+        $firstFiscalAuthorization = $document->fiscal_status !== FiscalDocumentStatusEnum::AUTHORIZED;
+
         $document->forceFill([
             'fiscal_status' => FiscalDocumentStatusEnum::AUTHORIZED,
             'issued_at' => $document->issued_at ?? now(),
@@ -140,6 +142,10 @@ class RecordDirectCteResult
             'error_code' => 'archive_pending',
             'error_message' => 'Autorização confirmada; cteProc aguardando armazenamento.',
         ])->save();
+
+        if ($firstFiscalAuthorization) {
+            app(MarkRegisterInvoicedForCte::class)->handle($document);
+        }
 
         $this->log('info', 'Autorização do CT-e confirmada; persistência dos artefatos pendente.', [
             'document' => $document->public_id,

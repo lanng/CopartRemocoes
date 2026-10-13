@@ -4,9 +4,12 @@ namespace Tests\Feature\Services;
 
 use App\Enums\CteDocumentStatusEnum;
 use App\Enums\CteEmissionBatchStatusEnum;
+use App\Enums\FiscalDocumentStatusEnum;
+use App\Enums\RegisterStatusEnum;
 use App\Jobs\EmitCteDirectJob;
 use App\Models\CteDocument;
 use App\Models\CteEmissionBatch;
+use App\Models\Register;
 use App\Services\Cte\CteDocumentRecoveryService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Queue;
@@ -70,8 +73,10 @@ class CteDocumentRecoveryTest extends TestCase
 
     public function test_a_reconciliation_can_register_an_authorized_cte_manually(): void
     {
+        $register = Register::factory()->create(['status' => RegisterStatusEnum::AVAILABLE]);
         $document = CteDocument::factory()->create([
             'status' => CteDocumentStatusEnum::RECONCILIATION_REQUIRED,
+            'register_id' => $register->id,
         ]);
 
         app(CteDocumentRecoveryService::class)->reconcile($document, [
@@ -85,6 +90,68 @@ class CteDocumentRecoveryTest extends TestCase
         $this->assertSame('authorized', $document->refresh()->fiscal_status->value);
         $this->assertSame('2670', $document->cte_number);
         $this->assertNotNull($document->authorized_at);
+        $this->assertSame(RegisterStatusEnum::INVOICED, $register->refresh()->status);
+    }
+
+    public function test_replayed_reconciliation_cannot_overwrite_a_manual_register_status(): void
+    {
+        $register = Register::factory()->create(['status' => RegisterStatusEnum::AVAILABLE]);
+        $document = CteDocument::factory()->create([
+            'status' => CteDocumentStatusEnum::RECONCILIATION_REQUIRED,
+            'register_id' => $register->id,
+        ]);
+        $data = [
+            'number' => '2670',
+            'access_key' => '35260812563112000130570010000026701338262343',
+            'protocol' => '135263860830097',
+            'reason' => 'XML confirmado manualmente.',
+        ];
+
+        app(CteDocumentRecoveryService::class)->reconcile($document, $data);
+        $register->refresh()->update(['status' => RegisterStatusEnum::AVAILABLE]);
+
+        try {
+            app(CteDocumentRecoveryService::class)->reconcile($document, $data);
+            $this->fail('A reconciliação repetida deveria ser recusada.');
+        } catch (ValidationException) {
+            $this->assertSame(RegisterStatusEnum::AVAILABLE, $register->refresh()->status);
+        }
+    }
+
+    public function test_reconciliation_does_not_reapply_authorization_to_a_previously_authorized_document(): void
+    {
+        $register = Register::factory()->create(['status' => RegisterStatusEnum::AVAILABLE]);
+        $document = CteDocument::factory()->create([
+            'status' => CteDocumentStatusEnum::RECONCILIATION_REQUIRED,
+            'fiscal_status' => FiscalDocumentStatusEnum::AUTHORIZED,
+            'register_id' => $register->id,
+        ]);
+
+        app(CteDocumentRecoveryService::class)->reconcile($document, [
+            'number' => '2670',
+            'access_key' => '35260812563112000130570010000026701338262343',
+            'protocol' => '135263860830097',
+            'reason' => 'Consulta confirmou autorização previamente registrada.',
+        ]);
+
+        $this->assertSame(RegisterStatusEnum::AVAILABLE, $register->refresh()->status);
+    }
+
+    public function test_reconciliation_without_a_register_is_safe(): void
+    {
+        $document = CteDocument::factory()->create([
+            'status' => CteDocumentStatusEnum::RECONCILIATION_REQUIRED,
+            'register_id' => null,
+        ]);
+
+        app(CteDocumentRecoveryService::class)->reconcile($document, [
+            'number' => '2670',
+            'access_key' => '35260812563112000130570010000026701338262343',
+            'protocol' => '135263860830097',
+            'reason' => 'XML confirmado manualmente.',
+        ]);
+
+        $this->assertSame(CteDocumentStatusEnum::AUTHORIZED, $document->refresh()->status);
     }
 
     public function test_only_known_safe_statuses_can_be_requeued(): void
