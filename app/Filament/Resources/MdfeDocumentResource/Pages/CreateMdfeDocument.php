@@ -115,6 +115,7 @@ class CreateMdfeDocument extends Page implements HasForms
                             ->preload()
                             ->required()
                             ->live()
+                            ->options(fn (Get $get): array => $this->cteInitialOptions($get('line')))
                             ->getSearchResultsUsing(fn (string $search, Get $get): array => $this->cteSearchResults(
                                 $search,
                                 $get('line'),
@@ -321,6 +322,23 @@ class CreateMdfeDocument extends Page implements HasForms
 
         return app(PrepareMdfeDocument::class)
             ->eligibleCteDocuments($line, $search, $this->batchId)
+            ->mapWithKeys(fn (CteDocument $document): array => [
+                $document->id => app(PrepareMdfeDocument::class)->cteOptionLabel($document),
+            ])
+            ->all();
+    }
+
+    /** @return array<int|string, string> */
+    protected function cteInitialOptions(mixed $lineValue): array
+    {
+        $line = CiotLineEnum::tryFrom((string) $lineValue);
+
+        if ($line === null) {
+            return [];
+        }
+
+        return app(PrepareMdfeDocument::class)
+            ->eligibleCteDocuments($line, limit: 5, batchId: $this->batchId)
             ->mapWithKeys(fn (CteDocument $document): array => [
                 $document->id => app(PrepareMdfeDocument::class)->cteOptionLabel($document),
             ])

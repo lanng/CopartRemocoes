@@ -5,6 +5,7 @@ namespace Tests\Feature\Services\Ciot;
 use App\Enums\CiotLineEnum;
 use App\Enums\CiotStatusEnum;
 use App\Enums\CteDocumentStatusEnum;
+use App\Enums\FiscalDocumentStatusEnum;
 use App\Jobs\EmitCiotJob;
 use App\Models\Ciot;
 use App\Models\CiotVehicle;
@@ -288,6 +289,98 @@ class PrepareMdfeDocumentTest extends TestCase
         $this->assertNotContains($activeCiot->id, $ciots->pluck('id')->all());
         $this->assertNotContains($closedCiot->id, $ciots->pluck('id')->all());
         $this->assertNotContains($tankAlcoholCiot->id, $ciots->pluck('id')->all());
+    }
+
+    public function test_only_ctes_linked_to_canceled_mdfes_are_eligible_and_limit_is_applied_after_filters(): void
+    {
+        $service = app(PrepareMdfeDocument::class);
+        $date = now()->subDay();
+        $available = $this->controlledVehicleDocument(overrides: [
+            'cte_number' => '901',
+            'access_key' => str_pad('901', 44, '0', STR_PAD_LEFT),
+            'authorized_at' => $date,
+        ]);
+        $canceled = $this->controlledVehicleDocument(overrides: [
+            'cte_number' => '902',
+            'access_key' => str_pad('902', 44, '0', STR_PAD_LEFT),
+            'authorized_at' => $date->copy()->addMinute(),
+        ]);
+        $linkedToCanceled = MdfeDocument::factory()->create([
+            'status' => CteDocumentStatusEnum::AUTHORIZED,
+            'fiscal_status' => FiscalDocumentStatusEnum::CANCELLED,
+        ]);
+        $linkedToCanceled->cteDocuments()->attach($canceled->id, ['position' => 1]);
+
+        $canceledByCode = $this->controlledVehicleDocument(overrides: [
+            'cte_number' => '909',
+            'access_key' => str_pad('909', 44, '0', STR_PAD_LEFT),
+            'authorized_at' => $date->copy()->addMinutes(2),
+        ]);
+        $linkedToCanceledByCode = MdfeDocument::factory()->create([
+            'status' => CteDocumentStatusEnum::AUTHORIZED,
+            'fiscal_status' => FiscalDocumentStatusEnum::AUTHORIZED,
+            'fiscal_status_code' => '101',
+        ]);
+        $linkedToCanceledByCode->cteDocuments()->attach($canceledByCode->id, ['position' => 1]);
+
+        $canceledByStatus = $this->controlledVehicleDocument(overrides: [
+            'cte_number' => '910',
+            'access_key' => str_pad('910', 44, '0', STR_PAD_LEFT),
+            'authorized_at' => $date->copy()->addMinutes(3),
+        ]);
+        $linkedToCanceledByStatus = MdfeDocument::factory()->create([
+            'status' => CteDocumentStatusEnum::CANCELLED,
+            'fiscal_status' => null,
+        ]);
+        $linkedToCanceledByStatus->cteDocuments()->attach($canceledByStatus->id, ['position' => 1]);
+
+        foreach ([
+            ['status' => CteDocumentStatusEnum::QUEUED, 'fiscal_status_code' => null],
+            ['status' => CteDocumentStatusEnum::AUTHORIZED, 'fiscal_status_code' => '132'],
+            ['status' => CteDocumentStatusEnum::REJECTED, 'fiscal_status_code' => null],
+            ['status' => CteDocumentStatusEnum::FAILED_BEFORE_AUTHORIZATION, 'fiscal_status_code' => null],
+        ] as $index => $attributes) {
+            $document = $this->controlledVehicleDocument(overrides: [
+                'cte_number' => (string) (903 + $index),
+                'access_key' => str_pad((string) (903 + $index), 44, '0', STR_PAD_LEFT),
+                'authorized_at' => $date->copy()->addMinutes(2 + $index),
+            ]);
+            $mdfe = MdfeDocument::factory()->create($attributes);
+            $mdfe->cteDocuments()->attach($document->id, ['position' => 1]);
+        }
+
+        $mixed = $this->controlledVehicleDocument(overrides: [
+            'cte_number' => '908',
+            'access_key' => str_pad('908', 44, '0', STR_PAD_LEFT),
+            'authorized_at' => $date->copy()->addMinutes(10),
+        ]);
+        $mixedCanceled = MdfeDocument::factory()->create([
+            'status' => CteDocumentStatusEnum::AUTHORIZED,
+            'fiscal_status' => FiscalDocumentStatusEnum::CANCELLED,
+        ]);
+        $mixedCanceled->cteDocuments()->attach($mixed->id, ['position' => 1]);
+        $mixedOpen = MdfeDocument::factory()->create([
+            'status' => CteDocumentStatusEnum::AUTHORIZED,
+            'fiscal_status' => FiscalDocumentStatusEnum::AUTHORIZED,
+        ]);
+        $mixedOpen->cteDocuments()->attach($mixed->id, ['position' => 1]);
+
+        $this->assertSame([$canceledByStatus->id, $canceledByCode->id, $canceled->id, $available->id], $service
+            ->eligibleCteDocuments(CiotLineEnum::VehicleRemoval)
+            ->pluck('id')->all());
+
+        $matching = collect();
+        for ($number = 920; $number < 925; $number++) {
+            $matching->push($this->controlledVehicleDocument(overrides: [
+                'cte_number' => (string) $number,
+                'access_key' => str_pad((string) $number, 44, '0', STR_PAD_LEFT),
+                'authorized_at' => $date->copy()->addMinutes($number - 919),
+            ]));
+        }
+
+        $limited = $service->eligibleCteDocuments(CiotLineEnum::VehicleRemoval, search: '92', limit: 2);
+
+        $this->assertSame([$matching[4]->id, $matching[3]->id], $limited->pluck('id')->all());
     }
 
     public function test_batch_context_scopes_search_and_selected_cte_labels(): void

@@ -5,6 +5,7 @@ namespace App\Services\Ciot;
 use App\Enums\CiotLineEnum;
 use App\Enums\CiotStatusEnum;
 use App\Enums\CteDocumentStatusEnum;
+use App\Enums\FiscalDocumentStatusEnum;
 use App\Models\Ciot;
 use App\Models\CteDocument;
 use App\Models\CteEmissionBatch;
@@ -95,7 +96,7 @@ class PrepareMdfeDocument
     /**
      * @return Collection<int, CteDocument>
      */
-    public function eligibleCteDocuments(CiotLineEnum $line, string $search = '', ?int $batchId = null): Collection
+    public function eligibleCteDocuments(CiotLineEnum $line, string $search = '', ?int $batchId = null, int $limit = 50): Collection
     {
         $query = $this->eligibleCteDocumentQuery($line, $batchId);
 
@@ -113,7 +114,7 @@ class PrepareMdfeDocument
             ->orderByDesc('authorized_at')
             ->orderByRaw('CAST(cte_number AS DECIMAL(20, 0)) DESC')
             ->orderByDesc('id')
-            ->limit(50)
+            ->limit($limit)
             ->get();
     }
 
@@ -155,15 +156,14 @@ class PrepareMdfeDocument
             ->where('snapshot->line', $line->value)
             ->when($batchId !== null, fn (Builder $query): Builder => $query->where('cte_emission_batch_id', $batchId))
             ->whereDoesntHave('mdfeDocuments', function (Builder $query): void {
-                $query
-                    ->whereNotIn('status', [
-                        CteDocumentStatusEnum::REJECTED->value,
-                        CteDocumentStatusEnum::FAILED_BEFORE_AUTHORIZATION->value,
-                        CteDocumentStatusEnum::CANCELLED->value,
-                    ])
+                $query->where('status', '!=', CteDocumentStatusEnum::CANCELLED->value)
+                    ->where(function (Builder $query): void {
+                        $query->whereNull('fiscal_status')
+                            ->orWhere('fiscal_status', '!=', FiscalDocumentStatusEnum::CANCELLED->value);
+                    })
                     ->where(function (Builder $query): void {
                         $query->whereNull('fiscal_status_code')
-                            ->orWhereNotIn('fiscal_status_code', ['101', '132']);
+                            ->orWhere('fiscal_status_code', '!=', '101');
                     });
             });
     }

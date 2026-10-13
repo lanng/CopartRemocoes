@@ -354,7 +354,7 @@ class BuildMdfeEmissionSnapshotTest extends TestCase
         Queue::assertPushed(EmitMdfeDirectJob::class, fn (EmitMdfeDirectJob $job): bool => $job->afterCommit === true);
 
         $this->expectException(DomainException::class);
-        $this->expectExceptionMessage('CIOT já está vinculado a outro MDF-e ativo ou em processamento.');
+        $this->expectExceptionMessage('Um ou mais CT-es já estão vinculados a outro MDF-e não cancelado.');
 
         app(QueueDirectMdfeEmission::class)->handle(
             batch: $batch,

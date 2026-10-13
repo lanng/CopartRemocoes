@@ -11,6 +11,7 @@ use App\Models\CteDocument;
 use App\Models\DfeDocumentReservation;
 use App\Models\MdfeDocument;
 use DomainException;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 
@@ -49,6 +50,8 @@ class ReserveMdfeDocuments
                 || ! preg_match('/^\d{44}$/', (string) $document->access_key))) {
                 throw new DomainException('Somente CT-es autorizados do fluxo controlado podem ser reservados.');
             }
+
+            $this->assertCtesHaveNoOtherNonCancelledMdfe($mdfe, $documentIds);
 
             $lockedCiot = Ciot::query()->whereKey($ciot->id)->lockForUpdate()->firstOrFail();
 
@@ -170,6 +173,28 @@ class ReserveMdfeDocuments
 
         if ($activeMdfeExists) {
             throw new DomainException('Este CIOT já está vinculado a outro MDF-e ativo ou em processamento.');
+        }
+    }
+
+    /** @param Collection<int, int> $documentIds */
+    private function assertCtesHaveNoOtherNonCancelledMdfe(MdfeDocument $mdfe, Collection $documentIds): void
+    {
+        $linkedToOtherNonCancelledMdfe = MdfeDocument::query()
+            ->whereKeyNot($mdfe->id)
+            ->whereHas('cteDocuments', fn (Builder $query): Builder => $query->whereIn('cte_documents.id', $documentIds))
+            ->where('status', '!=', CteDocumentStatusEnum::CANCELLED->value)
+            ->where(function (Builder $query): void {
+                $query->whereNull('fiscal_status')
+                    ->orWhere('fiscal_status', '!=', FiscalDocumentStatusEnum::CANCELLED->value);
+            })
+            ->where(function (Builder $query): void {
+                $query->whereNull('fiscal_status_code')
+                    ->orWhere('fiscal_status_code', '!=', '101');
+            })
+            ->exists();
+
+        if ($linkedToOtherNonCancelledMdfe) {
+            throw new DomainException('Um ou mais CT-es já estão vinculados a outro MDF-e não cancelado.');
         }
     }
 }

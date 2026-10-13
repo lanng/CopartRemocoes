@@ -163,12 +163,18 @@ class MdfeDocumentResourceTest extends TestCase
             'workflow_origin' => 'controlled_v1',
             'snapshot' => ['line' => 'tank_alcohol'],
         ]);
+        $otherBatchCte = CteDocument::factory()->authorized()->create([
+            'workflow_origin' => 'controlled_v1',
+            'snapshot' => ['line' => 'tank_alcohol'],
+        ]);
 
         Livewire::withQueryParams(['batch' => $batch->id])
             ->test(CreateMdfeDocument::class)
             ->assertSet('batchId', $batch->id)
             ->assertSet('data.line', 'tank_alcohol')
             ->assertSet('data.cte_document_ids', [$authorized->id])
+            ->assertFormFieldExists('cte_document_ids', fn ($field): bool => array_keys($field->getOptions()) === [$authorized->id]
+                && ! array_key_exists($otherBatchCte->id, $field->getOptions()))
             ->assertSet('data.ciot_mode', 'existing')
             ->assertSet('data.ciot_id', $ciot->id)
             ->assertSet('data.driver_id', $driver->id);
@@ -219,6 +225,36 @@ class MdfeDocumentResourceTest extends TestCase
             ->assertFormFieldExists('new_ciot.vehicle_ids')
             ->assertFormFieldDoesNotExist('vehicle_plate')
             ->assertSee('Criar e emitir um novo CIOT');
+    }
+
+    public function test_cte_selector_preloads_the_five_most_recent_eligible_documents_for_the_selected_line(): void
+    {
+        $documents = collect(range(1, 6))->map(fn (int $number): CteDocument => CteDocument::factory()->authorized()->create([
+            'cte_emission_batch_id' => null,
+            'register_id' => null,
+            'cte_number' => (string) $number,
+            'authorized_at' => now()->subMinutes(6 - $number),
+            'workflow_origin' => 'controlled_v1',
+            'snapshot' => ['line' => 'vehicle_removal'],
+        ]));
+        $otherLineDocument = CteDocument::factory()->authorized()->create([
+            'cte_emission_batch_id' => null,
+            'register_id' => null,
+            'workflow_origin' => 'controlled_v1',
+            'snapshot' => ['line' => 'tank_alcohol'],
+        ]);
+
+        Livewire::test(CreateMdfeDocument::class)
+            ->assertFormFieldExists('cte_document_ids', fn ($field): bool => $field->getOptions() === [])
+            ->set('data.line', 'vehicle_removal')
+            ->assertFormFieldExists('cte_document_ids', fn ($field): bool => array_keys($field->getOptions()) === $documents->reverse()->take(5)->pluck('id')->all())
+            ->assertFormFieldExists('cte_document_ids', fn ($field): bool => ! array_key_exists($otherLineDocument->id, $field->getOptions()))
+            ->assertFormFieldExists('cte_document_ids', fn ($field): bool => array_key_exists($documents->first()->id, $field->getSearchResults('1')))
+            ->set('data.cte_document_ids', [$documents->first()->id])
+            ->assertFormFieldExists('cte_document_ids', fn ($field): bool => str_starts_with($field->getOptionLabels()[$documents->first()->id] ?? '', 'CT-e 1/'))
+            ->set('data.line', 'tank_alcohol')
+            ->assertSet('data.cte_document_ids', [])
+            ->assertFormFieldExists('cte_document_ids', fn ($field): bool => array_keys($field->getOptions()) === [$otherLineDocument->id]);
     }
 
     public function test_new_ciot_vehicle_selection_starts_empty_and_keeps_each_vehicle_independent(): void
