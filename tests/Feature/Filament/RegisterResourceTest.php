@@ -4,6 +4,7 @@ namespace Tests\Feature\Filament;
 
 use App\Enums\CteDocumentStatusEnum;
 use App\Enums\CteEmissionBatchStatusEnum;
+use App\Filament\Resources\RegisterResource;
 use App\Filament\Resources\RegisterResource\Pages\ListRegisters;
 use App\Filament\Resources\RegisterResource\Pages\ViewRegister;
 use App\Models\CteDocument;
@@ -12,8 +13,14 @@ use App\Models\IntegrationInboxItem;
 use App\Models\Register;
 use App\Models\User;
 use Filament\Facades\Filament;
+use Filament\Http\Middleware\Authenticate;
+use Filament\Support\Enums\Alignment;
+use Filament\Support\Enums\MaxWidth;
+use Filament\Tables\Columns\SelectColumn;
+use Filament\Tables\Enums\RecordCheckboxPosition;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Facades\Storage;
 use Livewire\Livewire;
 use Tests\TestCase;
 
@@ -29,6 +36,497 @@ class RegisterResourceTest extends TestCase
         /** @var User $user */
         $user = User::factory()->create();
         $this->actingAs($user);
+    }
+
+    public function test_register_list_displays_operational_fields_as_spreadsheet_columns(): void
+    {
+        $component = Livewire::test(ListRegisters::class);
+        $table = $component->instance()->getTable();
+        $columns = $table->getColumns();
+        $this->assertSame(RecordCheckboxPosition::BeforeCells, $table->getRecordCheckboxPosition());
+
+        $this->assertSame([
+            'vehicle_plate',
+            'vehicle_model',
+            'origin_city',
+            'destination_city',
+            'deadline_withdraw',
+            'deadline_delivery',
+            'status',
+            'tow_yard',
+            'condition',
+            'value',
+        ], collect($columns)
+            ->reject(fn ($column): bool => $column->isToggledHidden())
+            ->keys()
+            ->all());
+        $this->assertSame('Placa', $columns['vehicle_plate']->getLabel());
+        $this->assertSame('Modelo', $columns['vehicle_model']->getLabel());
+        $this->assertSame('Coleta', $columns['deadline_withdraw']->getLabel());
+        $this->assertSame('Entrega', $columns['deadline_delivery']->getLabel());
+        $this->assertSame('Condição', $columns['condition']->getLabel());
+        $this->assertSame('6rem', $columns['vehicle_plate']->getWidth());
+        $this->assertSame('11rem', $columns['vehicle_model']->getWidth());
+        $this->assertTrue($columns['vehicle_model']->canWrap());
+        $this->assertSame('3.75rem', $columns['deadline_withdraw']->getWidth());
+        $this->assertSame($columns['deadline_withdraw']->getWidth(), $columns['deadline_delivery']->getWidth());
+        $this->assertSame('3.75rem', $columns['deadline_delivery']->getWidth());
+        $this->assertSame(Alignment::Center, $columns['deadline_withdraw']->getAlignment());
+        $this->assertSame(Alignment::Center, $columns['deadline_delivery']->getAlignment());
+        $this->assertSame('8rem', $columns['status']->getWidth());
+        $this->assertSame('7rem', $columns['tow_yard']->getWidth());
+        $this->assertSame('6rem', $columns['condition']->getWidth());
+        $this->assertSame('8rem', $columns['value']->getWidth());
+        foreach ([
+            'vehicle_plate',
+            'vehicle_model',
+            'origin_city',
+            'destination_city',
+            'status',
+            'condition',
+            'value',
+        ] as $columnName) {
+            $this->assertFalse($columns[$columnName]->isSortable(), "{$columnName} should not be sortable.");
+        }
+        $this->assertTrue($columns['deadline_withdraw']->isSortable());
+        $this->assertTrue($columns['deadline_delivery']->isSortable());
+        $this->assertNull($columns['condition']->record(Register::factory()->create())->getState());
+        $this->assertTrue($columns['company']->isToggledHidden());
+        $this->assertTrue($columns['collected_date']->isToggledHidden());
+        $this->assertTrue($columns['delivery_confirmed_at']->isToggledHidden());
+        $this->assertTrue($columns['unresolved_removal_imports_exists']->isToggledHidden());
+        foreach ([
+            'vehicle_plate',
+            'vehicle_model',
+            'origin_city',
+            'destination_city',
+            'status',
+            'tow_yard',
+        ] as $columnName) {
+            $this->assertFalse($columns[$columnName]->isIndividuallySearchable());
+            $this->assertTrue($columns[$columnName]->isGloballySearchable());
+        }
+    }
+
+    public function test_register_list_displays_deadlines_without_the_year(): void
+    {
+        $register = Register::factory()->create([
+            'deadline_withdraw' => '2026-10-09',
+            'deadline_delivery' => '2026-10-19',
+        ]);
+
+        Livewire::test(ListRegisters::class)
+            ->assertCanSeeTableRecords([$register])
+            ->assertSee('09/10')
+            ->assertSee('19/10')
+            ->assertDontSee('09/10/2026')
+            ->assertDontSee('19/10/2026');
+    }
+
+    public function test_register_row_actions_use_compact_status_and_pdf_labels(): void
+    {
+        $registerWithPdf = Register::factory()->create(['pdf_path' => 'registers/removal-letter.pdf']);
+        $registerWithoutPdf = Register::factory()->create(['pdf_path' => null]);
+        $pdfUrl = Storage::disk('s3')->url($registerWithPdf->pdf_path);
+
+        Livewire::test(ListRegisters::class)
+            ->assertTableActionHasLabel('updateStatusSingle', 'Situação', $registerWithPdf)
+            ->assertTableActionHasIcon('updateStatusSingle', 'heroicon-o-arrow-path', $registerWithPdf)
+            ->assertTableActionHasLabel('openPdf', 'PDF', $registerWithPdf)
+            ->assertTableActionHasIcon('openPdf', 'heroicon-o-document-text', $registerWithPdf)
+            ->assertTableActionHasUrl('openPdf', $pdfUrl, $registerWithPdf)
+            ->assertTableActionShouldOpenUrlInNewTab('openPdf', $registerWithPdf)
+            ->assertTableActionVisible('openPdf', $registerWithPdf)
+            ->assertTableActionHidden('openPdf', $registerWithoutPdf);
+    }
+
+    public function test_vehicle_condition_is_an_inline_select_and_saves_supported_values(): void
+    {
+        $register = Register::factory()->create();
+        $component = Livewire::test(ListRegisters::class);
+        $conditionColumn = $component->instance()->getTable()->getColumn('condition');
+        $this->assertInstanceOf(SelectColumn::class, $conditionColumn);
+        $component->assertTableSelectColumnHasOptions('condition', [
+            'ANDA' => 'ANDA',
+            'Ñ ANDA' => 'Ñ ANDA',
+        ], $register);
+        $this->assertFalse($conditionColumn->isSortable());
+
+        $component->call('updateTableColumnState', 'condition', (string) $register->getKey(), 'ANDA');
+        $this->assertSame('ANDA', $register->refresh()->condition);
+
+        $component->call('updateTableColumnState', 'condition', (string) $register->getKey(), 'Ñ ANDA');
+        $this->assertSame('Ñ ANDA', $register->refresh()->condition);
+
+        $component->call('updateTableColumnState', 'condition', (string) $register->getKey(), 'OUTRA');
+        $this->assertSame('Ñ ANDA', $register->refresh()->condition);
+    }
+
+    public function test_register_list_uses_the_full_available_page_width(): void
+    {
+        $this->assertSame(MaxWidth::Full, Livewire::test(ListRegisters::class)->instance()->getMaxContentWidth());
+    }
+
+    public function test_register_list_reserves_a_separate_column_for_row_actions(): void
+    {
+        $spreadsheetCss = file_get_contents(resource_path('css/filament/registers-spreadsheet.css'));
+
+        $this->assertIsString($spreadsheetCss);
+        $this->assertStringContainsString('.fi-resource-registers .fi-ta-table .fi-ta-actions-header-cell', $spreadsheetCss);
+        $this->assertStringContainsString('.fi-resource-registers .fi-ta-table .fi-ta-actions-cell', $spreadsheetCss);
+        $this->assertStringContainsString('min-width: 15rem;', $spreadsheetCss);
+    }
+
+    public function test_register_column_filter_controls_stay_within_the_popover(): void
+    {
+        $spreadsheetCss = file_get_contents(resource_path('css/filament/registers-spreadsheet.css'));
+
+        $this->assertIsString($spreadsheetCss);
+        $this->assertStringContainsString('.registers-column-filter-field', $spreadsheetCss);
+        $this->assertStringContainsString('.registers-column-filter-label', $spreadsheetCss);
+        $this->assertStringContainsString('.registers-column-filter-control', $spreadsheetCss);
+        $this->assertStringContainsString('max-width: calc(100vw - 1rem);', $spreadsheetCss);
+
+        Register::factory()->create();
+        $response = $this->withoutMiddleware(Authenticate::class)->get('/admin/registers');
+        $response->assertOk()
+            ->assertSee('registers-column-filter-field', false)
+            ->assertSee('registers-column-filter-label', false)
+            ->assertSee('registers-column-filter-control', false);
+    }
+
+    public function test_vehicle_condition_selector_is_constrained_to_its_table_column(): void
+    {
+        Register::factory()->create();
+        $response = $this->withoutMiddleware(Authenticate::class)->get('/admin/registers');
+        $spreadsheetCss = file_get_contents(resource_path('css/filament/registers-spreadsheet.css'));
+
+        $response->assertOk()
+            ->assertSee('fi-table-cell-condition', false)
+            ->assertSee('fi-ta-select w-full min-w-48', false);
+        $this->assertIsString($spreadsheetCss);
+        $this->assertStringContainsString('.fi-resource-registers .fi-ta-table .fi-table-cell-condition .fi-ta-select', $spreadsheetCss);
+        $this->assertStringContainsString('min-width: 0;', $spreadsheetCss);
+        $this->assertStringContainsString('max-width: 100%;', $spreadsheetCss);
+    }
+
+    public function test_register_list_has_a_desktop_sidebar_collapse_button(): void
+    {
+        $this->withoutMiddleware(Authenticate::class)
+            ->get('/admin/registers')
+            ->assertOk()
+            ->assertSee('registers-spreadsheet-destination-fit.css', false)
+            ->assertSee('ms-auto hidden lg:flex', false)
+            ->assertSee('registers-copy-as-image', false);
+    }
+
+    public function test_dashboard_does_not_enable_the_desktop_sidebar_collapse_button(): void
+    {
+        $this->withoutMiddleware(Authenticate::class)
+            ->get('/admin')
+            ->assertOk()
+            ->assertDontSee('ms-auto hidden lg:flex', false);
+    }
+
+    public function test_register_list_uses_only_the_global_search_for_searchable_columns(): void
+    {
+        $matching = Register::factory()->create(['vehicle_plate' => 'ABC1234']);
+        $other = Register::factory()->create(['vehicle_plate' => 'XYZ9876']);
+
+        Livewire::test(ListRegisters::class)
+            ->searchTable('ABC1234')
+            ->assertCanSeeTableRecords([$matching])
+            ->assertCanNotSeeTableRecords([$other]);
+    }
+
+    public function test_register_list_can_filter_a_date_column_by_range(): void
+    {
+        $before = Register::factory()->create(['deadline_withdraw' => '2026-09-10']);
+        $firstInRange = Register::factory()->create(['deadline_withdraw' => '2026-09-20']);
+        $lastInRange = Register::factory()->create(['deadline_withdraw' => '2026-09-30']);
+        $after = Register::factory()->create(['deadline_withdraw' => '2026-10-01']);
+
+        Livewire::test(ListRegisters::class)
+            ->set('columnFilters.deadline_withdraw.from', '2026-09-20')
+            ->set('columnFilters.deadline_withdraw.until', '2026-09-30')
+            ->assertCanSeeTableRecords([$firstInRange, $lastInRange])
+            ->assertCanNotSeeTableRecords([$before, $after]);
+    }
+
+    public function test_register_list_can_filter_the_delivery_deadline_by_range(): void
+    {
+        $before = Register::factory()->create(['deadline_delivery' => '2026-09-10']);
+        $matching = Register::factory()->create(['deadline_delivery' => '2026-09-20']);
+        $after = Register::factory()->create(['deadline_delivery' => '2026-10-01']);
+
+        Livewire::test(ListRegisters::class)
+            ->set('columnFilters.deadline_delivery.from', '2026-09-20')
+            ->set('columnFilters.deadline_delivery.until', '2026-09-30')
+            ->assertCanSeeTableRecords([$matching])
+            ->assertCanNotSeeTableRecords([$before, $after]);
+    }
+
+    public function test_register_cell_color_can_be_changed_and_reset_inline(): void
+    {
+        $register = Register::factory()->create();
+        $legacyBlack = Register::factory()->create(['vehicle_plate_color' => 'black']);
+
+        Livewire::test(ListRegisters::class)
+            ->mountTableAction('editVehiclePlateColor', $legacyBlack)
+            ->assertTableActionDataSet(['color' => 'automatic']);
+
+        Livewire::test(ListRegisters::class)
+            ->callTableAction('editVehiclePlateColor', $register, ['color' => 'blue'])
+            ->assertHasNoTableActionErrors();
+
+        $this->assertSame('blue', $register->refresh()->vehicle_plate_color);
+
+        Livewire::test(ListRegisters::class)
+            ->callTableAction('editVehiclePlateColor', $register, ['color' => 'automatic'])
+            ->assertHasNoTableActionErrors();
+
+        $this->assertNull($register->refresh()->vehicle_plate_color);
+    }
+
+    public function test_register_cell_colors_match_their_operational_palettes(): void
+    {
+        $register = Register::factory()->create([
+            'vehicle_plate_color' => 'blue',
+            'vehicle_model_color' => 'red',
+            'origin_city_color' => 'red',
+            'destination_city_color' => 'yellow',
+            'deadline_withdraw_color' => 'red',
+            'deadline_delivery_color' => 'red',
+        ]);
+        $columns = Livewire::test(ListRegisters::class)->instance()->getTable()->getColumns();
+
+        foreach ([
+            'vehicle_plate' => 'info',
+            'vehicle_model' => 'danger',
+            'origin_city' => 'danger',
+            'destination_city' => 'warning',
+            'deadline_withdraw' => 'danger',
+            'deadline_delivery' => 'danger',
+        ] as $columnName => $expectedColor) {
+            $column = $columns[$columnName]->record($register);
+
+            $this->assertSame($expectedColor, $column->getColor($column->getState()));
+        }
+    }
+
+    public function test_register_operational_colors_can_be_filtered_by_column(): void
+    {
+        $colorFilters = [
+            ['column' => 'vehicle_plate_color', 'color' => 'blue'],
+            ['column' => 'vehicle_model_color', 'color' => 'red'],
+            ['column' => 'origin_city_color', 'color' => 'red'],
+            ['column' => 'destination_city_color', 'color' => 'yellow'],
+            ['column' => 'deadline_withdraw_color', 'color' => 'red'],
+            ['column' => 'deadline_delivery_color', 'color' => 'red'],
+        ];
+
+        foreach ($colorFilters as $index => $filter) {
+            $matching = Register::factory()->create([
+                'vehicle_plate' => 'COL'.str_pad((string) ($index + 1), 4, '0', STR_PAD_LEFT),
+                $filter['column'] => $filter['color'],
+            ]);
+            $other = Register::factory()->create([
+                'vehicle_plate' => 'OTH'.str_pad((string) ($index + 1), 4, '0', STR_PAD_LEFT),
+            ]);
+
+            Livewire::test(ListRegisters::class)
+                ->set('columnFilters.'.$filter['column'], $filter['color'])
+                ->assertCanSeeTableRecords([$matching])
+                ->assertCanNotSeeTableRecords([$other]);
+        }
+    }
+
+    public function test_register_column_filter_menus_are_attached_to_visible_headers(): void
+    {
+        Register::factory()->create(['tow_yard' => 'Pátio central']);
+        $response = $this->withoutMiddleware(Authenticate::class)->get('/admin/registers');
+        $response->assertOk();
+        preg_match_all('/wire:model[^\s>]+="[^"]+"/', $response->getContent(), $modelBindings);
+        $this->assertContains('wire:model.live="columnFilters.vehicle_plate_color"', $modelBindings[0]);
+        $this->assertContains('wire:model.live="columnFilters.status"', $modelBindings[0]);
+        $this->assertContains('wire:model.live="columnFilters.deadline_withdraw.from"', $modelBindings[0]);
+        $this->assertContains('wire:model.live="columnFilters.tow_yard"', $modelBindings[0]);
+        $this->assertStringContainsString('value="Pátio central"', $response->getContent());
+
+        preg_match_all('/data-register-column-filter="([^"]+)"/', $response->getContent(), $filterableColumns);
+        $this->assertSame([
+            'vehicle_plate',
+            'vehicle_model',
+            'origin_city',
+            'destination_city',
+            'deadline_withdraw',
+            'deadline_delivery',
+            'status',
+            'tow_yard',
+        ], $filterableColumns[1]);
+        $this->assertSame(RegisterResource::SPREADSHEET_FILTERABLE_COLUMNS, $filterableColumns[1]);
+
+        $component = Livewire::test(ListRegisters::class);
+        $this->assertSame([
+            'company',
+            'cte_autorizado',
+            'payment_deferred_at_range',
+            'fipe_value_range',
+        ], array_keys($component->instance()->getTable()->getFilters()));
+        $this->assertSame('Buscar placa, modelo ou cidade', $component->instance()->getTable()->getSearchPlaceholder());
+    }
+
+    public function test_register_column_color_filter_options_offer_only_meaningful_choices(): void
+    {
+        $plateOptions = RegisterResource::spreadsheetColumnColorOptions('vehicle_plate');
+
+        $this->assertSame('Automático — sem marcação', $plateOptions['automatic']);
+        $this->assertSame('Azul — região afastada', $plateOptions['blue']);
+        $this->assertArrayNotHasKey('black', $plateOptions);
+
+        foreach ([
+            'vehicle_model',
+            'origin_city',
+            'destination_city',
+            'deadline_withdraw',
+            'deadline_delivery',
+        ] as $column) {
+            $options = RegisterResource::spreadsheetColumnColorOptions($column);
+
+            $this->assertArrayHasKey('automatic', $options);
+            $this->assertArrayNotHasKey('black', $options);
+        }
+
+        $filters = Livewire::test(ListRegisters::class)->instance()->getTable()->getFilters();
+        $this->assertArrayNotHasKey('status', $filters);
+        $this->assertArrayNotHasKey('plate_color', $filters);
+    }
+
+    public function test_automatic_plate_filter_includes_unmarked_and_legacy_black_cells(): void
+    {
+        $unmarked = Register::factory()->create(['vehicle_plate_color' => null]);
+        $legacyBlack = Register::factory()->create(['vehicle_plate_color' => 'black']);
+        $blue = Register::factory()->create(['vehicle_plate_color' => 'blue']);
+
+        Livewire::test(ListRegisters::class)
+            ->set('columnFilters.vehicle_plate_color', 'automatic')
+            ->assertCanSeeTableRecords([$unmarked, $legacyBlack])
+            ->assertCanNotSeeTableRecords([$blue]);
+
+        Livewire::test(ListRegisters::class)
+            ->set('columnFilters.vehicle_plate_color', 'blue')
+            ->assertCanSeeTableRecords([$blue])
+            ->assertCanNotSeeTableRecords([$unmarked, $legacyBlack]);
+    }
+
+    public function test_register_column_filters_can_be_combined(): void
+    {
+        $matching = Register::factory()->create([
+            'vehicle_plate_color' => 'blue',
+            'status' => 'pending',
+            'tow_yard' => 'Pátio Campinas',
+            'deadline_withdraw' => '2026-10-20',
+            'deadline_withdraw_color' => 'red',
+            'value' => 1200,
+        ]);
+        $wrongColor = Register::factory()->create([
+            'status' => 'pending',
+            'tow_yard' => 'Pátio Campinas',
+            'deadline_withdraw' => '2026-10-20',
+            'deadline_withdraw_color' => 'red',
+            'value' => 1200,
+        ]);
+        $wrongDeadlineColor = Register::factory()->create([
+            'vehicle_plate_color' => 'blue',
+            'status' => 'pending',
+            'tow_yard' => 'Pátio Campinas',
+            'deadline_withdraw' => '2026-10-20',
+            'deadline_withdraw_color' => null,
+            'value' => 1200,
+        ]);
+        $wrongStatus = Register::factory()->create([
+            'vehicle_plate_color' => 'blue',
+            'status' => 'paid',
+            'tow_yard' => 'Pátio Campinas',
+            'deadline_withdraw' => '2026-10-20',
+            'value' => 1200,
+        ]);
+        $wrongYard = Register::factory()->create([
+            'vehicle_plate_color' => 'blue',
+            'status' => 'pending',
+            'tow_yard' => 'Pátio Santos',
+            'deadline_withdraw' => '2026-10-20',
+            'value' => 1200,
+        ]);
+        $wrongDate = Register::factory()->create([
+            'vehicle_plate_color' => 'blue',
+            'status' => 'pending',
+            'tow_yard' => 'Pátio Campinas',
+            'deadline_withdraw' => '2026-10-01',
+            'deadline_withdraw_color' => 'red',
+            'value' => 1200,
+        ]);
+        $wrongValue = Register::factory()->create([
+            'vehicle_plate_color' => 'blue',
+            'status' => 'pending',
+            'tow_yard' => 'Pátio Campinas',
+            'deadline_withdraw' => '2026-10-20',
+            'value' => 3000,
+        ]);
+
+        Livewire::test(ListRegisters::class)
+            ->set('columnFilters.vehicle_plate_color', 'blue')
+            ->set('columnFilters.deadline_withdraw_color', 'red')
+            ->set('columnFilters.status', 'pending')
+            ->set('columnFilters.tow_yard', 'Pátio Campinas')
+            ->set('columnFilters.deadline_withdraw.from', '2026-10-10')
+            ->set('columnFilters.deadline_withdraw.until', '2026-10-30')
+            ->set('columnFilters.value.minimum', '1000')
+            ->set('columnFilters.value.maximum', '2000')
+            ->assertCanSeeTableRecords([$matching])
+            ->assertCanNotSeeTableRecords([$wrongColor, $wrongDeadlineColor, $wrongStatus, $wrongYard, $wrongDate, $wrongValue]);
+    }
+
+    public function test_column_filters_can_be_cleared_when_the_filtered_table_is_empty(): void
+    {
+        $register = Register::factory()->create(['vehicle_plate_color' => 'red']);
+
+        Livewire::test(ListRegisters::class)
+            ->set('columnFilters.vehicle_plate_color', 'blue')
+            ->assertCanNotSeeTableRecords([$register])
+            ->assertSee('Limpar filtros das colunas')
+            ->call('clearColumnFilters')
+            ->assertDontSee('Limpar filtros das colunas')
+            ->assertCanSeeTableRecords([$register]);
+    }
+
+    public function test_selected_registers_can_be_shared_as_a_colored_image(): void
+    {
+        $register = Register::factory()->create([
+            'vehicle_plate' => 'ABC1234',
+            'vehicle_model' => 'Honda Civic',
+            'origin_city' => 'Campinas',
+            'destination_city' => 'Santos',
+            'deadline_withdraw' => '2026-10-20',
+            'deadline_delivery' => '2026-10-25',
+            'status' => 'pending',
+            'tow_yard' => 'Pátio central',
+            'condition' => 'Ñ ANDA',
+            'value' => 1234.56,
+            'vehicle_plate_color' => 'blue',
+            'destination_city_color' => 'green',
+        ]);
+
+        Livewire::test(ListRegisters::class)
+            ->callTableBulkAction('copyAsImage', [$register])
+            ->assertDispatched('registers-copy-as-image', fn (string $event, array $params): bool => $event === 'registers-copy-as-image'
+                && $params['rows'][0]['plate'] === 'ABC1234'
+                && $params['rows'][0]['withdraw'] === '20/10'
+                && $params['rows'][0]['value'] === 'R$ 1.234,56'
+                && $params['rows'][0]['condition'] === 'Ñ ANDA'
+                && $params['rows'][0]['colors']['vehicle_plate_color'] === 'blue'
+                && $params['rows'][0]['colors']['destination_city_color'] === 'green'
+            );
     }
 
     public function test_registers_can_be_searched_by_historical_cte_number(): void
@@ -82,7 +580,7 @@ class RegisterResourceTest extends TestCase
         $filteredOut = Register::factory()->create(['vehicle_plate' => 'ABC1D23', 'status' => 'paid']);
 
         Livewire::test(ListRegisters::class)
-            ->filterTable('status', 'pending')
+            ->set('columnFilters.status', 'pending')
             ->searchTable('ABC1234; ABC1D23')
             ->assertCanSeeTableRecords([$matching])
             ->assertCanNotSeeTableRecords([$filteredOut]);

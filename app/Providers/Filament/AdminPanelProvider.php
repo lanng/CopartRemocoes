@@ -32,6 +32,7 @@ class AdminPanelProvider extends PanelProvider
             ->favicon(asset('images/logotem.png'))
             ->id('admin')
             ->path('admin')
+            ->sidebarCollapsibleOnDesktop(fn (): bool => request()->routeIs('filament.admin.resources.registers.index'))
             ->login()
             ->colors([
                 'primary' => Color::Amber,
@@ -45,6 +46,7 @@ class AdminPanelProvider extends PanelProvider
             ])
             ->assets([
                 Css::make('integration-inbox-alerts', resource_path('css/filament/integration-inbox-alerts.css')),
+                Css::make('registers-spreadsheet-destination-fit', resource_path('css/filament/registers-spreadsheet.css')),
             ])
             ->discoverResources(in: app_path('Filament/Resources'), for: 'App\\Filament\\Resources')
             ->discoverPages(in: app_path('Filament/Pages'), for: 'App\\Filament\\Pages')

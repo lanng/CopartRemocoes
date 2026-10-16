@@ -1,0 +1,150 @@
+.fi-main:has(.fi-resource-registers) {
+    padding-inline: 0.5rem;
+}
+
+.fi-resource-registers .fi-ta-table {
+    min-width: 1600px;
+    table-layout: fixed;
+}
+
+.fi-resource-registers .fi-ta-content {
+    max-width: 100%;
+    overflow-x: auto;
+    overscroll-behavior-inline: contain;
+    -webkit-overflow-scrolling: touch;
+}
+
+.fi-resource-registers .registers-column-filter-menu {
+    box-sizing: border-box;
+    max-width: calc(100vw - 1rem);
+}
+
+.fi-resource-registers .registers-column-filter-menu .registers-column-filter-field {
+    display: block;
+    width: 100%;
+}
+
+.fi-resource-registers .registers-column-filter-menu .registers-column-filter-label {
+    display: block;
+    margin-bottom: 0.375rem;
+}
+
+.fi-resource-registers .registers-column-filter-menu .registers-column-filter-control {
+    display: block;
+    box-sizing: border-box;
+    width: 100%;
+    max-width: 100%;
+    min-width: 0;
+}
+
+.fi-resource-registers .fi-ta-table .fi-table-cell-condition .fi-ta-select {
+    box-sizing: border-box;
+    width: 100%;
+    max-width: 100%;
+    min-width: 0;
+}
+
+.fi-resource-registers .fi-table-cell-destination-city .fi-ta-col-wrp,
+.fi-resource-registers .fi-table-cell-destination-city .fi-ta-col-wrp > button,
+.fi-resource-registers .fi-table-cell-destination-city .fi-ta-text,
+.fi-resource-registers .fi-table-cell-destination-city .fi-ta-text-item,
+.fi-resource-registers .fi-table-cell-destination-city .fi-ta-text-item-label {
+    min-width: 0;
+    max-width: 100%;
+    overflow: hidden;
+}
+
+.fi-resource-registers .fi-table-cell-destination-city .fi-ta-text-item {
+    width: 100%;
+}
+
+.fi-resource-registers .fi-table-cell-destination-city .fi-ta-text-item-label {
+    display: block;
+    flex: 1 1 auto;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.fi-resource-registers .fi-ta-table .fi-ta-header-cell {
+    padding-inline: 0.5rem;
+    white-space: nowrap;
+}
+
+.fi-resource-registers .fi-ta-table .fi-ta-cell .fi-ta-text {
+    padding-inline: 0.5rem;
+}
+
+.fi-resource-registers .fi-ta-table .fi-ta-selection-cell {
+    width: 3rem;
+    min-width: 3rem;
+}
+
+.fi-resource-registers .fi-ta-table .fi-ta-actions-header-cell,
+.fi-resource-registers .fi-ta-table .fi-ta-actions-cell {
+    width: 15rem;
+    min-width: 15rem;
+}
+
+.fi-resource-registers .fi-ta-table .fi-ta-actions-cell > div {
+    white-space: normal;
+}
+
+.fi-resource-registers .fi-ta-table .fi-ta-actions-cell .fi-ta-actions {
+    flex-wrap: wrap;
+}
+
+.fi-resource-registers .fi-ta-table .fi-table-header-cell-deadline-withdraw,
+.fi-resource-registers .fi-ta-table .fi-table-header-cell-deadline-delivery {
+    padding-inline: 0.125rem;
+}
+
+.fi-resource-registers .fi-ta-table .fi-table-header-cell-deadline-withdraw .fi-ta-header-cell-label,
+.fi-resource-registers .fi-ta-table .fi-table-header-cell-deadline-delivery .fi-ta-header-cell-label {
+    font-size: 0.6875rem;
+}
+
+.fi-resource-registers .fi-ta-table .fi-table-header-cell-deadline-withdraw .fi-ta-header-cell-sort-icon,
+.fi-resource-registers .fi-ta-table .fi-table-header-cell-deadline-delivery .fi-ta-header-cell-sort-icon {
+    width: 0.625rem;
+    height: 0.625rem;
+}
+
+.fi-resource-registers .fi-ta-table .fi-table-cell-deadline-withdraw .fi-ta-text,
+.fi-resource-registers .fi-ta-table .fi-table-cell-deadline-delivery .fi-ta-text {
+    padding-inline: 0.125rem;
+}
+
+.fi-resource-registers .fi-ta-cell,
+.fi-resource-registers .fi-ta-header-cell {
+    border-inline-end: 1px solid rgb(226 232 240 / 75%);
+}
+
+.fi-resource-registers .fi-ta-col-wrp > button {
+    cursor: pointer;
+}
+
+.fi-resource-registers .fi-ta-col-wrp > button:hover .fi-ta-text {
+    text-decoration: underline dotted;
+    text-underline-offset: 3px;
+}
+
+.fi-resource-registers .fi-ta-col-wrp > button:focus-visible {
+    outline: 2px solid currentColor;
+    outline-offset: -2px;
+}
+
+.dark .fi-resource-registers .fi-ta-cell,
+.dark .fi-resource-registers .fi-ta-header-cell {
+    border-inline-end-color: rgb(255 255 255 / 10%);
+}
+
+@media (max-width: 767px) {
+    .fi-resource-registers .fi-ta-table {
+        min-width: 1600px;
+    }
+
+    .fi-resource-registers [data-register-record-url] .fi-ta-col-wrp > button {
+        pointer-events: none;
+        cursor: default;
+    }
+}
