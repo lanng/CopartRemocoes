@@ -37,7 +37,7 @@ class ApproveCteEmissionBatchTest extends TestCase
     {
         $user = User::factory()->create();
         $batch = app(CreateCteEmissionBatch::class)->handle(
-            Register::factory()->count(2)->create(),
+            Register::factory()->count(2)->create(['status' => 'analysis']),
             $user,
             'live',
         );
@@ -49,6 +49,9 @@ class ApproveCteEmissionBatchTest extends TestCase
         $this->assertNotNull($approved->approved_at);
         $this->assertTrue($approved->documents->every(
             fn ($document): bool => $document->status === CteDocumentStatusEnum::QUEUED
+        ));
+        $this->assertTrue($approved->documents->every(
+            fn (CteDocument $document): bool => $document->register->status->value === 'analysis'
         ));
     }
 

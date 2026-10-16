@@ -108,6 +108,25 @@ class RegisterResourceTest extends TestCase
         }
     }
 
+    public function test_analysis_can_be_filtered_and_manually_resolved_from_the_register_list(): void
+    {
+        $register = Register::factory()->create(['status' => 'analysis']);
+        $other = Register::factory()->create(['status' => 'pending']);
+        $item = IntegrationInboxItem::factory()->create([
+            'register_id' => $register->id, 'message_type' => 'cte_error', 'status' => 'alert',
+        ]);
+
+        Livewire::test(ListRegisters::class)
+            ->set('columnFilters.status', 'analysis')
+            ->assertCanSeeTableRecords([$register])
+            ->assertCanNotSeeTableRecords([$other])
+            ->callTableAction('updateStatusSingle', $register, data: ['status' => 'delivered'])
+            ->assertHasNoTableActionErrors();
+
+        $this->assertSame('delivered', $register->refresh()->status->value);
+        $this->assertNotNull($item->refresh()->resolved_at);
+    }
+
     public function test_register_list_displays_deadlines_without_the_year(): void
     {
         $register = Register::factory()->create([

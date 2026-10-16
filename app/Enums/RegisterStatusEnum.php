@@ -12,6 +12,7 @@ enum RegisterStatusEnum: string
     case AVAILABLE = 'available';
     case PENDING_DAILY_RATES = 'pending daily rates';
     case INVOICED = 'invoiced';
+    case ANALYSIS = 'analysis';
 
     public function label(): string
     {
@@ -23,7 +24,8 @@ enum RegisterStatusEnum: string
             self::CANCELLED => 'Cancelled',
             self::AVAILABLE => 'Available',
             self::PENDING_DAILY_RATES => 'Pending daily rates',
-            self::INVOICED => 'Invoiced'
+            self::INVOICED => 'Invoiced',
+            self::ANALYSIS => 'Analysis',
         };
     }
 
@@ -38,6 +40,7 @@ enum RegisterStatusEnum: string
             self::AVAILABLE => 'Liberado',
             self::PENDING_DAILY_RATES => 'Pen. Diária',
             self::INVOICED => 'Em nota fiscal',
+            self::ANALYSIS => 'Análise',
         };
     }
 
@@ -67,6 +70,7 @@ enum RegisterStatusEnum: string
             self::INVOICED => 'invoiced',
             self::PENDING => 'waiting',
             self::PENDING_DAILY_RATES => 'warning',
+            self::ANALYSIS => 'warning',
             self::CANCELLED => 'danger',
         };
     }

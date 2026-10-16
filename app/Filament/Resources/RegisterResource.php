@@ -582,6 +582,7 @@ class RegisterResource extends Resource
 
                 $query->orderByRaw("
                     CASE status
+                        WHEN 'analysis' THEN 0
                         WHEN 'pending' THEN 1
                         WHEN 'pending daily rates' THEN 2
                         WHEN 'available' THEN 3

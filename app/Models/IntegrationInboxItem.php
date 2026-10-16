@@ -43,6 +43,22 @@ class IntegrationInboxItem extends Model
         return $this->message_type === 'removal_request';
     }
 
+    public function isCteError(): bool
+    {
+        return $this->message_type === 'cte_error';
+    }
+
+    public function scopeOpenRegisterAnalyses(Builder $query): Builder
+    {
+        return $query->whereNull('resolved_at')
+            ->whereIn('status', ['pending', 'alert'])
+            ->where(function (Builder $query): void {
+                $query->where('message_type', 'cte_error')
+                    ->orWhere(fn (Builder $query): Builder => $query->where('message_type', 'checklist')
+                        ->whereIn('delivery_alert', ['missing_authorized_cte', 'under_analysis']));
+            });
+    }
+
     public function requiresUserAction(): bool
     {
         if ($this->acknowledged_at !== null) {
@@ -53,7 +69,7 @@ class IntegrationInboxItem extends Model
             return $this->status === 'pending' || $this->delivery_alert !== null;
         }
 
-        return $this->message_type === 'removal_request'
+        return in_array($this->message_type, ['removal_request', 'cte_error'], true)
             && in_array($this->status, ['pending', 'alert'], true)
             && $this->resolved_at === null;
     }
@@ -71,7 +87,7 @@ class IntegrationInboxItem extends Model
                             });
                     })
                     ->orWhere(function (Builder $query): void {
-                        $query->where('message_type', 'removal_request')
+                        $query->whereIn('message_type', ['removal_request', 'cte_error'])
                             ->whereIn('status', ['pending', 'alert'])
                             ->whereNull('resolved_at');
                     });
@@ -83,6 +99,7 @@ class IntegrationInboxItem extends Model
         return $query
             ->orderByRaw("CASE
                 WHEN delivery_alert = 'missing_authorized_cte' THEN 1
+                WHEN message_type = 'cte_error' AND status IN ('pending', 'alert') THEN 1
                 WHEN message_type = 'removal_request' AND status IN ('pending', 'alert') THEN 2
                 WHEN delivery_alert = 'unexpected_status' THEN 3
                 WHEN status = 'pending' THEN 4
@@ -97,6 +114,7 @@ class IntegrationInboxItem extends Model
     {
         return match (true) {
             $this->delivery_alert === 'missing_authorized_cte' => 1,
+            $this->isCteError() && in_array($this->status, ['pending', 'alert'], true) => 1,
             $this->isRemovalRequest() && in_array($this->status, ['pending', 'alert'], true) => 2,
             $this->delivery_alert === 'unexpected_status' => 3,
             $this->status === 'pending' => 4,
@@ -108,6 +126,7 @@ class IntegrationInboxItem extends Model
     public function actionLabel(): string
     {
         return match (true) {
+            $this->isCteError() => $this->failureReasonLabel() ?? 'Erro no CT-e',
             $this->delivery_alert === 'missing_authorized_cte' => 'Entrega sem CT-e',
             $this->delivery_alert === 'unexpected_status' => 'Entrega fora do fluxo',
             $this->isRemovalRequest() && $this->failure_reason !== null => $this->failureReasonLabel() ?? 'Falha na importação',
@@ -122,6 +141,7 @@ class IntegrationInboxItem extends Model
         return match ($this->message_type) {
             'removal_request' => 'Inclusão de registro',
             'checklist' => 'Baixa de entrega',
+            'cte_error' => 'Erro no CT-e',
             default => $this->message_type,
         };
     }
@@ -216,6 +236,10 @@ class IntegrationInboxItem extends Model
             'invalid_subject' => 'Assunto inválido',
             'invalid_body' => 'Corpo inválido',
             'vehicle_id_mismatch' => 'ID do veículo divergente',
+            'cte_number_mismatch' => 'Número do CT-e divergente',
+            'cte_not_found_or_ambiguous' => 'CT-e não encontrado ou ambíguo',
+            'cte_error_false_positive' => 'Aviso de erro descartado pelo usuário',
+            'analysis_resolved' => 'Análise concluída',
             'register_not_found_or_ambiguous' => 'Registro não encontrado ou ambíguo',
             'vehicle_plate_mismatch' => 'Placa divergente',
             'identity_conflict' => 'Identidade ambígua ou divergente',
@@ -243,6 +267,7 @@ class IntegrationInboxItem extends Model
             null => null,
             'unexpected_status' => 'Fluxo inesperado',
             'missing_authorized_cte' => 'Entrega sem CT-e',
+            'under_analysis' => 'Registro em análise',
             default => $this->delivery_alert,
         };
     }
@@ -252,6 +277,7 @@ class IntegrationInboxItem extends Model
         return match ($this->delivery_alert) {
             'unexpected_status' => 'warning',
             'missing_authorized_cte' => 'danger',
+            'under_analysis' => 'warning',
             default => 'gray',
         };
     }
