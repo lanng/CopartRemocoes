@@ -2,6 +2,7 @@
 
 namespace App\Filament\Resources\MdfeDocumentResource\Pages;
 
+use App\Filament\Actions\DownloadFiscalXmlsAction;
 use App\Filament\Resources\MdfeDocumentResource;
 use App\Models\MdfeDocument;
 use Closure;
@@ -20,6 +21,7 @@ class ManageMdfeDocuments extends ManageRecords
     protected function getHeaderActions(): array
     {
         return [
+            DownloadFiscalXmlsAction::make(MdfeDocumentResource::class, 'mdfe'),
             Actions\CreateAction::make()->label('Preparar MDF-e'),
         ];
     }

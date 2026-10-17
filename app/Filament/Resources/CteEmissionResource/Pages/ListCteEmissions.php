@@ -2,6 +2,7 @@
 
 namespace App\Filament\Resources\CteEmissionResource\Pages;
 
+use App\Filament\Actions\DownloadFiscalXmlsAction;
 use App\Filament\Resources\CteEmissionResource;
 use App\Models\CteDocument;
 use Closure;
@@ -20,6 +21,7 @@ class ListCteEmissions extends ListRecords
     protected function getHeaderActions(): array
     {
         return [
+            DownloadFiscalXmlsAction::make(CteEmissionResource::class, 'cte'),
             CreateAction::make()->label('Novo CT-e de álcool'),
         ];
     }
