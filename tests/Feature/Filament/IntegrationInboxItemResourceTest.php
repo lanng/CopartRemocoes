@@ -6,6 +6,7 @@ use App\Filament\Resources\IntegrationInboxItemResource;
 use App\Filament\Resources\IntegrationInboxItemResource\Pages\ListIntegrationInboxItems;
 use App\Filament\Resources\IntegrationInboxItemResource\Pages\ViewIntegrationInboxItem;
 use App\Models\IntegrationInboxItem;
+use App\Models\Register;
 use App\Models\User;
 use Filament\Facades\Filament;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -53,6 +54,67 @@ class IntegrationInboxItemResourceTest extends TestCase
 
         $this->assertSame('Processado', $processed->refresh()->statusLabel());
         $this->assertSame('Placa divergente', $pending->failureReasonLabel());
+    }
+
+    public function test_it_reviews_cte_errors_without_using_checklist_reconciliation(): void
+    {
+        $register = Register::factory()->create(['status' => 'analysis']);
+        $item = IntegrationInboxItem::factory()->create([
+            'register_id' => $register->id, 'message_type' => 'cte_error', 'status' => 'alert',
+            'previous_register_status' => 'invoiced',
+            'extracted_data' => ['cte_number' => '3014', 'error_message' => 'Comitente incorreto.'],
+        ]);
+        $table = Livewire::test(ListIntegrationInboxItems::class)->instance()->getTable();
+
+        $this->assertFalse($table->getAction('conciliarChecklist')->record($item)->isVisible());
+        $this->assertTrue($table->getAction('reviewCteError')->record($item)->isVisible());
+
+        Livewire::test(ListIntegrationInboxItems::class)
+            ->callTableAction('reviewCteError', $item, data: ['decision' => 'acknowledge'])
+            ->assertHasNoTableActionErrors();
+
+        $this->assertSame('analysis', $register->refresh()->status->value);
+        $this->assertNotNull($item->refresh()->acknowledged_at);
+        $this->assertNull($item->resolved_at);
+
+        Livewire::test(ListIntegrationInboxItems::class)
+            ->callTableAction('reviewCteError', $item, data: ['decision' => 'false_positive'])
+            ->assertHasNoTableActionErrors();
+
+        $this->assertSame('invoiced', $register->refresh()->status->value);
+        $this->assertNotNull($item->refresh()->resolved_at);
+    }
+
+    public function test_it_shows_cte_error_details_and_filters_the_new_message_type(): void
+    {
+        $item = IntegrationInboxItem::factory()->create([
+            'message_type' => 'cte_error', 'status' => 'pending',
+            'extracted_data' => ['cte_number' => '3014', 'error_message' => 'Comitente incorreto.'],
+        ]);
+        $checklist = IntegrationInboxItem::factory()->create();
+
+        Livewire::test(ListIntegrationInboxItems::class)
+            ->filterTable('message_type', 'cte_error')
+            ->assertCanSeeTableRecords([$item])
+            ->assertCanNotSeeTableRecords([$checklist]);
+
+        Livewire::test(ViewIntegrationInboxItem::class, ['record' => $item->getRouteKey()])
+            ->assertSee('Erro no CT-e')->assertSee('3014')->assertSee('Comitente incorreto.');
+    }
+
+    public function test_it_can_complete_manual_review_of_an_unassociated_notice(): void
+    {
+        $item = IntegrationInboxItem::factory()->create([
+            'message_type' => 'cte_error', 'status' => 'pending', 'failure_reason' => 'cte_not_found_or_ambiguous',
+        ]);
+
+        Livewire::test(ListIntegrationInboxItems::class)
+            ->callTableAction('reviewCteError', $item, data: ['decision' => 'manual_review'])
+            ->assertHasNoTableActionErrors();
+
+        $this->assertSame('processed', $item->refresh()->status);
+        $this->assertNotNull($item->resolved_at);
+        $this->assertNull($item->register_id);
     }
 
     public function test_it_exposes_the_compact_table_columns_in_order(): void

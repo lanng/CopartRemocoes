@@ -14,11 +14,13 @@ class ResolveIntegrationInboxItem
     public function handle(IntegrationInboxItem $item, Register $register, User $user, string $reason): IntegrationInboxItem
     {
         return DB::transaction(function () use ($item, $register, $user, $reason): IntegrationInboxItem {
-            if ($item->status !== 'pending') {
+            $register = Register::query()->lockForUpdate()->findOrFail($register->id);
+            $item = IntegrationInboxItem::query()->lockForUpdate()->findOrFail($item->id);
+
+            if ($item->message_type !== 'checklist' || $item->status !== 'pending') {
                 throw new DomainException('Somente pendencias podem ser conciliadas.');
             }
 
-            $register = Register::query()->lockForUpdate()->findOrFail($register->id);
             $plate = strtoupper(str_replace('-', '', $register->vehicle_plate));
             $isAssociatedRegister = (int) $register->id === (int) $item->register_id;
 

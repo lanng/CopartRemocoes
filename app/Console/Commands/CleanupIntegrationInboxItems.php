@@ -28,6 +28,10 @@ class CleanupIntegrationInboxItems extends Command
             IntegrationInboxItem::query()
                 ->whereIn('status', ['processed', 'duplicate', 'no_changes', 'rejected'])
                 ->where(function (Builder $query): void {
+                    $query->where('message_type', '!=', 'cte_error')
+                        ->orWhereNotNull('extracted_data->duplicate_of');
+                })
+                ->where(function (Builder $query): void {
                     $query->whereNull('delivery_alert')->orWhereNotNull('acknowledged_at');
                 })
                 ->whereRaw('COALESCE(resolved_at, updated_at) <= ?', [$cutoff])

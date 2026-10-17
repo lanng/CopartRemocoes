@@ -2,6 +2,7 @@
 
 namespace App\Filament\Support;
 
+use App\Enums\RegisterStatusEnum;
 use App\Models\IntegrationInboxItem;
 use App\Models\Register;
 use App\Services\MicrosoftGraph\AcknowledgeIntegrationAlert;
@@ -19,7 +20,7 @@ class ChecklistConciliationAction
             ->label('Conciliar')
             ->icon('heroicon-o-check-badge')
             ->color('success')
-            ->visible(fn (IntegrationInboxItem $record): bool => ! $record->isRemovalRequest()
+            ->visible(fn (IntegrationInboxItem $record): bool => $record->message_type === 'checklist'
                 && $record->acknowledged_at === null
                 && ($record->status === 'pending' || $record->delivery_alert !== null))
             ->disabled(fn (IntegrationInboxItem $record): bool => $record->status === 'pending'
@@ -41,7 +42,7 @@ class ChecklistConciliationAction
                             'deliver' => 'Prosseguir com a baixa (status Entregue)',
                             'keep' => 'Manter status atual (baixa manual pelo escritório)',
                         ])
-                        ->default('deliver')
+                        ->default(fn (IntegrationInboxItem $record): string => $record->register?->status === RegisterStatusEnum::ANALYSIS ? 'keep' : 'deliver')
                         ->live()
                         ->required(),
                     Placeholder::make('registro')

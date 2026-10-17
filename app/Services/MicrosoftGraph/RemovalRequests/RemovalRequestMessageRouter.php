@@ -4,6 +4,7 @@ namespace App\Services\MicrosoftGraph\RemovalRequests;
 
 use App\Models\IntegrationInboxItem;
 use App\Services\MicrosoftGraph\ProcessChecklistEmail;
+use App\Services\MicrosoftGraph\ProcessCteErrorEmail;
 
 class RemovalRequestMessageRouter
 {
@@ -11,6 +12,7 @@ class RemovalRequestMessageRouter
         private readonly RemovalRequestSubjectParser $subjectParser,
         private readonly QueueRemovalRequestEmail $queueRemovalRequest,
         private readonly ProcessChecklistEmail $checklistProcessor,
+        private readonly ProcessCteErrorEmail $cteErrorProcessor,
     ) {}
 
     /** @param array<string, mixed> $message */
@@ -23,6 +25,7 @@ class RemovalRequestMessageRouter
             return $this->queueRemovalRequest->handle($message);
         }
 
-        return $this->checklistProcessor->handle($message);
+        return $this->cteErrorProcessor->handle($message)
+            ?? $this->checklistProcessor->handle($message);
     }
 }

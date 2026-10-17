@@ -133,6 +133,27 @@ class ActionableIntegrationsTest extends TestCase
         Queue::assertPushed(ProcessRemovalRequestEmail::class);
     }
 
+    public function test_it_reviews_a_cte_error_from_the_dashboard_and_keeps_analysis_open(): void
+    {
+        $register = Register::factory()->create(['status' => 'analysis']);
+        $item = IntegrationInboxItem::factory()->create([
+            'register_id' => $register->id, 'message_type' => 'cte_error', 'status' => 'alert',
+            'previous_register_status' => 'invoiced',
+            'extracted_data' => ['cte_number' => '3014', 'error_message' => 'Comitente incorreto.'],
+        ]);
+
+        $this->assertTrue($item->requiresUserAction());
+        Livewire::test(ActionableIntegrations::class)
+            ->assertCanSeeTableRecords([$item])
+            ->assertSee('Erro no CT-e')
+            ->callTableAction('reviewCteError', $item, data: ['decision' => 'acknowledge'])
+            ->assertHasNoTableActionErrors()
+            ->assertCanNotSeeTableRecords([$item]);
+
+        $this->assertSame('analysis', $register->refresh()->status->value);
+        $this->assertNull($item->refresh()->resolved_at);
+    }
+
     public function test_it_reviews_a_status_blocked_import_directly_from_the_widget(): void
     {
         $register = Register::factory()->create([

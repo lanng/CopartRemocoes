@@ -5,6 +5,7 @@ namespace Tests\Feature\MicrosoftGraph;
 use App\Enums\RegisterStatusEnum;
 use App\Jobs\ProcessRemovalRequestEmail;
 use App\Jobs\SyncChecklistEmails;
+use App\Models\CteDocument;
 use App\Models\IntegrationInboxItem;
 use App\Models\MicrosoftGraphConnection;
 use App\Models\Register;
@@ -32,6 +33,7 @@ class SyncChecklistEmailsTest extends TestCase
             'vehicle_plate' => 'ESN4A20',
             'status' => RegisterStatusEnum::INVOICED,
         ]);
+        CteDocument::factory()->authorized()->create(['register_id' => $register->id]);
         $connection = MicrosoftGraphConnection::factory()->create();
 
         Http::fake([
@@ -80,6 +82,7 @@ class SyncChecklistEmailsTest extends TestCase
             'vehicle_plate' => 'ESN4A20',
             'status' => RegisterStatusEnum::INVOICED,
         ]);
+        CteDocument::factory()->authorized()->create(['register_id' => $register->id]);
         $connection = MicrosoftGraphConnection::factory()->create();
         Queue::fake();
         Http::fake([
@@ -126,6 +129,7 @@ class SyncChecklistEmailsTest extends TestCase
             'vehicle_plate' => 'ESN4A20',
             'status' => RegisterStatusEnum::INVOICED,
         ]);
+        CteDocument::factory()->authorized()->create(['register_id' => $checklistRegister->id]);
         $connection = MicrosoftGraphConnection::factory()->create();
 
         Http::fake([
@@ -211,6 +215,63 @@ class SyncChecklistEmailsTest extends TestCase
         Http::assertSent(function ($request): bool {
             return str_ends_with($request->url(), '/attachments/attachment-id/$value');
         });
+    }
+
+    public function test_it_ingests_a_cte_error_and_preserves_analysis_when_the_checklist_arrives_in_the_same_page(): void
+    {
+        Carbon::setTestNow('2026-08-13 20:55:00');
+        $register = Register::factory()->create([
+            'vehicle_id' => '1146609',
+            'vehicle_plate' => 'ESN4A20',
+            'status' => RegisterStatusEnum::INVOICED,
+        ]);
+        CteDocument::factory()->authorized()->create([
+            'register_id' => $register->id,
+            'cte_number' => '3014',
+            'execution_mode' => 'production',
+        ]);
+        $connection = MicrosoftGraphConnection::factory()->create();
+        Http::fake([
+            'https://graph.microsoft.com/*' => Http::response([
+                'value' => [
+                    [
+                        'id' => 'cte-error-message',
+                        'subject' => 'COPART - Erro no Documento Número 3014',
+                        'sender' => ['emailAddress' => ['address' => 'remocao@copart.com.br']],
+                        'receivedDateTime' => '2026-08-13T20:52:00Z',
+                        'body' => ['content' => 'Documento de transporte número 3014. Mensagem de Erro: Valor do frete divergente. Solicitamos o cancelamento do documento.', 'contentType' => 'text'],
+                    ],
+                    [
+                        'id' => 'checklist-after-cte-error',
+                        'subject' => 'Checklist digital - 1146609',
+                        'sender' => ['emailAddress' => ['address' => 'remocao@copart.com.br']],
+                        'receivedDateTime' => '2026-08-13T20:53:00Z',
+                        'body' => ['content' => 'Veículo 1146609 - ESN4A20.', 'contentType' => 'text'],
+                    ],
+                ],
+            ]),
+        ]);
+
+        $result = app(SyncChecklistEmailsService::class)->handle();
+
+        $this->assertSame(['processed' => 2, 'ignored' => 0], $result);
+        $this->assertSame(RegisterStatusEnum::ANALYSIS, $register->refresh()->status);
+        $this->assertSame('2026-08-13 20:53:00', $register->delivery_confirmed_at->utc()->format('Y-m-d H:i:s'));
+        $this->assertStringContainsString('Valor do frete divergente.', $register->notes);
+        $this->assertDatabaseHas('integration_inbox_items', [
+            'external_id' => 'cte-error-message',
+            'message_type' => 'cte_error',
+            'status' => 'alert',
+            'previous_register_status' => 'invoiced',
+        ]);
+        $this->assertDatabaseHas('integration_inbox_items', [
+            'external_id' => 'checklist-after-cte-error',
+            'status' => 'pending',
+            'delivery_alert' => 'under_analysis',
+            'previous_register_status' => 'invoiced',
+        ]);
+        $this->assertSame('2026-08-13 20:55:00', $connection->refresh()->last_synced_at->utc()->format('Y-m-d H:i:s'));
+        Http::assertSentCount(1);
     }
 
     public function test_the_job_has_bounded_runtime_and_prevents_overlapping_syncs(): void

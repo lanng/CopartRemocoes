@@ -293,6 +293,21 @@ class RemovalRequestMessageRouterTest extends TestCase
         Queue::assertNothingPushed();
     }
 
+    public function test_cte_error_messages_are_routed_without_dispatching_a_removal_request(): void
+    {
+        Queue::fake();
+        $message = $this->removalRequestMessage();
+        $message['subject'] = 'COPART - Erro no Documento Número 3014';
+        $message['body'] = 'Documento de transporte número 3014. Mensagem de Erro: Frete divergente. Solicitamos o cancelamento do documento.';
+
+        $item = app(RemovalRequestMessageRouter::class)->handle($message);
+
+        $this->assertSame('cte_error', $item?->message_type);
+        $this->assertSame('pending', $item?->status);
+        $this->assertSame('3014', $item?->extracted_data['cte_number']);
+        Queue::assertNothingPushed();
+    }
+
     /** @return array<string, mixed> */
     private function removalRequestMessage(): array
     {

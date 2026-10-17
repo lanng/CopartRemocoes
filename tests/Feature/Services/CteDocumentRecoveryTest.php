@@ -93,6 +93,25 @@ class CteDocumentRecoveryTest extends TestCase
         $this->assertSame(RegisterStatusEnum::INVOICED, $register->refresh()->status);
     }
 
+    public function test_first_reconciled_authorization_reuses_delivery_during_analysis(): void
+    {
+        $register = Register::factory()->create([
+            'status' => RegisterStatusEnum::ANALYSIS, 'delivery_confirmed_at' => '2026-10-01 12:00:00',
+        ]);
+        $document = CteDocument::factory()->create([
+            'status' => CteDocumentStatusEnum::RECONCILIATION_REQUIRED, 'register_id' => $register->id,
+        ]);
+
+        app(CteDocumentRecoveryService::class)->reconcile($document, [
+            'number' => '2670',
+            'access_key' => '35260812563112000130570010000026701338262343',
+            'protocol' => '135263860830097', 'reason' => 'Autorização confirmada.',
+        ]);
+
+        $this->assertSame(RegisterStatusEnum::DELIVERED, $register->refresh()->status);
+        $this->assertSame('2026-10-01 12:00:00', $register->delivery_confirmed_at->toDateTimeString());
+    }
+
     public function test_replayed_reconciliation_cannot_overwrite_a_manual_register_status(): void
     {
         $register = Register::factory()->create(['status' => RegisterStatusEnum::AVAILABLE]);

@@ -37,10 +37,12 @@ use Filament\Tables\Actions\BulkAction;
 use Filament\Tables\Actions\BulkActionGroup;
 use Filament\Tables\Actions\DeleteBulkAction;
 use Filament\Tables\Actions\EditAction;
-use Filament\Tables\Columns\Layout\Panel;
-use Filament\Tables\Columns\Layout\Split;
-use Filament\Tables\Columns\Layout\Stack;
+use Filament\Tables\Columns\Column;
+use Filament\Tables\Columns\SelectColumn;
 use Filament\Tables\Columns\TextColumn;
+use Filament\Tables\Enums\FiltersLayout;
+use Filament\Tables\Enums\RecordCheckboxPosition;
+use Filament\Tables\Filters\Filter;
 use Filament\Tables\Filters\SelectFilter;
 use Filament\Tables\Filters\TernaryFilter;
 use Filament\Tables\Table;
@@ -49,7 +51,10 @@ use Illuminate\Support\Carbon;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Str;
+use Illuminate\Validation\Rule;
 use Leandrocfe\FilamentPtbrFormFields\Money;
+use Livewire\Component as LivewireComponent;
 use Livewire\Features\SupportFileUploads\TemporaryUploadedFile;
 use Maatwebsite\Excel\Excel as ExcelExcel;
 use Maatwebsite\Excel\Facades\Excel;
@@ -58,6 +63,68 @@ use Throwable;
 
 class RegisterResource extends Resource
 {
+    /** @var array<string, string> */
+    public const VEHICLE_CONDITION_OPTIONS = [
+        'ANDA' => 'ANDA',
+        'Ñ ANDA' => 'Ñ ANDA',
+    ];
+
+    /** @var array<string, string> */
+    public const SPREADSHEET_COLUMN_COLOR_ATTRIBUTES = [
+        'vehicle_plate' => 'vehicle_plate_color',
+        'vehicle_model' => 'vehicle_model_color',
+        'origin_city' => 'origin_city_color',
+        'destination_city' => 'destination_city_color',
+        'deadline_withdraw' => 'deadline_withdraw_color',
+        'deadline_delivery' => 'deadline_delivery_color',
+    ];
+
+    /** @var array<int, string> */
+    public const SPREADSHEET_FILTERABLE_COLUMNS = [
+        'vehicle_plate',
+        'vehicle_model',
+        'origin_city',
+        'destination_city',
+        'deadline_withdraw',
+        'deadline_delivery',
+        'status',
+        'tow_yard',
+    ];
+
+    /** @var array<string, string> */
+    private const SPREADSHEET_COLOR_FIELD_LABELS = [
+        'vehicle_plate_color' => 'Placa',
+        'vehicle_model_color' => 'Modelo',
+        'origin_city_color' => 'Origem',
+        'destination_city_color' => 'Destino',
+        'deadline_withdraw_color' => 'Coleta',
+        'deadline_delivery_color' => 'Entrega',
+    ];
+
+    /** @var array<string, array<string, string>> */
+    private const SPREADSHEET_COLOR_CHOICES = [
+        'vehicle_plate_color' => [
+            'blue' => 'Azul — região afastada',
+        ],
+        'vehicle_model_color' => [
+            'red' => 'Vermelho — carga formada para cegonha',
+        ],
+        'origin_city_color' => [
+            'red' => 'Vermelho — próxima carga formada',
+        ],
+        'destination_city_color' => [
+            'red' => 'Vermelho — ligar com urgência',
+            'yellow' => 'Amarelo — veículo com pendências',
+            'green' => 'Verde — coleta hoje',
+        ],
+        'deadline_withdraw_color' => [
+            'red' => 'Vermelho — prazo vencendo',
+        ],
+        'deadline_delivery_color' => [
+            'red' => 'Vermelho — prazo vencendo',
+        ],
+    ];
+
     protected static ?string $model = Register::class;
 
     protected static ?string $navigationIcon = 'heroicon-o-rectangle-stack';
@@ -371,7 +438,7 @@ class RegisterResource extends Resource
                                 $summary = $record === null ? null : self::removalImportSummary($record);
 
                                 return $summary !== null
-                                    ? "Pendência de integração: {$summary}. Registre sua ciência na coluna Integração da listagem de registros."
+                                    ? "Pendência de integração: {$summary}. Abra a ação Revisão na listagem de registros."
                                     : 'Nenhuma revisão de e-mail pendente.';
                             }),
                     ]),
@@ -382,173 +449,15 @@ class RegisterResource extends Resource
     {
         return $table
             ->defaultPaginationPageOption(25)
-            ->columns([
-                Split::make([
-                    Stack::make([
-                        TextColumn::make('vehicle_model')
-                            ->weight('bold')
-                            ->searchable(query: function (Builder $query, string $search): Builder {
-                                return $query
-                                    ->where('vehicle_model', 'like', "%{$search}%")
-                                    ->orWhereHas('cteDocuments', function (Builder $query) use ($search): Builder {
-                                        return $query->where('cte_number', 'like', "%{$search}%");
-                                    });
-                            })
-                            ->formatStateUsing(fn (string $state, Register $record) => "{$state} - {$record->company->getLabel()}"),
-                        TextColumn::make('vehicle_plate')
-                            ->badge()
-                            ->searchable(),
-                        TextColumn::make('origin_city')
-                            ->icon('heroicon-o-arrow-up-circle')
-                            ->searchable(),
-                        TextColumn::make('destination_city')
-                            ->icon('heroicon-o-arrow-down-circle')
-                            ->searchable(),
-                        TextColumn::make('deadline_withdraw')
-                            ->label('Data limite recolha') // label just for orderBy option
-                            ->icon('heroicon-o-exclamation-triangle')
-                            ->color(fn (Register $record) => $record->deadline_withdraw?->isPast() && ! $record->isCollected() && ! $record->isDelivered() && ! $record->isCancelled() && ! $record->isPaid() ? 'danger' : 'gray')
-                            ->tooltip(fn (Register $record) => $record->deadline_withdraw?->isPast() && ! $record->isCollected() && ! $record->isDelivered() && ! $record->isCancelled() && ! $record->isPaid() ? 'Remoção Atrasada!' : null)
-                            ->date('d/m/Y')
-                            ->sortable(),
-                        TextColumn::make('deadline_delivery')
-                            ->label('Data limite entrega') // label just for orderBy option
-                            ->icon('heroicon-o-calendar-days')
-                            ->color(fn (Register $record) => $record->deadline_delivery?->isPast() && ! $record->isPaid() && ! $record->isDelivered() && ! $record->isCancelled() ? 'warning' : 'gray')
-                            ->tooltip(fn (Register $record) => $record->deadline_delivery?->isPast() && ! $record->isPaid() && ! $record->isDelivered() && ! $record->isCancelled() ? 'Entrega Atrasada!' : null)
-                            ->date('d/m/Y')
-                            ->sortable(),
-                        TextColumn::make('status')
-                            ->label('Situação') // label just for orderBy option
-                            ->badge()
-                            ->color(fn (RegisterStatusEnum $state): string => $state->color())
-                            ->formatStateUsing(fn (RegisterStatusEnum $state): string => $state->localizedLabel())
-                            ->sortable()
-                            ->searchable(),
-                        TextColumn::make('latestAuthorizedCteDocument.cte_number')
-                            ->label('CT-e autorizado')
-                            ->badge()
-                            ->color('success')
-                            ->placeholder('-'),
-                        TextColumn::make('unresolved_removal_imports_exists')
-                            ->label('Integração')
-                            ->state(fn (Register $record): ?string => self::removalImportSummary($record))
-                            ->badge()
-                            ->icon('heroicon-o-exclamation-triangle')
-                            ->color('warning')
-                            ->action(
-                                Action::make('acknowledgeRemovalImport')
-                                    ->requiresConfirmation()
-                                    ->modalHeading('Tomar ciência das alterações')
-                                    ->modalDescription('Confirma ter ciência das alterações sinalizadas nesta importação? O aviso deixará de ser exibido.')
-                                    ->visible(fn (Register $record): bool => self::firstUnresolvedRemovalImport($record)?->status === 'alert')
-                                    ->action(function (Register $record): void {
-                                        $item = self::firstUnresolvedRemovalImport($record);
-
-                                        if ($item === null) {
-                                            return;
-                                        }
-
-                                        try {
-                                            app(ResolveRemovalRequestImport::class)->acknowledge($item, auth()->user());
-
-                                            Notification::make()
-                                                ->title('Ciência registrada com sucesso.')
-                                                ->success()
-                                                ->send();
-                                        } catch (Throwable $exception) {
-                                            Notification::make()
-                                                ->title('Não foi possível registrar a ciência.')
-                                                ->body($exception->getMessage())
-                                                ->danger()
-                                                ->send();
-                                        }
-                                    })
-                            ),
-                    ]),
-
-                    Stack::make([
-                        TextColumn::make('pdf_path')
-                            ->label('Carta de Remoção')
-                            ->icon('heroicon-o-document-text')
-                            ->formatStateUsing(fn () => 'Ver PDF')
-                            ->url(fn ($record): ?string => $record->pdf_path ? Storage::disk('s3')->url($record->pdf_path) : null)
-                            ->openUrlInNewTab()
-                            ->hidden(fn (?Register $record) => $record?->company === CompanyEnum::MILLAN),
-                        TextColumn::make('consignor_letter_path')
-                            ->label('Carta do Comitente')
-                            ->icon('heroicon-o-document-text')
-                            ->formatStateUsing(fn (?string $state): ?string => $state ? 'Comitente' : null)
-                            ->url(fn (?Register $record): ?string => $record?->consignor_letter_path ? Storage::disk('s3')->url($record->consignor_letter_path) : null)
-                            ->openUrlInNewTab()
-                            ->hidden(fn (?Register $record) => $record?->company === CompanyEnum::MILLAN),
-                    ]),
-                ]),
-
-                Panel::make([
-                    Stack::make([
-                        TextColumn::make('driver')
-                            ->formatStateUsing(fn ($state) => '<strong> Motorista: </strong>'.$state ?: '-')
-                            ->html()
-                            ->icon('heroicon-o-user')
-                            ->searchable(),
-                        TextColumn::make('driver_plate')
-                            ->formatStateUsing(fn ($state) => '<strong> Placa guincho: </strong>'.$state ?: '-')
-                            ->html()
-                            ->icon('heroicon-o-truck')
-                            ->searchable(),
-                        TextColumn::make('collected_date')
-                            ->date('d/m/Y')
-                            ->placeholder('-')
-                            ->icon('heroicon-o-check-circle'),
-                        TextColumn::make('tow_yard')
-                            ->formatStateUsing(fn ($state) => '<strong> Pátio: </strong>'.$state ?: '-')
-                            ->html()
-                            ->icon('heroicon-o-home'),
-                        TextColumn::make('vehicle_id')
-                            ->icon('heroicon-o-identification')
-                            ->searchable(),
-                        TextColumn::make('notes')
-                            ->formatStateUsing(fn (?string $state): ?string => $state ? '<strong>Obs.: </strong>'.nl2br(e($state)) : null)
-                            ->wrap()
-                            ->html(),
-                        TextColumn::make('value')
-                            ->formatStateUsing(fn ($state) => '<strong> Valor: R$ </strong>'.str_replace('.', ',', $state))
-                            ->html(),
-
-                    ]),
-                ])->collapsed(),
-            ])
+            ->columns(self::tableColumns())
+            ->striped()
+            ->searchPlaceholder('Buscar placa, modelo ou cidade')
             ->emptyStateHeading('Não há registros!')
             ->emptyStateDescription('Nenhum registro encontrado. Tente ajustar sua busca ou crie um novo registro.')
-            ->filters([
-                SelectFilter::make('company')
-                    ->options([
-                        'copart' => 'Copart',
-                        'millan' => 'Millan',
-                    ]),
-                SelectFilter::make('status')
-                    ->label('Situação')
-                    ->options(RegisterStatusEnum::optionsWithLabels()),
-                TernaryFilter::make('cte_autorizado')
-                    ->label('CT-e autorizado')
-                    ->placeholder('Todos')
-                    ->trueLabel('Com CT-e autorizado')
-                    ->falseLabel('Sem CT-e autorizado')
-                    ->queries(
-                        true: fn (Builder $query): Builder => $query->whereHas(
-                            'cteDocuments',
-                            fn (Builder $query): Builder => $query->where('status', CteDocumentStatusEnum::AUTHORIZED),
-                        ),
-                        false: fn (Builder $query): Builder => $query->whereDoesntHave(
-                            'cteDocuments',
-                            fn (Builder $query): Builder => $query->where('status', CteDocumentStatusEnum::AUTHORIZED),
-                        ),
-                    ),
-            ])
+            ->filters(self::tableFilters(), layout: FiltersLayout::AboveContentCollapsible)
             ->actions([
                 Action::make('viewRemovalImport')
-                    ->label('Revisão')
+                    ->label(fn (Register $record): string => 'Revisão: '.(self::removalImportSummary($record) ?? 'pendente'))
                     ->icon('heroicon-o-exclamation-triangle')
                     ->color('warning')
                     ->visible(fn (Register $record): bool => self::hasUnresolvedRemovalImport($record))
@@ -561,7 +470,7 @@ class RegisterResource extends Resource
                     }),
                 EditAction::make()->iconButton(),
                 Action::make('updateStatusSingle')
-                    ->label('Atual. Situação')
+                    ->label('Situação')
                     ->icon('heroicon-o-arrow-path')
                     ->form(self::getUpdateStatusFormSchema())
                     ->action(function (array $data, Register $record): void {
@@ -569,6 +478,14 @@ class RegisterResource extends Resource
                     })
                     ->color('primary')
                     ->modalWidth('lg'),
+                Action::make('openPdf')
+                    ->label('PDF')
+                    ->icon('heroicon-o-document-text')
+                    ->url(fn (Register $record): ?string => $record->pdf_path
+                        ? Storage::disk('s3')->url($record->pdf_path)
+                        : null)
+                    ->openUrlInNewTab()
+                    ->visible(fn (Register $record): bool => filled($record->pdf_path)),
             ])
             ->bulkActions([
                 BulkActionGroup::make([
@@ -605,6 +522,36 @@ class RegisterResource extends Resource
                             return Excel::download(new RegistersExport($records), $filename, ExcelExcel::XLSX);
                         })
                         ->deselectRecordsAfterCompletion(),
+                    BulkAction::make('copyAsImage')
+                        ->label('Copiar como imagem')
+                        ->icon('heroicon-o-photo')
+                        ->action(function (Collection $records, LivewireComponent $livewire): void {
+                            $rows = $records->map(fn (Register $record): array => [
+                                'plate' => $record->vehicle_plate,
+                                'model' => $record->vehicle_model,
+                                'origin' => $record->origin_city,
+                                'destination' => self::destinationWithInsurance($record->destination_city, $record),
+                                'withdraw' => $record->deadline_withdraw?->format('d/m') ?? '-',
+                                'delivery' => $record->deadline_delivery?->format('d/m') ?? '-',
+                                'status' => $record->status->localizedLabel(),
+                                'location' => $record->tow_yard ?: '-',
+                                'condition' => $record->condition ?? '',
+                                'value' => $record->value === null
+                                    ? '-'
+                                    : 'R$ '.number_format((float) $record->value, 2, ',', '.'),
+                                'colors' => [
+                                    'vehicle_plate_color' => $record->vehicle_plate_color,
+                                    'vehicle_model_color' => $record->vehicle_model_color,
+                                    'origin_city_color' => $record->origin_city_color,
+                                    'destination_city_color' => $record->destination_city_color,
+                                    'deadline_withdraw_color' => $record->deadline_withdraw_color,
+                                    'deadline_delivery_color' => $record->deadline_delivery_color,
+                                ],
+                            ])->values()->all();
+
+                            $livewire->dispatch('registers-copy-as-image', rows: $rows);
+                        })
+                        ->deselectRecordsAfterCompletion(),
                     BulkAction::make('exportJson')
                         ->label('Exportar para JSON')
                         ->icon('heroicon-o-code-bracket-square')
@@ -625,7 +572,9 @@ class RegisterResource extends Resource
                         ->modalWidth('lg')
                         ->deselectRecordsAfterCompletion(),
                 ])->label('Ações em massa'),
-            ])->modifyQueryUsing(function (Builder $query) {
+            ])
+            ->recordCheckboxPosition(RecordCheckboxPosition::BeforeCells)
+            ->modifyQueryUsing(function (Builder $query): void {
                 $query
                     ->withExists('unresolvedRemovalImports')
                     ->with('unresolvedRemovalImports:id,register_id,status,alerts,failure_reason')
@@ -633,6 +582,7 @@ class RegisterResource extends Resource
 
                 $query->orderByRaw("
                     CASE status
+                        WHEN 'analysis' THEN 0
                         WHEN 'pending' THEN 1
                         WHEN 'pending daily rates' THEN 2
                         WHEN 'available' THEN 3
@@ -644,6 +594,388 @@ class RegisterResource extends Resource
                 ")->orderBy('deadline_withdraw', 'asc');
             })
             ->recordUrl(fn (Register $record): string => static::getUrl('view', ['record' => $record]));
+    }
+
+    /** @return array<int, Column> */
+    private static function tableColumns(): array
+    {
+        $columns = [
+            TextColumn::make('company')
+                ->label('Empresa')
+                ->formatStateUsing(fn (CompanyEnum $state): string => $state->getLabel() ?? $state->value)
+                ->sortable()
+                ->toggleable(isToggledHiddenByDefault: true),
+            TextColumn::make('vehicle_plate')
+                ->label('Placa')
+                ->width('6rem')
+                ->weight('bold')
+                ->color(fn (Register $record): string => self::spreadsheetCellTextColor($record, 'vehicle_plate_color'))
+                ->tooltip('Clique para alterar a cor da placa')
+                ->extraCellAttributes(fn (Register $record): array => self::spreadsheetMobileRecordLinkAttributes($record))
+                ->action(self::spreadsheetCellColorAction('vehicle_plate_color'))
+                ->searchable(),
+            TextColumn::make('vehicle_model')
+                ->label('Modelo')
+                ->width('11rem')
+                ->wrap()
+                ->color(fn (Register $record): string => self::spreadsheetCellTextColor($record, 'vehicle_model_color'))
+                ->tooltip('Clique para alterar a cor do modelo')
+                ->extraCellAttributes(fn (Register $record): array => self::spreadsheetMobileRecordLinkAttributes($record))
+                ->action(self::spreadsheetCellColorAction('vehicle_model_color'))
+                ->searchable(
+                    query: function (Builder $query, string $search): Builder {
+                        return $query
+                            ->where('vehicle_model', 'like', "%{$search}%")
+                            ->orWhereHas('cteDocuments', fn (Builder $query): Builder => $query->where('cte_number', 'like', "%{$search}%"));
+                    },
+                ),
+            TextColumn::make('origin_city')
+                ->label('Origem')
+                ->color(fn (Register $record): string => self::spreadsheetCellTextColor($record, 'origin_city_color'))
+                ->tooltip('Clique para alterar a cor da origem')
+                ->extraCellAttributes(fn (Register $record): array => self::spreadsheetMobileRecordLinkAttributes($record))
+                ->action(self::spreadsheetCellColorAction('origin_city_color'))
+                ->searchable(),
+            TextColumn::make('destination_city')
+                ->label('Destino')
+                ->formatStateUsing(fn (string $state, Register $record): string => self::destinationWithInsurance($state, $record))
+                ->color(fn (Register $record): string => self::spreadsheetCellTextColor($record, 'destination_city_color'))
+                ->tooltip('Clique para alterar a cor do destino')
+                ->extraCellAttributes(fn (Register $record): array => self::spreadsheetMobileRecordLinkAttributes($record))
+                ->action(self::spreadsheetCellColorAction('destination_city_color'))
+                ->searchable(),
+            TextColumn::make('vehicle_id')
+                ->label('Código')
+                ->searchable()
+                ->sortable()
+                ->toggleable(isToggledHiddenByDefault: true),
+            TextColumn::make('deadline_withdraw')
+                ->label('Coleta')
+                ->date('d/m')
+                ->width('3.75rem')
+                ->alignCenter()
+                ->color(fn (Register $record): string => self::spreadsheetCellTextColor($record, 'deadline_withdraw_color'))
+                ->tooltip('Clique para alterar a cor da data de coleta')
+                ->extraCellAttributes(fn (Register $record): array => self::spreadsheetMobileRecordLinkAttributes($record))
+                ->action(self::spreadsheetCellColorAction('deadline_withdraw_color'))
+                ->sortable(),
+            TextColumn::make('collected_date')
+                ->label('Data da coleta efetiva')
+                ->date('d/m/Y')
+                ->placeholder('-')
+                ->sortable()
+                ->toggleable(isToggledHiddenByDefault: true),
+            TextColumn::make('deadline_delivery')
+                ->label('Entrega')
+                ->date('d/m')
+                ->width('3.75rem')
+                ->alignCenter()
+                ->color(fn (Register $record): string => self::spreadsheetCellTextColor($record, 'deadline_delivery_color'))
+                ->tooltip('Clique para alterar a cor da data de entrega')
+                ->extraCellAttributes(fn (Register $record): array => self::spreadsheetMobileRecordLinkAttributes($record))
+                ->action(self::spreadsheetCellColorAction('deadline_delivery_color'))
+                ->sortable(),
+            TextColumn::make('delivery_confirmed_at')
+                ->label('Entrega confirmada')
+                ->date('d/m/Y')
+                ->placeholder('-')
+                ->sortable()
+                ->toggleable(isToggledHiddenByDefault: true),
+            TextColumn::make('status')
+                ->label('Situação')
+                ->width('8rem')
+                ->badge()
+                ->color(fn (RegisterStatusEnum $state): string => $state->color())
+                ->formatStateUsing(fn (RegisterStatusEnum $state): string => $state->localizedLabel())
+                ->searchable(),
+            TextColumn::make('latestAuthorizedCteDocument.cte_number')
+                ->label('CT-e autorizado')
+                ->badge()
+                ->color('success')
+                ->placeholder('-')
+                ->searchable()
+                ->toggleable(isToggledHiddenByDefault: true),
+            TextColumn::make('unresolved_removal_imports_exists')
+                ->label('Integração')
+                ->state(fn (Register $record): ?string => self::removalImportSummary($record))
+                ->badge()
+                ->icon('heroicon-o-exclamation-triangle')
+                ->color('warning')
+                ->action(
+                    Action::make('acknowledgeRemovalImport')
+                        ->requiresConfirmation()
+                        ->modalHeading('Tomar ciência das alterações')
+                        ->modalDescription('Confirma ter ciência das alterações sinalizadas nesta importação? O aviso deixará de ser exibido.')
+                        ->visible(fn (Register $record): bool => self::firstUnresolvedRemovalImport($record)?->status === 'alert')
+                        ->action(function (Register $record): void {
+                            $item = self::firstUnresolvedRemovalImport($record);
+
+                            if ($item === null) {
+                                return;
+                            }
+
+                            try {
+                                app(ResolveRemovalRequestImport::class)->acknowledge($item, auth()->user());
+
+                                Notification::make()
+                                    ->title('Ciência registrada com sucesso.')
+                                    ->success()
+                                    ->send();
+                            } catch (Throwable $exception) {
+                                Notification::make()
+                                    ->title('Não foi possível registrar a ciência.')
+                                    ->body($exception->getMessage())
+                                    ->danger()
+                                    ->send();
+                            }
+                        })
+                )
+                ->toggleable(isToggledHiddenByDefault: true),
+            TextColumn::make('driver')
+                ->label('Motorista')
+                ->searchable()
+                ->toggleable(isToggledHiddenByDefault: true),
+            TextColumn::make('driver_plate')
+                ->label('Placa guincho')
+                ->searchable()
+                ->toggleable(isToggledHiddenByDefault: true),
+            TextColumn::make('tow_yard')
+                ->label('Local')
+                ->width('7rem')
+                ->wrap()
+                ->searchable()
+                ->toggleable(),
+            SelectColumn::make('condition')
+                ->label('Condição')
+                ->width('6rem')
+                ->wrapHeader()
+                ->options(self::VEHICLE_CONDITION_OPTIONS)
+                ->placeholder('—')
+                ->selectablePlaceholder()
+                ->rules(['nullable', Rule::in(array_keys(self::VEHICLE_CONDITION_OPTIONS))]),
+            TextColumn::make('value')
+                ->label('Valor')
+                ->width('8rem')
+                ->formatStateUsing(fn (mixed $state): string => $state === null ? '-' : 'R$ '.number_format((float) $state, 2, ',', '.')),
+            TextColumn::make('fipe_value')
+                ->label('Valor FIPE')
+                ->formatStateUsing(fn (mixed $state): string => $state === null ? '-' : 'R$ '.number_format((float) $state, 2, ',', '.'))
+                ->sortable()
+                ->toggleable(isToggledHiddenByDefault: true),
+            TextColumn::make('insurance')
+                ->label('Seguradora')
+                ->searchable()
+                ->toggleable(isToggledHiddenByDefault: true),
+            TextColumn::make('payment_code')
+                ->label('Código pagamento')
+                ->searchable()
+                ->toggleable(isToggledHiddenByDefault: true),
+            TextColumn::make('payment_deferred_at')
+                ->label('Pagamento adiado')
+                ->dateTime('d/m/Y H:i')
+                ->placeholder('-')
+                ->sortable()
+                ->toggleable(isToggledHiddenByDefault: true),
+            TextColumn::make('notes')
+                ->label('Observações')
+                ->searchable()
+                ->wrap()
+                ->limit(60)
+                ->tooltip(fn (?string $state): ?string => $state)
+                ->toggleable(isToggledHiddenByDefault: true),
+            TextColumn::make('pdf_path')
+                ->label('Carta remoção')
+                ->formatStateUsing(fn (?string $state): ?string => $state ? 'Abrir PDF' : '-')
+                ->url(fn (?Register $record): ?string => $record?->pdf_path ? Storage::disk('s3')->url($record->pdf_path) : null)
+                ->openUrlInNewTab()
+                ->hidden(fn (?Register $record): bool => $record?->company === CompanyEnum::MILLAN)
+                ->toggleable(isToggledHiddenByDefault: true),
+            TextColumn::make('consignor_letter_path')
+                ->label('Carta comitente')
+                ->formatStateUsing(fn (?string $state): ?string => $state ? 'Comitente' : '-')
+                ->url(fn (?Register $record): ?string => $record?->consignor_letter_path ? Storage::disk('s3')->url($record->consignor_letter_path) : null)
+                ->openUrlInNewTab()
+                ->hidden(fn (?Register $record): bool => $record?->company === CompanyEnum::MILLAN)
+                ->toggleable(isToggledHiddenByDefault: true),
+        ];
+
+        foreach ($columns as $column) {
+            if (in_array($column->getName(), self::SPREADSHEET_FILTERABLE_COLUMNS, true)) {
+                $column->extraHeaderAttributes(['data-register-column-filter-header' => 'true']);
+            }
+        }
+
+        return $columns;
+    }
+
+    /** @return array<int, Filter|SelectFilter|TernaryFilter> */
+    private static function tableFilters(): array
+    {
+        return [
+            SelectFilter::make('company')
+                ->label('Empresa')
+                ->options([
+                    'copart' => 'Copart',
+                    'millan' => 'Millan',
+                ]),
+            TernaryFilter::make('cte_autorizado')
+                ->label('CT-e autorizado')
+                ->placeholder('Todos')
+                ->trueLabel('Com CT-e autorizado')
+                ->falseLabel('Sem CT-e autorizado')
+                ->queries(
+                    true: fn (Builder $query): Builder => $query->whereHas(
+                        'cteDocuments',
+                        fn (Builder $query): Builder => $query->where('status', CteDocumentStatusEnum::AUTHORIZED),
+                    ),
+                    false: fn (Builder $query): Builder => $query->whereDoesntHave(
+                        'cteDocuments',
+                        fn (Builder $query): Builder => $query->where('status', CteDocumentStatusEnum::AUTHORIZED),
+                    ),
+                ),
+            self::dateRangeFilter('payment_deferred_at', 'Pagamento adiado'),
+            self::decimalRangeFilter('fipe_value', 'Valor FIPE'),
+        ];
+    }
+
+    /** @return array<string, string> */
+    public static function spreadsheetColumnColorOptions(string $column): array
+    {
+        $attribute = self::SPREADSHEET_COLUMN_COLOR_ATTRIBUTES[$column] ?? null;
+
+        return $attribute === null ? [] : self::spreadsheetColorOptions($attribute);
+    }
+
+    public static function spreadsheetColorAttributeForColumn(string $column): ?string
+    {
+        return self::SPREADSHEET_COLUMN_COLOR_ATTRIBUTES[$column] ?? null;
+    }
+
+    /** @return array<int, string> */
+    public static function spreadsheetTowYardFilterOptions(): array
+    {
+        return Register::query()
+            ->whereNotNull('tow_yard')
+            ->where('tow_yard', '!=', '')
+            ->distinct()
+            ->orderBy('tow_yard')
+            ->pluck('tow_yard')
+            ->all();
+    }
+
+    /** @return array<string, string> */
+    private static function spreadsheetMobileRecordLinkAttributes(Register $record): array
+    {
+        return [
+            'data-register-record-url' => static::getUrl('view', ['record' => $record]),
+        ];
+    }
+
+    private static function destinationWithInsurance(string $destination, Register $record): string
+    {
+        return filled($record->insurance)
+            ? "{$destination} - {$record->insurance}"
+            : $destination;
+    }
+
+    private static function spreadsheetCellColorAction(string $attribute): Action
+    {
+        $options = self::spreadsheetColorOptions($attribute);
+        $label = self::SPREADSHEET_COLOR_FIELD_LABELS[$attribute];
+
+        return Action::make('edit'.Str::studly($attribute))
+            ->label("Alterar cor de {$label}")
+            ->modalHeading("Alterar cor de {$label}")
+            ->modalSubmitActionLabel('Aplicar cor')
+            ->modalWidth('sm')
+            ->fillForm(fn (Register $record): array => [
+                'color' => in_array($record->{$attribute}, [null, 'black'], true)
+                    ? 'automatic'
+                    : $record->{$attribute},
+            ])
+            ->form([
+                Select::make('color')
+                    ->label('Destaque')
+                    ->options($options)
+                    ->required()
+                    ->in(array_keys($options))
+                    ->native(false),
+            ])
+            ->action(function (Register $record, array $data) use ($attribute): void {
+                $record->update([
+                    $attribute => $data['color'] === 'automatic' ? null : $data['color'],
+                ]);
+            });
+    }
+
+    /** @return array<string, string> */
+    private static function spreadsheetColorOptions(string $attribute): array
+    {
+        return [
+            'automatic' => 'Automático — sem marcação',
+            ...self::SPREADSHEET_COLOR_CHOICES[$attribute],
+        ];
+    }
+
+    private static function spreadsheetCellTextColor(Register $record, string $attribute): string
+    {
+        return match ($record->{$attribute}) {
+            'blue' => 'info',
+            'red' => 'danger',
+            'yellow' => 'warning',
+            'green' => 'success',
+            default => 'gray',
+        };
+    }
+
+    private static function dateRangeFilter(string $column, string $label): Filter
+    {
+        return Filter::make("{$column}_range")
+            ->label($label)
+            ->form([
+                DatePicker::make('from')
+                    ->label('De')
+                    ->native(false),
+                DatePicker::make('until')
+                    ->label('Até')
+                    ->native(false),
+            ])
+            ->query(function (Builder $query, array $data) use ($column): Builder {
+                return $query
+                    ->when(
+                        $data['from'] ?? null,
+                        fn (Builder $query, string $date): Builder => $query->whereDate($column, '>=', $date),
+                    )
+                    ->when(
+                        $data['until'] ?? null,
+                        fn (Builder $query, string $date): Builder => $query->whereDate($column, '<=', $date),
+                    );
+            });
+    }
+
+    private static function decimalRangeFilter(string $column, string $label): Filter
+    {
+        return Filter::make("{$column}_range")
+            ->label($label)
+            ->form([
+                TextInput::make('minimum')
+                    ->label('Mínimo')
+                    ->numeric(),
+                TextInput::make('maximum')
+                    ->label('Máximo')
+                    ->numeric(),
+            ])
+            ->query(function (Builder $query, array $data) use ($column): Builder {
+                return $query
+                    ->when(
+                        $data['minimum'] ?? null,
+                        fn (Builder $query, string $minimum): Builder => $query->where($column, '>=', $minimum),
+                    )
+                    ->when(
+                        $data['maximum'] ?? null,
+                        fn (Builder $query, string $maximum): Builder => $query->where($column, '<=', $maximum),
+                    );
+            });
     }
 
     protected static function getUpdateStatusFormSchema(): array

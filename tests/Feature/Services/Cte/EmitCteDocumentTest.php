@@ -5,6 +5,7 @@ namespace Tests\Feature\Services\Cte;
 use App\Enums\CteDocumentStatusEnum;
 use App\Enums\RegisterStatusEnum;
 use App\Jobs\EmitCteDirectJob;
+use App\Models\IntegrationInboxItem;
 use App\Services\Cte\CreateAlcoholCteDocument;
 use App\Services\Cte\EmitCteDocument;
 use App\Services\Cte\QueueCteDocumentEmission;
@@ -53,6 +54,38 @@ class EmitCteDocumentTest extends TestCase
         $document = $this->liveDirectDocument();
 
         $this->assertSame(RegisterStatusEnum::PENDING, $document->register->refresh()->status);
+    }
+
+    public function test_authorization_completes_analysis_and_reuses_the_original_delivery(): void
+    {
+        DfeSoapResponses::fakeOnline($this->baseUrl);
+        DfeSoapResponses::fakeTransmission($this->baseUrl);
+        $document = $this->liveDirectDocument();
+        $register = $document->register;
+        $register->update(['status' => RegisterStatusEnum::ANALYSIS, 'delivery_confirmed_at' => '2026-10-01 12:00:00']);
+        $item = IntegrationInboxItem::factory()->create([
+            'register_id' => $register->id, 'message_type' => 'cte_error', 'status' => 'alert',
+        ]);
+
+        app(EmitCteDocument::class)->attempt($document);
+
+        $this->assertSame(RegisterStatusEnum::DELIVERED, $register->refresh()->status);
+        $this->assertSame('2026-10-01 12:00:00', $register->delivery_confirmed_at->toDateTimeString());
+        $this->assertNotNull($item->refresh()->resolved_at);
+    }
+
+    public function test_authorization_without_delivery_moves_analysis_to_invoiced(): void
+    {
+        DfeSoapResponses::fakeOnline($this->baseUrl);
+        DfeSoapResponses::fakeTransmission($this->baseUrl);
+        $document = $this->liveDirectDocument();
+        $register = $document->register;
+        $register->update(['status' => RegisterStatusEnum::ANALYSIS]);
+
+        app(EmitCteDocument::class)->attempt($document);
+
+        $this->assertSame(RegisterStatusEnum::INVOICED, $register->refresh()->status);
+        $this->assertNull($register->delivery_confirmed_at);
     }
 
     public function test_attempt_authorizes_the_document_and_stores_the_cte_proc(): void
@@ -210,10 +243,12 @@ class EmitCteDocumentTest extends TestCase
         DfeSoapResponses::fakeTransmission($this->baseUrl, cStat: '225', xMotivo: 'Rejeicao: Duplicidade de CT-e');
 
         $document = $this->liveDirectDocument();
+        $document->register->update(['status' => RegisterStatusEnum::ANALYSIS]);
 
         $document = app(EmitCteDocument::class)->attempt($document)->refresh();
 
         $this->assertSame(CteDocumentStatusEnum::REJECTED, $document->status);
+        $this->assertSame(RegisterStatusEnum::ANALYSIS, $document->register->refresh()->status);
         $this->assertSame('not_authorized', $document->fiscal_status->value);
         $this->assertSame('225', $document->fiscal_status_code);
         $this->assertStringContainsString('Duplicidade', (string) $document->fiscal_status_message);

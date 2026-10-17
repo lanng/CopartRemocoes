@@ -90,16 +90,28 @@ class ProcessChecklistEmail
             }
 
             $previousRegisterStatus = $register->status->value;
+            if ($register->status === RegisterStatusEnum::ANALYSIS) {
+                $previousRegisterStatus = $register->integrationInboxItems()->openRegisterAnalyses()
+                    ->where('previous_register_status', '!=', RegisterStatusEnum::ANALYSIS->value)
+                    ->oldest('id')->value('previous_register_status');
+            }
             $authorizedCteNumber = $register->latestAuthorizedCteDocument()->value('cte_number');
             $authorizedCteNumber = blank($authorizedCteNumber) ? null : $authorizedCteNumber;
-            $deliveryAlert = in_array($register->status, [
-                RegisterStatusEnum::INVOICED,
-                RegisterStatusEnum::DELIVERED,
-            ], true)
-                ? null
-                : ($authorizedCteNumber !== null ? 'unexpected_status' : 'missing_authorized_cte');
+            $deliveryAlert = match (true) {
+                $register->status === RegisterStatusEnum::ANALYSIS => 'under_analysis',
+                $authorizedCteNumber === null => 'missing_authorized_cte',
+                in_array($register->status, [RegisterStatusEnum::INVOICED, RegisterStatusEnum::DELIVERED], true) => null,
+                default => 'unexpected_status',
+            };
 
             if ($deliveryAlert !== null) {
+                if (in_array($deliveryAlert, ['missing_authorized_cte', 'under_analysis'], true)) {
+                    $register->forceFill([
+                        'delivery_confirmed_at' => $receivedAt,
+                        'status' => RegisterStatusEnum::ANALYSIS,
+                    ])->save();
+                }
+
                 $item->update([
                     'register_id' => $register->id,
                     'status' => 'pending',

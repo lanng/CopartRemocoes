@@ -5,6 +5,7 @@ namespace App\Models;
 use App\Enums\CompanyEnum;
 use App\Enums\CteDocumentStatusEnum;
 use App\Enums\RegisterStatusEnum;
+use App\Services\MicrosoftGraph\ResolveCteErrorAnalysis;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\HasMany;
@@ -20,6 +21,14 @@ class Register extends Model
     protected static function boot(): void
     {
         parent::boot();
+
+        static::updated(function (Register $register): void {
+            if ($register->wasChanged('status')
+                && $register->getRawOriginal('status') === RegisterStatusEnum::ANALYSIS->value
+                && $register->status !== RegisterStatusEnum::ANALYSIS) {
+                app(ResolveCteErrorAnalysis::class)->completeForRegister($register);
+            }
+        });
 
         static::deleting(function ($register) {
             $paths = array_values(array_filter([
@@ -39,8 +48,15 @@ class Register extends Model
         'vehicle_plate',
         'origin_city',
         'destination_city',
+        'condition',
+        'vehicle_plate_color',
+        'vehicle_model_color',
+        'origin_city_color',
+        'destination_city_color',
         'deadline_withdraw',
+        'deadline_withdraw_color',
         'deadline_delivery',
+        'deadline_delivery_color',
         'collected_date',
         'delivery_confirmed_at',
         'payment_deferred_at',
@@ -140,8 +156,15 @@ class Register extends Model
                 'vehicle_plate',
                 'origin_city',
                 'destination_city',
+                'condition',
+                'vehicle_plate_color',
+                'vehicle_model_color',
+                'origin_city_color',
+                'destination_city_color',
                 'deadline_withdraw',
+                'deadline_withdraw_color',
                 'deadline_delivery',
+                'deadline_delivery_color',
                 'vehicle_id',
                 'value',
                 'notes',

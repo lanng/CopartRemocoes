@@ -4,6 +4,7 @@ namespace App\Filament\Widgets;
 
 use App\Filament\Support\ChecklistConciliationAction;
 use App\Filament\Support\IntegrationInboxItemPresentation;
+use App\Filament\Support\ReviewCteErrorAction;
 use App\Filament\Support\ReviewRemovalRequestAction;
 use App\Models\IntegrationInboxItem;
 use App\Services\MicrosoftGraph\RemovalRequests\ResolveRemovalRequestImport;
@@ -43,6 +44,7 @@ class ActionableIntegrations extends BaseWidget
                     ->formatStateUsing(fn (string $state): string => match ($state) {
                         'removal_request' => 'Inclusão de registro',
                         'checklist' => 'Baixa de entrega',
+                        'cte_error' => 'Erro no CT-e',
                         default => $state,
                     }),
                 Tables\Columns\TextColumn::make('subject')
@@ -72,6 +74,7 @@ class ActionableIntegrations extends BaseWidget
                         && IntegrationInboxItemPresentation::matchingRegisterOptions($record) === []
                         ? 'Nenhum registro compatível encontrado para esta baixa.'
                         : 'Conciliar'),
+                ReviewCteErrorAction::make()->iconButton()->tooltip('Revisar erro no CT-e'),
                 ReviewRemovalRequestAction::make()
                     ->iconButton()
                     ->tooltip('Revisar'),

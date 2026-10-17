@@ -72,7 +72,7 @@ class CreateCteEmissionBatchTest extends TestCase
     public function test_it_creates_a_replacement_document_when_the_reemission_is_confirmed(): void
     {
         $user = User::factory()->create();
-        $register = Register::factory()->create();
+        $register = Register::factory()->create(['status' => 'analysis']);
         $oldBatch = CteEmissionBatch::factory()->create([
             'status' => CteEmissionBatchStatusEnum::COMPLETED,
             'execution_mode' => 'live',
@@ -96,6 +96,7 @@ class CreateCteEmissionBatchTest extends TestCase
         $this->assertSame('Recusado pelo contratante', $document->replacement_reason);
         $this->assertSame(CteDocumentStatusEnum::DRAFT, $document->status);
         $this->assertSame(CteDocumentStatusEnum::AUTHORIZED, $oldDocument->refresh()->status);
+        $this->assertSame('analysis', $register->refresh()->status->value);
     }
 
     public function test_it_links_only_the_registers_that_have_an_authorized_cte(): void

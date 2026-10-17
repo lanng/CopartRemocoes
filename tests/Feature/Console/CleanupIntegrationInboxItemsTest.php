@@ -75,4 +75,25 @@ class CleanupIntegrationInboxItemsTest extends TestCase
 
         $this->assertModelExists($item);
     }
+
+    public function test_it_retains_canonical_cte_errors_for_deduplication_but_deletes_old_duplicates(): void
+    {
+        $original = IntegrationInboxItem::factory()->create([
+            'message_type' => 'cte_error',
+            'status' => 'processed',
+            'resolved_at' => Carbon::now()->subDays(31),
+            'extracted_data' => ['cte_document_id' => 1, 'error_fingerprint' => 'fingerprint'],
+        ]);
+        $duplicate = IntegrationInboxItem::factory()->create([
+            'message_type' => 'cte_error',
+            'status' => 'duplicate',
+            'resolved_at' => Carbon::now()->subDays(31),
+            'extracted_data' => ['duplicate_of' => $original->id],
+        ]);
+
+        $this->artisan('app:cleanup-integration-inbox-items')->assertSuccessful();
+
+        $this->assertModelExists($original);
+        $this->assertModelMissing($duplicate);
+    }
 }

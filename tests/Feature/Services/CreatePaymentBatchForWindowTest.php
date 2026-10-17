@@ -8,6 +8,7 @@ use App\Models\CteDocument;
 use App\Models\PaymentBatch;
 use App\Models\PaymentBatchRun;
 use App\Models\Register;
+use App\Services\Cte\MarkRegisterInvoicedForCte;
 use App\Services\Payments\CreatePaymentBatchForWindow;
 use App\Services\Payments\PaymentBatchWindow;
 use Carbon\CarbonImmutable;
@@ -59,6 +60,49 @@ class CreatePaymentBatchForWindowTest extends TestCase
         $this->assertNull($batch);
         $this->assertSame('empty', PaymentBatchRun::first()->result);
         $this->assertSame(0, PaymentBatch::query()->count());
+    }
+
+    public function test_analysis_never_enters_payment_batches_even_with_delivery_and_deferral(): void
+    {
+        Register::factory()->create([
+            'status' => RegisterStatusEnum::ANALYSIS,
+            'delivery_confirmed_at' => '2026-08-08 12:00:00',
+            'payment_deferred_at' => '2026-08-20 12:00:00',
+        ]);
+
+        $this->assertNull(app(CreatePaymentBatchForWindow::class)->handle($this->window()));
+        $this->assertDatabaseCount('payment_batch_items', 0);
+    }
+
+    public function test_late_cte_authorization_keeps_the_original_delivery_window_for_payment(): void
+    {
+        $register = Register::factory()->create([
+            'status' => RegisterStatusEnum::ANALYSIS, 'delivery_confirmed_at' => '2026-08-08 12:00:00',
+        ]);
+        $document = CteDocument::factory()->authorized()->create([
+            'register_id' => $register->id, 'cte_number' => '3015', 'authorized_at' => '2026-08-20 12:00:00',
+        ]);
+        app(MarkRegisterInvoicedForCte::class)->handle($document);
+
+        $batch = app(CreatePaymentBatchForWindow::class)->handle($this->window());
+
+        $this->assertSame(RegisterStatusEnum::DELIVERED, $register->refresh()->status);
+        $this->assertSame('2026-08-08 12:00:00', $batch->items()->first()->delivery_confirmed_at->toDateTimeString());
+        $this->assertSame('3015', $batch->items()->first()->cte_number);
+    }
+
+    public function test_a_window_processed_during_analysis_is_not_automatically_reopened(): void
+    {
+        $register = Register::factory()->create([
+            'status' => RegisterStatusEnum::ANALYSIS, 'delivery_confirmed_at' => '2026-08-08 12:00:00',
+        ]);
+        $service = app(CreatePaymentBatchForWindow::class);
+        $this->assertNull($service->handle($this->window()));
+        $register->update(['status' => RegisterStatusEnum::DELIVERED]);
+
+        $this->assertNull($service->handle($this->window()));
+        $this->assertDatabaseCount('payment_batch_items', 0);
+        $this->assertDatabaseCount('payment_batch_runs', 1);
     }
 
     public function test_rerunning_a_window_does_not_duplicate_its_batch(): void

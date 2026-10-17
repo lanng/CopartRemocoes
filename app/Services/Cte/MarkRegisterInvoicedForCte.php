@@ -16,11 +16,17 @@ class MarkRegisterInvoicedForCte
 
         $register = Register::query()->lockForUpdate()->find($document->register_id);
 
-        if ($register === null || $register->status === RegisterStatusEnum::INVOICED) {
+        if ($register === null) {
             return;
         }
 
-        $register->status = RegisterStatusEnum::INVOICED;
+        $status = $register->delivery_confirmed_at !== null ? RegisterStatusEnum::DELIVERED : RegisterStatusEnum::INVOICED;
+
+        if ($register->status === $status) {
+            return;
+        }
+
+        $register->status = $status;
         $register->save();
     }
 }

@@ -5,6 +5,7 @@ namespace App\Filament\Resources;
 use App\Enums\RegisterStatusEnum;
 use App\Filament\Resources\IntegrationInboxItemResource\Pages;
 use App\Filament\Support\ChecklistConciliationAction;
+use App\Filament\Support\ReviewCteErrorAction;
 use App\Filament\Support\ReviewRemovalRequestAction;
 use App\Models\IntegrationInboxItem;
 use App\Services\MicrosoftGraph\RemovalRequests\ResolveRemovalRequestImport;
@@ -49,6 +50,10 @@ class IntegrationInboxItemResource extends Resource
             TextEntry::make('external_id'),
             TextEntry::make('sender'),
             TextEntry::make('subject'),
+            TextEntry::make('extracted_data.cte_number')->label('CT-e do aviso')
+                ->visible(fn (IntegrationInboxItem $record): bool => $record->isCteError()),
+            TextEntry::make('extracted_data.error_message')->label('Mensagem de erro')
+                ->visible(fn (IntegrationInboxItem $record): bool => $record->isCteError()),
             TextEntry::make('received_at')->dateTime('d/m/Y H:i')->timezone('America/Sao_Paulo'),
             TextEntry::make('extracted_vehicle_id')->label('ID veículo'),
             TextEntry::make('extracted_vehicle_plate')->label('Placa'),
@@ -98,6 +103,7 @@ class IntegrationInboxItemResource extends Resource
     public static function table(Table $table): Table
     {
         return $table
+            ->modifyQueryUsing(fn (Builder $query): Builder => $query->with('register'))
             ->columns([
                 Tables\Columns\TextColumn::make('status')->label('Situação')->formatStateUsing(fn (IntegrationInboxItem $record): string => $record->statusLabel())->badge()->searchable(),
                 Tables\Columns\TextColumn::make('message_type')
@@ -118,7 +124,8 @@ class IntegrationInboxItemResource extends Resource
                     ->visibleFrom('md'),
                 Tables\Columns\TextColumn::make('occurrence')
                     ->label('Ocorrência')
-                    ->state(fn (IntegrationInboxItem $record): ?string => $record->deliveryAlertLabel()
+                    ->state(fn (IntegrationInboxItem $record): ?string => ($record->isCteError() ? $record->actionLabel() : null)
+                        ?? $record->deliveryAlertLabel()
                         ?? ($record->hasRemovalAlert() ? implode(', ', $record->removalAlertLabels()) : null)
                         ?? $record->failureReasonLabel())
                     ->badge()
@@ -140,6 +147,7 @@ class IntegrationInboxItemResource extends Resource
                 Tables\Filters\SelectFilter::make('message_type')->label('Tipo')->options([
                     'checklist' => 'Checklist digital',
                     'removal_request' => 'Pedido de remoção',
+                    'cte_error' => 'Erro no CT-e',
                 ]),
                 Tables\Filters\TernaryFilter::make('has_delivery_alert')
                     ->label('Alerta')
@@ -165,6 +173,7 @@ class IntegrationInboxItemResource extends Resource
                 ChecklistConciliationAction::make()
                     ->iconButton()
                     ->tooltip('Conciliar'),
+                ReviewCteErrorAction::make()->iconButton()->tooltip('Revisar erro no CT-e'),
                 Tables\Actions\Action::make('acceptRemovalRequest')
                     ->label('Aceitar importação')
                     ->icon('heroicon-o-check-circle')

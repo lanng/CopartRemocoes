@@ -22,6 +22,7 @@ class ProcessChecklistEmailTest extends TestCase
             'vehicle_plate' => 'ESN4A20',
             'status' => 'invoiced',
         ]);
+        $this->authorizeCte($register);
 
         $result = app(ProcessChecklistEmail::class)->handle($this->message());
 
@@ -39,6 +40,7 @@ class ProcessChecklistEmailTest extends TestCase
             'vehicle_plate' => 'ESN4A20',
             'status' => 'invoiced',
         ]);
+        $this->authorizeCte($register);
 
         app(ProcessChecklistEmail::class)->handle($this->message());
         $result = app(ProcessChecklistEmail::class)->handle($this->message());
@@ -88,6 +90,7 @@ class ProcessChecklistEmailTest extends TestCase
             'vehicle_plate' => 'ESN4A20',
             'status' => 'invoiced',
         ]);
+        $this->authorizeCte($register);
         $message = $this->message();
         $message['sender'] = ' REMOCAO@COPART.COM.BR ';
         $message['subject'] = '  CHECKLIST DIGITAL - 1146609  ';
@@ -105,6 +108,7 @@ class ProcessChecklistEmailTest extends TestCase
             'vehicle_plate' => 'ESN4A20',
             'status' => 'invoiced',
         ]);
+        $this->authorizeCte($register);
         $message = $this->message();
         $message['sender'] = ' REMOCAO@COPART.COM.BR ';
 
@@ -241,7 +245,7 @@ class ProcessChecklistEmailTest extends TestCase
         $this->assertSame('3000', $result->authorized_cte_number_at_delivery);
     }
 
-    public function test_an_invoiced_register_without_a_cte_has_no_delivery_alert(): void
+    public function test_an_invoiced_register_without_a_cte_enters_analysis(): void
     {
         $register = Register::factory()->create([
             'vehicle_id' => '1146609',
@@ -251,13 +255,13 @@ class ProcessChecklistEmailTest extends TestCase
 
         $result = app(ProcessChecklistEmail::class)->handle($this->message());
 
-        $this->assertProcessedDelivery($result, $register);
+        $this->assertPendingDeliveryDecision($result, $register, 'missing_authorized_cte');
         $this->assertSame('invoiced', $result->previous_register_status);
-        $this->assertNull($result->delivery_alert);
+        $this->assertSame('missing_authorized_cte', $result->delivery_alert);
         $this->assertNull($result->authorized_cte_number_at_delivery);
     }
 
-    public function test_a_delivered_register_without_confirmation_or_cte_has_no_delivery_alert(): void
+    public function test_a_delivered_register_without_confirmation_or_cte_enters_analysis(): void
     {
         $register = Register::factory()->create([
             'vehicle_id' => '1146609',
@@ -267,9 +271,9 @@ class ProcessChecklistEmailTest extends TestCase
 
         $result = app(ProcessChecklistEmail::class)->handle($this->message());
 
-        $this->assertProcessedDelivery($result, $register);
+        $this->assertPendingDeliveryDecision($result, $register, 'missing_authorized_cte');
         $this->assertSame('delivered', $result->previous_register_status);
-        $this->assertNull($result->delivery_alert);
+        $this->assertSame('missing_authorized_cte', $result->delivery_alert);
         $this->assertNull($result->authorized_cte_number_at_delivery);
     }
 
@@ -317,12 +321,43 @@ class ProcessChecklistEmailTest extends TestCase
         $this->assertNull($result?->authorized_cte_number_at_delivery);
     }
 
-    private function assertProcessedDelivery(IntegrationInboxItem $item, Register $register): void
+    public function test_delivery_during_analysis_keeps_analysis_and_the_original_status_snapshot(): void
     {
-        $this->assertSame('processed', $item->status);
-        $this->assertSame($register->id, $item->register_id);
-        $this->assertSame('delivered', $register->refresh()->status->value);
+        $register = Register::factory()->create([
+            'vehicle_id' => '1146609', 'vehicle_plate' => 'ESN4A20', 'status' => 'analysis',
+        ]);
+        $this->authorizeCte($register);
+        IntegrationInboxItem::factory()->create([
+            'register_id' => $register->id, 'message_type' => 'cte_error',
+            'status' => 'alert', 'previous_register_status' => 'invoiced',
+        ]);
+
+        $item = app(ProcessChecklistEmail::class)->handle($this->message());
+
+        $this->assertSame('analysis', $register->refresh()->status->value);
         $this->assertSame('2026-08-06 17:51:36', $register->delivery_confirmed_at->utc()->format('Y-m-d H:i:s'));
+        $this->assertSame('under_analysis', $item->delivery_alert);
+        $this->assertSame('invoiced', $item->previous_register_status);
+        $this->assertNull($item->resolved_at);
+
+        $message = $this->message();
+        $message['external_id'] = 'another-checklist';
+        $message['receivedDateTime'] = '2026-08-06T19:51:36-03:00';
+        $duplicate = app(ProcessChecklistEmail::class)->handle($message);
+
+        $this->assertSame('duplicate', $duplicate->status);
+        $this->assertSame('analysis', $register->refresh()->status->value);
+        $this->assertSame('2026-08-06 17:51:36', $register->delivery_confirmed_at->utc()->format('Y-m-d H:i:s'));
+    }
+
+    private function authorizeCte(Register $register): void
+    {
+        CteDocument::factory()->create([
+            'register_id' => $register->id,
+            'status' => CteDocumentStatusEnum::AUTHORIZED,
+            'cte_number' => '2670',
+            'authorized_at' => Carbon::parse('2026-08-06 12:00:00'),
+        ]);
     }
 
     private function assertPendingDeliveryDecision(IntegrationInboxItem $item, Register $register, string $alert): void
@@ -331,8 +366,13 @@ class ProcessChecklistEmailTest extends TestCase
         $this->assertSame($register->id, $item->register_id);
         $this->assertSame($alert, $item->delivery_alert);
         $this->assertNull($item->resolved_at);
-        $this->assertSame($register->status->value, $register->refresh()->status->value);
-        $this->assertNull($register->delivery_confirmed_at);
+        if ($alert === 'missing_authorized_cte') {
+            $this->assertSame('analysis', $register->refresh()->status->value);
+            $this->assertSame('2026-08-06 17:51:36', $register->delivery_confirmed_at->utc()->format('Y-m-d H:i:s'));
+        } else {
+            $this->assertSame($register->status->value, $register->refresh()->status->value);
+            $this->assertNull($register->delivery_confirmed_at);
+        }
     }
 
     /** @return array<string, mixed> */
