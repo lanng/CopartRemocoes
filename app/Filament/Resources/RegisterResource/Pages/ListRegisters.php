@@ -4,6 +4,7 @@ namespace App\Filament\Resources\RegisterResource\Pages;
 
 use App\Enums\RegisterStatusEnum;
 use App\Filament\Resources\RegisterResource;
+use App\Models\Register;
 use Filament\Actions;
 use Filament\Resources\Pages\ListRecords;
 use Filament\Support\Enums\MaxWidth;
@@ -11,6 +12,14 @@ use Illuminate\Database\Eloquent\Builder;
 
 class ListRegisters extends ListRecords
 {
+    /** @var array<int, string> */
+    private const ORIGIN_CITY_FILTER_STATUSES = [
+        RegisterStatusEnum::COLLECTED->value,
+        RegisterStatusEnum::PENDING->value,
+        RegisterStatusEnum::AVAILABLE->value,
+        RegisterStatusEnum::PENDING_DAILY_RATES->value,
+    ];
+
     protected static string $resource = RegisterResource::class;
 
     protected static string $view = 'filament.resources.register-resource.pages.list-registers';
@@ -53,6 +62,7 @@ class ListRegisters extends ListRecords
     {
         $query = parent::filterTableQuery($this->getTable()->getQuery());
         $cities = $this->applyColumnFiltersToQuery($query, includeOriginCities: false)
+            ->whereIn('registers.status', self::ORIGIN_CITY_FILTER_STATUSES)
             ->reorder()
             ->select('registers.origin_city')
             ->whereNotNull('registers.origin_city')
@@ -63,7 +73,13 @@ class ListRegisters extends ListRecords
         $selectedCities = $this->columnFilters['origin_cities'] ?? [];
 
         if (is_array($selectedCities) && $selectedCities !== []) {
-            $availableCities = RegisterResource::spreadsheetOriginCityFilterOptions();
+            $availableCities = Register::query()
+                ->whereIn('status', self::ORIGIN_CITY_FILTER_STATUSES)
+                ->whereNotNull('origin_city')
+                ->where('origin_city', '!=', '')
+                ->distinct()
+                ->pluck('origin_city')
+                ->all();
             $cities = $cities->merge(array_filter(
                 $selectedCities,
                 fn (mixed $city): bool => is_string($city) && in_array($city, $availableCities, true),

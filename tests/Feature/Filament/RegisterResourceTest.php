@@ -702,23 +702,84 @@ class RegisterResourceTest extends TestCase
         $this->assertSame(['Osvaldo Cruz', 'Ourinhos'], $component->instance()->getOriginCityFilterOptions());
     }
 
+    public function test_origin_city_options_only_include_the_four_operational_statuses(): void
+    {
+        $includedCities = [
+            'collected' => 'Bauru',
+            'pending' => 'Ourinhos',
+            'available' => 'Osvaldo Cruz',
+            'pending daily rates' => 'Campinas',
+        ];
+        $excludedCities = [
+            'paid' => 'Santos',
+            'delivered' => 'Assis',
+            'cancelled' => 'Lins',
+            'invoiced' => 'Marilia',
+            'analysis' => 'Avare',
+        ];
+        $registers = collect();
+
+        foreach ([...$includedCities, ...$excludedCities] as $status => $city) {
+            $registers->push(Register::factory()->create(['status' => $status, 'origin_city' => $city]));
+        }
+
+        Register::factory()->create(['status' => 'pending', 'origin_city' => 'Araraquara']);
+        $sharedPaid = Register::factory()->create(['status' => 'paid', 'origin_city' => 'Araraquara']);
+
+        $component = Livewire::test(ListRegisters::class)
+            ->assertCanSeeTableRecords($registers->all())
+            ->assertSeeHtml('value="Araraquara"');
+
+        foreach ($includedCities as $city) {
+            $component->assertSeeHtml('value="'.$city.'"');
+        }
+
+        foreach ($excludedCities as $city) {
+            $component->assertDontSeeHtml('value="'.$city.'"');
+        }
+
+        $this->assertSame(['Araraquara', 'Bauru', 'Campinas', 'Osvaldo Cruz', 'Ourinhos'], $component->instance()->getOriginCityFilterOptions());
+
+        $component->set('columnFilters.status', 'paid')
+            ->assertCanSeeTableRecords([$sharedPaid])
+            ->assertDontSeeHtml('value="Araraquara"');
+
+        $this->assertSame([], $component->instance()->getOriginCityFilterOptions());
+    }
+
+    public function test_excluded_status_cities_are_not_restored_by_existing_city_selections(): void
+    {
+        $retired = Register::factory()->create(['origin_city' => 'Ourinhos', 'status' => 'paid']);
+        $eligible = Register::factory()->create(['origin_city' => 'Osvaldo Cruz', 'status' => 'pending']);
+        $unrelated = Register::factory()->create(['origin_city' => 'Lins', 'status' => 'paid']);
+
+        $component = Livewire::test(ListRegisters::class)
+            ->set('columnFilters.origin_cities', ['Ourinhos'])
+            ->assertCanSeeTableRecords([$retired])
+            ->assertCanNotSeeTableRecords([$eligible, $unrelated])
+            ->assertDontSeeHtml('value="Ourinhos"')
+            ->assertSeeHtml('value="Osvaldo Cruz"');
+
+        $this->assertSame(['Osvaldo Cruz'], $component->instance()->getOriginCityFilterOptions());
+    }
+
     public function test_selected_origin_city_can_be_removed_when_other_filters_exclude_its_records(): void
     {
         $pending = Register::factory()->create(['origin_city' => 'Ourinhos', 'status' => 'pending']);
-        $paid = Register::factory()->create(['origin_city' => 'Osvaldo Cruz', 'status' => 'paid']);
+        $collected = Register::factory()->create(['origin_city' => 'Osvaldo Cruz', 'status' => 'collected']);
 
         $component = Livewire::test(ListRegisters::class)
             ->call('toggleOriginCityFilter', 'Ourinhos')
             ->call('toggleOriginCityFilter', 'Osvaldo Cruz')
-            ->set('columnFilters.status', 'paid')
-            ->assertCanSeeTableRecords([$paid])
+            ->set('columnFilters.status', 'collected')
+            ->assertCanSeeTableRecords([$collected])
             ->assertCanNotSeeTableRecords([$pending])
             ->assertSet('columnFilters.origin_cities', ['Ourinhos', 'Osvaldo Cruz'])
             ->assertSeeHtml('value="Ourinhos"');
 
         $this->assertSame(['Osvaldo Cruz', 'Ourinhos'], $component->instance()->getOriginCityFilterOptions());
 
-        $component->call('toggleOriginCityFilter', 'Ourinhos')->assertCanSeeTableRecords([$paid]);
+        $component->call('toggleOriginCityFilter', 'Ourinhos')->assertCanSeeTableRecords([$collected]);
 
         $this->assertSame(['Osvaldo Cruz'], $component->instance()->getOriginCityFilterOptions());
     }
