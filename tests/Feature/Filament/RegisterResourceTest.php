@@ -4,6 +4,7 @@ namespace Tests\Feature\Filament;
 
 use App\Enums\CteDocumentStatusEnum;
 use App\Enums\CteEmissionBatchStatusEnum;
+use App\Enums\RegisterStatusEnum;
 use App\Filament\Resources\RegisterResource;
 use App\Filament\Resources\RegisterResource\Pages\ListRegisters;
 use App\Filament\Resources\RegisterResource\Pages\ViewRegister;
@@ -356,6 +357,193 @@ class RegisterResourceTest extends TestCase
         }
     }
 
+    public function test_automatic_deadline_colors_respect_dates_statuses_and_manual_choices(): void
+    {
+        $this->travelTo(Carbon::parse('2026-10-19 12:00:00', 'America/Sao_Paulo'));
+        $columns = Livewire::test(ListRegisters::class)->instance()->getTable()->getColumns();
+
+        foreach (RegisterStatusEnum::cases() as $status) {
+            $canHighlight = in_array($status, [
+                RegisterStatusEnum::PENDING,
+                RegisterStatusEnum::AVAILABLE,
+                RegisterStatusEnum::PENDING_DAILY_RATES,
+            ], true);
+
+            foreach ([
+                ['2026-10-18', 'danger'],
+                ['2026-10-19 23:59:59', 'danger'],
+                ['2026-10-20', 'gray'],
+                [null, 'gray'],
+            ] as [$deadline, $dueColor]) {
+                foreach ([null, 'red', 'black'] as $manualColor) {
+                    $register = Register::factory()->make([
+                        'status' => $status,
+                        'deadline_withdraw' => $deadline,
+                        'deadline_delivery' => $deadline,
+                        'deadline_withdraw_color' => $manualColor,
+                        'deadline_delivery_color' => $manualColor,
+                    ]);
+                    $expectedColor = match ($manualColor) {
+                        'red' => 'danger',
+                        'black' => 'gray',
+                        default => $canHighlight ? $dueColor : 'gray',
+                    };
+
+                    foreach (['deadline_withdraw', 'deadline_delivery'] as $columnName) {
+                        $column = $columns[$columnName]->record($register);
+                        $this->assertSame($expectedColor, $column->getColor($column->getState()), $status->value.' '.$columnName.' '.$deadline.' '.($manualColor ?? 'automatic'));
+                    }
+                }
+            }
+        }
+
+        $mixedDeadlines = Register::factory()->make([
+            'deadline_withdraw' => '2026-10-20',
+            'deadline_delivery' => '2026-10-18',
+        ]);
+        $withdraw = $columns['deadline_withdraw']->record($mixedDeadlines);
+        $delivery = $columns['deadline_delivery']->record($mixedDeadlines);
+
+        $this->assertSame('gray', $withdraw->getColor($withdraw->getState()));
+        $this->assertSame('danger', $delivery->getColor($delivery->getState()));
+    }
+
+    public function test_deadline_color_filters_and_exports_match_the_visible_colors(): void
+    {
+        $this->travelTo(Carbon::parse('2026-10-19 12:00:00', 'America/Sao_Paulo'));
+        $red = collect();
+        $unmarked = collect();
+
+        foreach (RegisterStatusEnum::cases() as $status) {
+            foreach (['2026-10-18', '2026-10-19 23:59:59', '2026-10-20'] as $deadline) {
+                $register = Register::factory()->create([
+                    'status' => $status,
+                    'deadline_withdraw' => $deadline,
+                    'deadline_delivery' => $deadline,
+                ]);
+
+                if (in_array($status, [RegisterStatusEnum::PENDING, RegisterStatusEnum::AVAILABLE, RegisterStatusEnum::PENDING_DAILY_RATES], true) && $deadline !== '2026-10-20') {
+                    $red->push($register);
+                } else {
+                    $unmarked->push($register);
+                }
+            }
+        }
+
+        $red->push(Register::factory()->create([
+            'status' => 'paid',
+            'deadline_withdraw' => '2026-10-20',
+            'deadline_delivery' => '2026-10-20',
+            'deadline_withdraw_color' => 'red',
+            'deadline_delivery_color' => 'red',
+        ]));
+        $unmarked->push(Register::factory()->create([
+            'deadline_withdraw' => '2026-10-18',
+            'deadline_delivery' => '2026-10-18',
+            'deadline_withdraw_color' => 'black',
+            'deadline_delivery_color' => 'black',
+        ]));
+
+        foreach (['deadline_withdraw_color', 'deadline_delivery_color'] as $attribute) {
+            $component = Livewire::test(ListRegisters::class)
+                ->set('columnFilters', [$attribute => 'red'])
+                ->assertCanSeeTableRecords($red->all())
+                ->assertCanNotSeeTableRecords($unmarked->all());
+
+            $this->assertEqualsCanonicalizing($red->pluck('id')->all(), $component->instance()->getTableQueryForExport()->pluck('registers.id')->all());
+
+            $component->set('columnFilters', [$attribute => 'automatic'])
+                ->assertCanSeeTableRecords($unmarked->all())
+                ->assertCanNotSeeTableRecords($red->all());
+
+            $this->assertEqualsCanonicalizing($unmarked->pluck('id')->all(), $component->instance()->getTableQueryForExport()->pluck('registers.id')->all());
+        }
+    }
+
+    public function test_status_changes_remove_only_automatic_deadline_colors(): void
+    {
+        $this->travelTo(Carbon::parse('2026-10-19 12:00:00', 'America/Sao_Paulo'));
+        $automatic = Register::factory()->create([
+            'deadline_withdraw' => '2026-10-18',
+            'deadline_delivery' => '2026-10-19',
+        ]);
+        $manual = Register::factory()->create([
+            'deadline_withdraw' => '2026-10-18',
+            'deadline_delivery' => '2026-10-19',
+            'deadline_withdraw_color' => 'red',
+            'deadline_delivery_color' => 'red',
+        ]);
+        $component = Livewire::test(ListRegisters::class);
+        $columns = $component->instance()->getTable()->getColumns();
+
+        foreach (['deadline_withdraw', 'deadline_delivery'] as $columnName) {
+            $column = $columns[$columnName]->record($automatic);
+            $this->assertSame('danger', $column->getColor($column->getState()));
+        }
+
+        $component->callTableAction('updateStatusSingle', $automatic, ['status' => 'paid'])
+            ->assertHasNoTableActionErrors()
+            ->callTableAction('updateStatusSingle', $manual, ['status' => 'paid'])
+            ->assertHasNoTableActionErrors();
+        $automatic->refresh();
+        $manual->refresh();
+
+        foreach (['deadline_withdraw', 'deadline_delivery'] as $columnName) {
+            $column = $columns[$columnName]->record($automatic);
+            $this->assertSame('gray', $column->getColor($column->getState()));
+            $this->assertNull($automatic->{$columnName.'_color'});
+
+            $column->record($manual);
+            $this->assertSame('danger', $column->getColor($column->getState()));
+            $this->assertSame('red', $manual->{$columnName.'_color'});
+        }
+
+        $component->callTableBulkAction('copyAsImage', [$automatic, $manual])
+            ->assertDispatched('registers-copy-as-image', function (string $event, array $params) use ($automatic, $manual): bool {
+                $rows = collect($params['rows'])->keyBy('plate');
+
+                return $rows[$automatic->vehicle_plate]['colors']['deadline_withdraw_color'] === null
+                    && $rows[$automatic->vehicle_plate]['colors']['deadline_delivery_color'] === null
+                    && $rows[$manual->vehicle_plate]['colors']['deadline_withdraw_color'] === 'red'
+                    && $rows[$manual->vehicle_plate]['colors']['deadline_delivery_color'] === 'red';
+            });
+
+        $component->callTableAction('updateStatusSingle', $automatic, ['status' => 'available'])
+            ->assertHasNoTableActionErrors();
+        $automatic->refresh();
+
+        foreach (['deadline_withdraw', 'deadline_delivery'] as $columnName) {
+            $column = $columns[$columnName]->record($automatic);
+            $this->assertSame('danger', $column->getColor($column->getState()));
+            $this->assertNull($automatic->{$columnName.'_color'});
+        }
+    }
+
+    public function test_deadline_alerts_follow_the_calendar_day_in_sao_paulo(): void
+    {
+        $this->travelTo(Carbon::parse('2026-10-19 23:30:00', 'America/Sao_Paulo'));
+        $register = Register::factory()->create([
+            'deadline_withdraw' => '2026-10-20',
+            'deadline_delivery' => '2026-10-20',
+        ]);
+        $component = Livewire::test(ListRegisters::class);
+        $columns = $component->instance()->getTable()->getColumns();
+
+        foreach (['deadline_withdraw', 'deadline_delivery'] as $columnName) {
+            $column = $columns[$columnName]->record($register);
+            $this->assertSame('gray', $column->getColor($column->getState()));
+            $component->set('columnFilters', [$columnName.'_color' => 'red'])->assertCanNotSeeTableRecords([$register]);
+        }
+
+        $this->travelTo(Carbon::parse('2026-10-20 00:01:00', 'America/Sao_Paulo'));
+
+        foreach (['deadline_withdraw', 'deadline_delivery'] as $columnName) {
+            $column = $columns[$columnName]->record($register);
+            $this->assertSame('danger', $column->getColor($column->getState()));
+            $component->set('columnFilters', [$columnName.'_color' => 'red'])->assertCanSeeTableRecords([$register]);
+        }
+    }
+
     public function test_register_operational_colors_can_be_filtered_by_column(): void
     {
         $colorFilters = [
@@ -654,7 +842,7 @@ class RegisterResourceTest extends TestCase
             'deadline_withdraw_color' => 'red',
             'value' => 1200,
         ]);
-        $automaticDeadlineColor = Register::factory()->create([
+        $futureDeadline = Register::factory()->create([
             'vehicle_plate_color' => 'blue',
             'status' => 'pending',
             'tow_yard' => 'Pátio Campinas',
@@ -701,8 +889,8 @@ class RegisterResourceTest extends TestCase
             ->set('columnFilters.deadline_withdraw.until', '2026-10-30')
             ->set('columnFilters.value.minimum', '1000')
             ->set('columnFilters.value.maximum', '2000')
-            ->assertCanSeeTableRecords([$matching, $automaticDeadlineColor])
-            ->assertCanNotSeeTableRecords([$wrongColor, $wrongStatus, $wrongYard, $wrongDate, $wrongValue]);
+            ->assertCanSeeTableRecords([$matching])
+            ->assertCanNotSeeTableRecords([$wrongColor, $futureDeadline, $wrongStatus, $wrongYard, $wrongDate, $wrongValue]);
     }
 
     public function test_column_filters_can_be_cleared_when_the_filtered_table_is_empty(): void
@@ -720,6 +908,7 @@ class RegisterResourceTest extends TestCase
 
     public function test_selected_registers_can_be_shared_as_a_colored_image(): void
     {
+        $this->travelTo(Carbon::parse('2026-10-19 12:00:00', 'America/Sao_Paulo'));
         $register = Register::factory()->create([
             'vehicle_plate' => 'ABC1234',
             'vehicle_model' => 'Honda Civic',
@@ -744,6 +933,8 @@ class RegisterResourceTest extends TestCase
                 && $params['rows'][0]['condition'] === 'Ñ ANDA'
                 && $params['rows'][0]['colors']['vehicle_plate_color'] === 'blue'
                 && $params['rows'][0]['colors']['destination_city_color'] === 'green'
+                && $params['rows'][0]['colors']['deadline_withdraw_color'] === null
+                && $params['rows'][0]['colors']['deadline_delivery_color'] === null
             );
     }
 

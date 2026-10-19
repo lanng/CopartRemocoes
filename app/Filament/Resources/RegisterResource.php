@@ -90,6 +90,13 @@ class RegisterResource extends Resource
     ];
 
     /** @var array<int, string> */
+    public const SPREADSHEET_DEADLINE_ALERT_STATUSES = [
+        RegisterStatusEnum::PENDING->value,
+        RegisterStatusEnum::AVAILABLE->value,
+        RegisterStatusEnum::PENDING_DAILY_RATES->value,
+    ];
+
+    /** @var array<int, string> */
     public const SPREADSHEET_FILTERABLE_COLUMNS = [
         'vehicle_plate',
         'vehicle_model',
@@ -976,10 +983,11 @@ class RegisterResource extends Resource
         $color = $record->{$attribute};
         $deadlineAttribute = self::SPREADSHEET_DEADLINE_COLOR_ATTRIBUTES[$attribute] ?? null;
 
-        if ($color === null && $deadlineAttribute !== null) {
+        if ($color === null && $deadlineAttribute !== null
+            && in_array($record->status->value, self::SPREADSHEET_DEADLINE_ALERT_STATUSES, true)) {
             $deadline = $record->{$deadlineAttribute};
 
-            if ($deadline !== null) {
+            if ($deadline !== null && $deadline->toDateString() <= today('America/Sao_Paulo')->toDateString()) {
                 return 'red';
             }
         }

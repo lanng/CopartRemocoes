@@ -178,6 +178,8 @@ class ListRegisters extends ListRecords
 
     private function applyColumnFiltersToQuery(Builder $query, bool $includeOriginCities = true): Builder
     {
+        $deadlineAlertDate = today('America/Sao_Paulo')->toDateString();
+
         foreach (RegisterResource::SPREADSHEET_COLUMN_COLOR_ATTRIBUTES as $column => $attribute) {
             $color = $this->columnFilters[$attribute] ?? null;
 
@@ -194,7 +196,7 @@ class ListRegisters extends ListRecords
             $deadlineAttribute = RegisterResource::SPREADSHEET_DEADLINE_COLOR_ATTRIBUTES[$attribute] ?? null;
 
             if ($color === 'automatic') {
-                $query->where(function (Builder $query) use ($attribute, $deadlineAttribute): void {
+                $query->where(function (Builder $query) use ($attribute, $deadlineAttribute, $deadlineAlertDate): void {
                     if ($deadlineAttribute === null) {
                         $query->whereNull($attribute)->orWhere($attribute, 'black');
 
@@ -202,9 +204,13 @@ class ListRegisters extends ListRecords
                     }
 
                     $query->where($attribute, 'black')
-                        ->orWhere(function (Builder $query) use ($attribute, $deadlineAttribute): void {
+                        ->orWhere(function (Builder $query) use ($attribute, $deadlineAttribute, $deadlineAlertDate): void {
                             $query->whereNull($attribute)
-                                ->whereNull($deadlineAttribute);
+                                ->where(function (Builder $query) use ($deadlineAttribute, $deadlineAlertDate): void {
+                                    $query->whereNull($deadlineAttribute)
+                                        ->orWhereDate($deadlineAttribute, '>', $deadlineAlertDate)
+                                        ->orWhereNotIn('status', RegisterResource::SPREADSHEET_DEADLINE_ALERT_STATUSES);
+                                });
                         });
                 });
 
@@ -212,10 +218,12 @@ class ListRegisters extends ListRecords
             }
 
             if ($deadlineAttribute !== null && $color === 'red') {
-                $query->where(function (Builder $query) use ($attribute, $deadlineAttribute): void {
+                $query->where(function (Builder $query) use ($attribute, $deadlineAttribute, $deadlineAlertDate): void {
                     $query->where($attribute, 'red')
-                        ->orWhere(function (Builder $query) use ($attribute, $deadlineAttribute): void {
-                            $query->whereNull($attribute)->whereNotNull($deadlineAttribute);
+                        ->orWhere(function (Builder $query) use ($attribute, $deadlineAttribute, $deadlineAlertDate): void {
+                            $query->whereNull($attribute)
+                                ->whereDate($deadlineAttribute, '<=', $deadlineAlertDate)
+                                ->whereIn('status', RegisterResource::SPREADSHEET_DEADLINE_ALERT_STATUSES);
                         });
                 });
 
