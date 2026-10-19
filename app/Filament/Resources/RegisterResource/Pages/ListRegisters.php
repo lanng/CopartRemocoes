@@ -48,6 +48,31 @@ class ListRegisters extends ListRecords
         return $this->applyColumnFiltersToQuery(parent::getTableQueryForExport());
     }
 
+    /** @return array<int, string> */
+    public function getOriginCityFilterOptions(): array
+    {
+        $query = parent::filterTableQuery($this->getTable()->getQuery());
+        $cities = $this->applyColumnFiltersToQuery($query, includeOriginCities: false)
+            ->reorder()
+            ->select('registers.origin_city')
+            ->whereNotNull('registers.origin_city')
+            ->where('registers.origin_city', '!=', '')
+            ->distinct()
+            ->pluck('registers.origin_city');
+
+        $selectedCities = $this->columnFilters['origin_cities'] ?? [];
+
+        if (is_array($selectedCities) && $selectedCities !== []) {
+            $availableCities = RegisterResource::spreadsheetOriginCityFilterOptions();
+            $cities = $cities->merge(array_filter(
+                $selectedCities,
+                fn (mixed $city): bool => is_string($city) && in_array($city, $availableCities, true),
+            ));
+        }
+
+        return $cities->unique()->sort(SORT_NATURAL | SORT_FLAG_CASE)->values()->all();
+    }
+
     public function updatedColumnFilters(): void
     {
         $this->resetPage();
@@ -151,7 +176,7 @@ class ListRegisters extends ListRecords
         return count($plates) >= 2 ? array_values(array_unique($plates)) : null;
     }
 
-    private function applyColumnFiltersToQuery(Builder $query): Builder
+    private function applyColumnFiltersToQuery(Builder $query, bool $includeOriginCities = true): Builder
     {
         foreach (RegisterResource::SPREADSHEET_COLUMN_COLOR_ATTRIBUTES as $column => $attribute) {
             $color = $this->columnFilters[$attribute] ?? null;
@@ -202,7 +227,7 @@ class ListRegisters extends ListRecords
 
         $originCities = $this->columnFilters['origin_cities'] ?? [];
 
-        if (is_array($originCities) && $originCities !== []) {
+        if ($includeOriginCities && is_array($originCities) && $originCities !== []) {
             $availableCities = RegisterResource::spreadsheetOriginCityFilterOptions();
             $originCities = array_values(array_filter(
                 $originCities,

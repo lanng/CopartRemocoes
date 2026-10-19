@@ -59,7 +59,7 @@
     x-on:click.outside="open = false"
     x-on:keydown.escape.stop.prevent="open = false"
     x-on:resize.window="positionMenu()"
-    x-on:scroll.window.capture="open = false"
+    x-on:scroll.window.capture="if (! $event.composedPath().includes($refs.menu)) { open = false }"
 >
     <button
         type="button"
@@ -113,8 +113,11 @@
             @if ($column === 'origin_city')
                 <div class="registers-column-filter-field mt-3 space-y-1.5">
                     <span class="registers-column-filter-label text-xs font-medium text-gray-600 dark:text-gray-300">Cidades</span>
-                    <div class="max-h-48 space-y-1 overflow-y-auto rounded-lg border border-gray-200 p-2 dark:border-white/10">
-                        @forelse (\App\Filament\Resources\RegisterResource::spreadsheetOriginCityFilterOptions() as $city)
+                    <div
+                        class="space-y-1 rounded-lg border border-gray-200 p-2 dark:border-white/10"
+                        style="max-height: min(16rem, 50dvh); overflow-y: auto; overscroll-behavior-y: contain;"
+                    >
+                        @forelse ($this->getOriginCityFilterOptions() as $city)
                             <label
                                 wire:key="origin-city-filter-{{ md5($city) }}"
                                 class="flex cursor-pointer items-start gap-2 text-sm text-gray-950 dark:text-white"
@@ -129,7 +132,7 @@
                                 <span class="break-words">{{ $city }}</span>
                             </label>
                         @empty
-                            <p class="text-sm text-gray-500 dark:text-gray-400">Nenhuma cidade cadastrada.</p>
+                            <p class="text-sm text-gray-500 dark:text-gray-400">Nenhuma cidade encontrada.</p>
                         @endforelse
                     </div>
                 </div>

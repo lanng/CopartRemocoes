@@ -426,16 +426,113 @@ class RegisterResourceTest extends TestCase
 
     public function test_origin_city_filter_toggles_each_city_independently(): void
     {
-        Register::factory()->create(['origin_city' => 'Osvaldo Cruz']);
-        Register::factory()->create(['origin_city' => 'Ourinhos']);
+        $osvaldoCruz = Register::factory()->create(['origin_city' => 'Osvaldo Cruz']);
+        $ourinhos = Register::factory()->create(['origin_city' => 'Ourinhos']);
 
-        Livewire::test(ListRegisters::class)
+        $component = Livewire::test(ListRegisters::class)
             ->call('toggleOriginCityFilter', 'Osvaldo Cruz')
             ->assertSet('columnFilters.origin_cities', ['Osvaldo Cruz'])
+            ->assertCanSeeTableRecords([$osvaldoCruz])
+            ->assertCanNotSeeTableRecords([$ourinhos])
+            ->assertSeeHtml('value="Ourinhos"');
+
+        $this->assertSame(['Osvaldo Cruz', 'Ourinhos'], $component->instance()->getOriginCityFilterOptions());
+
+        $component
             ->call('toggleOriginCityFilter', 'Ourinhos')
             ->assertSet('columnFilters.origin_cities', ['Osvaldo Cruz', 'Ourinhos'])
+            ->assertCanSeeTableRecords([$osvaldoCruz, $ourinhos])
             ->call('toggleOriginCityFilter', 'Osvaldo Cruz')
-            ->assertSet('columnFilters.origin_cities', ['Ourinhos']);
+            ->assertSet('columnFilters.origin_cities', ['Ourinhos'])
+            ->assertCanSeeTableRecords([$ourinhos])
+            ->assertCanNotSeeTableRecords([$osvaldoCruz]);
+    }
+
+    public function test_origin_city_options_follow_search_and_other_table_filters(): void
+    {
+        $matchingAttributes = [
+            'company' => 'copart',
+            'vehicle_model' => 'CIVIC',
+            'vehicle_plate_color' => 'blue',
+            'origin_city_color' => 'red',
+            'status' => 'pending',
+            'deadline_withdraw' => '2026-10-20',
+        ];
+
+        foreach ([
+            ['origin_city' => 'Ourinhos'],
+            ['origin_city' => 'Osvaldo Cruz'],
+            ['origin_city' => 'Santos', 'vehicle_plate_color' => null],
+            ['origin_city' => 'Bauru', 'status' => 'paid'],
+            ['origin_city' => 'Campinas', 'company' => 'millan'],
+            ['origin_city' => 'Assis', 'vehicle_model' => 'COROLLA'],
+            ['origin_city' => 'Lins', 'origin_city_color' => null],
+            ['origin_city' => 'Avare', 'deadline_withdraw' => '2026-11-20'],
+        ] as $attributes) {
+            Register::factory()->create([...$matchingAttributes, ...$attributes]);
+        }
+
+        $component = Livewire::test(ListRegisters::class)
+            ->filterTable('company', 'copart')
+            ->searchTable('CIVIC')
+            ->set('columnFilters', [
+                'vehicle_plate_color' => 'blue',
+                'origin_city_color' => 'red',
+                'status' => 'pending',
+                'deadline_withdraw' => ['from' => '2026-10-19', 'until' => '2026-10-21'],
+            ])
+            ->assertSeeHtml('value="Ourinhos"')
+            ->assertSeeHtml('value="Osvaldo Cruz"');
+
+        foreach (['Santos', 'Bauru', 'Campinas', 'Assis', 'Lins', 'Avare'] as $city) {
+            $component->assertDontSeeHtml('value="'.$city.'"');
+        }
+
+        $this->assertSame(['Osvaldo Cruz', 'Ourinhos'], $component->instance()->getOriginCityFilterOptions());
+
+        $component->searchTable('SEM RESULTADOS')->assertSee('Limpar filtros das colunas');
+
+        $this->assertSame([], $component->instance()->getOriginCityFilterOptions());
+    }
+
+    public function test_origin_city_options_include_matches_from_other_pages(): void
+    {
+        Register::factory()->count(25)->create([
+            'origin_city' => 'Ourinhos',
+            'deadline_withdraw' => '2026-10-01',
+        ]);
+        $secondPageRegister = Register::factory()->create([
+            'origin_city' => 'Osvaldo Cruz',
+            'deadline_withdraw' => '2026-10-02',
+        ]);
+
+        $component = Livewire::test(ListRegisters::class)
+            ->sortTable('deadline_withdraw', 'asc')
+            ->assertCanNotSeeTableRecords([$secondPageRegister])
+            ->assertSeeHtml('value="Osvaldo Cruz"');
+
+        $this->assertSame(['Osvaldo Cruz', 'Ourinhos'], $component->instance()->getOriginCityFilterOptions());
+    }
+
+    public function test_selected_origin_city_can_be_removed_when_other_filters_exclude_its_records(): void
+    {
+        $pending = Register::factory()->create(['origin_city' => 'Ourinhos', 'status' => 'pending']);
+        $paid = Register::factory()->create(['origin_city' => 'Osvaldo Cruz', 'status' => 'paid']);
+
+        $component = Livewire::test(ListRegisters::class)
+            ->call('toggleOriginCityFilter', 'Ourinhos')
+            ->call('toggleOriginCityFilter', 'Osvaldo Cruz')
+            ->set('columnFilters.status', 'paid')
+            ->assertCanSeeTableRecords([$paid])
+            ->assertCanNotSeeTableRecords([$pending])
+            ->assertSet('columnFilters.origin_cities', ['Ourinhos', 'Osvaldo Cruz'])
+            ->assertSeeHtml('value="Ourinhos"');
+
+        $this->assertSame(['Osvaldo Cruz', 'Ourinhos'], $component->instance()->getOriginCityFilterOptions());
+
+        $component->call('toggleOriginCityFilter', 'Ourinhos')->assertCanSeeTableRecords([$paid]);
+
+        $this->assertSame(['Osvaldo Cruz'], $component->instance()->getOriginCityFilterOptions());
     }
 
     public function test_origin_filter_options_are_dynamic_distinct_and_sorted(): void
