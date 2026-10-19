@@ -80,7 +80,10 @@ class ListRegisters extends ListRecords
     {
         $colorAttribute = RegisterResource::spreadsheetColorAttributeForColumn($column);
 
-        if ($colorAttribute !== null) {
+        if ($column === 'origin_city') {
+            $this->columnFilters['origin_city_color'] = null;
+            $this->columnFilters['origin_cities'] = [];
+        } elseif ($colorAttribute !== null) {
             $this->columnFilters[$colorAttribute] = null;
         } else {
             match ($column) {
@@ -97,6 +100,35 @@ class ListRegisters extends ListRecords
             };
         }
 
+        $this->updatedColumnFilters();
+    }
+
+    public function toggleOriginCityFilter(string $city): void
+    {
+        $availableCities = RegisterResource::spreadsheetOriginCityFilterOptions();
+
+        if (! in_array($city, $availableCities, true)) {
+            return;
+        }
+
+        $selectedCities = $this->columnFilters['origin_cities'] ?? [];
+        $selectedCities = is_array($selectedCities)
+            ? array_values(array_filter(
+                $selectedCities,
+                fn (mixed $selectedCity): bool => is_string($selectedCity) && in_array($selectedCity, $availableCities, true),
+            ))
+            : [];
+
+        if (in_array($city, $selectedCities, true)) {
+            $selectedCities = array_values(array_filter(
+                $selectedCities,
+                fn (string $selectedCity): bool => $selectedCity !== $city,
+            ));
+        } else {
+            $selectedCities[] = $city;
+        }
+
+        $this->columnFilters['origin_cities'] = $selectedCities;
         $this->updatedColumnFilters();
     }
 
@@ -134,15 +166,52 @@ class ListRegisters extends ListRecords
                 continue;
             }
 
+            $deadlineAttribute = RegisterResource::SPREADSHEET_DEADLINE_COLOR_ATTRIBUTES[$attribute] ?? null;
+
             if ($color === 'automatic') {
-                $query->where(function (Builder $query) use ($attribute): void {
-                    $query->whereNull($attribute)->orWhere($attribute, 'black');
+                $query->where(function (Builder $query) use ($attribute, $deadlineAttribute): void {
+                    if ($deadlineAttribute === null) {
+                        $query->whereNull($attribute)->orWhere($attribute, 'black');
+
+                        return;
+                    }
+
+                    $query->where($attribute, 'black')
+                        ->orWhere(function (Builder $query) use ($attribute, $deadlineAttribute): void {
+                            $query->whereNull($attribute)
+                                ->whereNull($deadlineAttribute);
+                        });
+                });
+
+                continue;
+            }
+
+            if ($deadlineAttribute !== null && $color === 'red') {
+                $query->where(function (Builder $query) use ($attribute, $deadlineAttribute): void {
+                    $query->where($attribute, 'red')
+                        ->orWhere(function (Builder $query) use ($attribute, $deadlineAttribute): void {
+                            $query->whereNull($attribute)->whereNotNull($deadlineAttribute);
+                        });
                 });
 
                 continue;
             }
 
             $query->where($attribute, $color);
+        }
+
+        $originCities = $this->columnFilters['origin_cities'] ?? [];
+
+        if (is_array($originCities) && $originCities !== []) {
+            $availableCities = RegisterResource::spreadsheetOriginCityFilterOptions();
+            $originCities = array_values(array_filter(
+                $originCities,
+                fn (mixed $city): bool => is_string($city) && in_array($city, $availableCities, true),
+            ));
+
+            if ($originCities !== []) {
+                $query->whereIn('origin_city', $originCities);
+            }
         }
 
         $status = $this->columnFilters['status'] ?? null;

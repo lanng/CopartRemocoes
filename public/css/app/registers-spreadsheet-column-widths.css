@@ -81,8 +81,8 @@
 
 .fi-resource-registers .fi-ta-table .fi-ta-actions-header-cell,
 .fi-resource-registers .fi-ta-table .fi-ta-actions-cell {
-    width: 15rem;
-    min-width: 15rem;
+    width: 13rem;
+    min-width: 13rem;
 }
 
 .fi-resource-registers .fi-ta-table .fi-ta-actions-cell > div {

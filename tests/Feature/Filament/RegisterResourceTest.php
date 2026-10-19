@@ -67,6 +67,7 @@ class RegisterResourceTest extends TestCase
         $this->assertSame('Condição', $columns['condition']->getLabel());
         $this->assertSame('6rem', $columns['vehicle_plate']->getWidth());
         $this->assertSame('11rem', $columns['vehicle_model']->getWidth());
+        $this->assertSame('15rem', $columns['origin_city']->getWidth());
         $this->assertTrue($columns['vehicle_model']->canWrap());
         $this->assertSame('3.75rem', $columns['deadline_withdraw']->getWidth());
         $this->assertSame($columns['deadline_withdraw']->getWidth(), $columns['deadline_delivery']->getWidth());
@@ -74,8 +75,8 @@ class RegisterResourceTest extends TestCase
         $this->assertSame(Alignment::Center, $columns['deadline_withdraw']->getAlignment());
         $this->assertSame(Alignment::Center, $columns['deadline_delivery']->getAlignment());
         $this->assertSame('8rem', $columns['status']->getWidth());
-        $this->assertSame('7rem', $columns['tow_yard']->getWidth());
-        $this->assertSame('6rem', $columns['condition']->getWidth());
+        $this->assertSame('6rem', $columns['tow_yard']->getWidth());
+        $this->assertSame('8rem', $columns['condition']->getWidth());
         $this->assertSame('8rem', $columns['value']->getWidth());
         foreach ([
             'vehicle_plate',
@@ -168,11 +169,15 @@ class RegisterResourceTest extends TestCase
         $component->assertTableSelectColumnHasOptions('condition', [
             'ANDA' => 'ANDA',
             'Ñ ANDA' => 'Ñ ANDA',
+            'DOC - OK' => 'DOC - OK',
+            'AMI - OK' => 'AMI - OK',
+            'FIS - OK' => 'FIS - OK',
+            'ND - OK' => 'ND - OK',
         ], $register);
         $this->assertFalse($conditionColumn->isSortable());
 
-        $component->call('updateTableColumnState', 'condition', (string) $register->getKey(), 'ANDA');
-        $this->assertSame('ANDA', $register->refresh()->condition);
+        $component->call('updateTableColumnState', 'condition', (string) $register->getKey(), 'DOC - OK');
+        $this->assertSame('DOC - OK', $register->refresh()->condition);
 
         $component->call('updateTableColumnState', 'condition', (string) $register->getKey(), 'Ñ ANDA');
         $this->assertSame('Ñ ANDA', $register->refresh()->condition);
@@ -193,7 +198,7 @@ class RegisterResourceTest extends TestCase
         $this->assertIsString($spreadsheetCss);
         $this->assertStringContainsString('.fi-resource-registers .fi-ta-table .fi-ta-actions-header-cell', $spreadsheetCss);
         $this->assertStringContainsString('.fi-resource-registers .fi-ta-table .fi-ta-actions-cell', $spreadsheetCss);
-        $this->assertStringContainsString('min-width: 15rem;', $spreadsheetCss);
+        $this->assertStringContainsString('min-width: 13rem;', $spreadsheetCss);
     }
 
     public function test_register_column_filter_controls_stay_within_the_popover(): void
@@ -234,7 +239,7 @@ class RegisterResourceTest extends TestCase
         $this->withoutMiddleware(Authenticate::class)
             ->get('/admin/registers')
             ->assertOk()
-            ->assertSee('registers-spreadsheet-destination-fit.css', false)
+            ->assertSee('registers-spreadsheet-column-widths.css', false)
             ->assertSee('ms-auto hidden lg:flex', false)
             ->assertSee('registers-copy-as-image', false);
     }
@@ -317,6 +322,16 @@ class RegisterResourceTest extends TestCase
             'deadline_withdraw_color' => 'red',
             'deadline_delivery_color' => 'red',
         ]);
+        $automaticPastDeadlines = Register::factory()->create([
+            'deadline_withdraw' => '2026-09-09',
+            'deadline_delivery' => '2026-09-17',
+        ]);
+        $manuallyUnmarkedDeadlines = Register::factory()->create([
+            'deadline_withdraw' => '2026-10-20',
+            'deadline_withdraw_color' => 'black',
+            'deadline_delivery' => '2026-10-25',
+            'deadline_delivery_color' => 'black',
+        ]);
         $columns = Livewire::test(ListRegisters::class)->instance()->getTable()->getColumns();
 
         foreach ([
@@ -330,6 +345,14 @@ class RegisterResourceTest extends TestCase
             $column = $columns[$columnName]->record($register);
 
             $this->assertSame($expectedColor, $column->getColor($column->getState()));
+        }
+
+        foreach (['deadline_withdraw', 'deadline_delivery'] as $columnName) {
+            $automaticColumn = $columns[$columnName]->record($automaticPastDeadlines);
+            $this->assertSame('danger', $automaticColumn->getColor($automaticColumn->getState()));
+
+            $unmarkedColumn = $columns[$columnName]->record($manuallyUnmarkedDeadlines);
+            $this->assertSame('gray', $unmarkedColumn->getColor($unmarkedColumn->getState()));
         }
     }
 
@@ -349,9 +372,15 @@ class RegisterResourceTest extends TestCase
                 'vehicle_plate' => 'COL'.str_pad((string) ($index + 1), 4, '0', STR_PAD_LEFT),
                 $filter['column'] => $filter['color'],
             ]);
-            $other = Register::factory()->create([
+            $otherAttributes = [
                 'vehicle_plate' => 'OTH'.str_pad((string) ($index + 1), 4, '0', STR_PAD_LEFT),
-            ]);
+            ];
+
+            if (isset(RegisterResource::SPREADSHEET_DEADLINE_COLOR_ATTRIBUTES[$filter['column']])) {
+                $otherAttributes[$filter['column']] = 'black';
+            }
+
+            $other = Register::factory()->create($otherAttributes);
 
             Livewire::test(ListRegisters::class)
                 ->set('columnFilters.'.$filter['column'], $filter['color'])
@@ -360,9 +389,72 @@ class RegisterResourceTest extends TestCase
         }
     }
 
+    public function test_origin_filter_combines_multiple_cities_with_color_and_other_filters(): void
+    {
+        $osvaldoCruz = Register::factory()->create([
+            'origin_city' => 'Osvaldo Cruz',
+            'origin_city_color' => 'red',
+        ]);
+        $ourinhos = Register::factory()->create([
+            'origin_city' => 'Ourinhos',
+            'origin_city_color' => 'red',
+        ]);
+        $otherCity = Register::factory()->create([
+            'origin_city' => 'Santos',
+            'origin_city_color' => 'red',
+        ]);
+        $otherColor = Register::factory()->create([
+            'origin_city' => 'Osvaldo Cruz',
+        ]);
+        $otherStatus = Register::factory()->create([
+            'origin_city' => 'Osvaldo Cruz',
+            'origin_city_color' => 'red',
+            'status' => 'paid',
+        ]);
+
+        Livewire::test(ListRegisters::class)
+            ->set('columnFilters.origin_city_color', 'red')
+            ->set('columnFilters.origin_cities', ['Osvaldo Cruz', 'Ourinhos'])
+            ->set('columnFilters.status', 'pending')
+            ->assertCanSeeTableRecords([$osvaldoCruz, $ourinhos])
+            ->assertCanNotSeeTableRecords([$otherCity, $otherColor, $otherStatus])
+            ->call('clearColumnFilter', 'origin_city')
+            ->assertSet('columnFilters.origin_city_color', null)
+            ->assertSet('columnFilters.origin_cities', [])
+            ->assertCanSeeTableRecords([$otherCity]);
+    }
+
+    public function test_origin_city_filter_toggles_each_city_independently(): void
+    {
+        Register::factory()->create(['origin_city' => 'Osvaldo Cruz']);
+        Register::factory()->create(['origin_city' => 'Ourinhos']);
+
+        Livewire::test(ListRegisters::class)
+            ->call('toggleOriginCityFilter', 'Osvaldo Cruz')
+            ->assertSet('columnFilters.origin_cities', ['Osvaldo Cruz'])
+            ->call('toggleOriginCityFilter', 'Ourinhos')
+            ->assertSet('columnFilters.origin_cities', ['Osvaldo Cruz', 'Ourinhos'])
+            ->call('toggleOriginCityFilter', 'Osvaldo Cruz')
+            ->assertSet('columnFilters.origin_cities', ['Ourinhos']);
+    }
+
+    public function test_origin_filter_options_are_dynamic_distinct_and_sorted(): void
+    {
+        Register::factory()->create(['origin_city' => 'Ourinhos']);
+        Register::factory()->create(['origin_city' => 'Osvaldo Cruz']);
+        Register::factory()->create(['origin_city' => 'Ourinhos']);
+        Register::factory()->create(['origin_city' => '']);
+
+        $this->assertSame(
+            ['Osvaldo Cruz', 'Ourinhos'],
+            RegisterResource::spreadsheetOriginCityFilterOptions(),
+        );
+    }
+
     public function test_register_column_filter_menus_are_attached_to_visible_headers(): void
     {
         Register::factory()->create(['tow_yard' => 'Pátio central']);
+        Register::factory()->create(['origin_city' => 'Osvaldo Cruz']);
         $response = $this->withoutMiddleware(Authenticate::class)->get('/admin/registers');
         $response->assertOk();
         preg_match_all('/wire:model[^\s>]+="[^"]+"/', $response->getContent(), $modelBindings);
@@ -371,6 +463,14 @@ class RegisterResourceTest extends TestCase
         $this->assertContains('wire:model.live="columnFilters.deadline_withdraw.from"', $modelBindings[0]);
         $this->assertContains('wire:model.live="columnFilters.tow_yard"', $modelBindings[0]);
         $this->assertStringContainsString('value="Pátio central"', $response->getContent());
+        $this->assertStringContainsString('value="Ourinhos"', $response->getContent());
+        $this->assertStringContainsString('x-bind:checked=', $response->getContent());
+        $this->assertDoesNotMatchRegularExpression('/wire:model.live="columnFilters.origin_cities"/', $response->getContent());
+        preg_match_all('/wire:click="[^"]*toggleOriginCityFilter\(/', $response->getContent(), $originCityActions);
+        $this->assertCount(2, $originCityActions[0]);
+        preg_match_all('/wire:key="origin-city-filter-([^"]+)"/', $response->getContent(), $originCityKeys);
+        $this->assertCount(2, $originCityKeys[1]);
+        $this->assertCount(2, array_unique($originCityKeys[1]));
 
         preg_match_all('/data-register-column-filter="([^"]+)"/', $response->getContent(), $filterableColumns);
         $this->assertSame([
@@ -440,6 +540,8 @@ class RegisterResourceTest extends TestCase
 
     public function test_register_column_filters_can_be_combined(): void
     {
+        $this->travelTo(Carbon::parse('2026-10-19 12:00:00', 'America/Sao_Paulo'));
+
         $matching = Register::factory()->create([
             'vehicle_plate_color' => 'blue',
             'status' => 'pending',
@@ -455,7 +557,7 @@ class RegisterResourceTest extends TestCase
             'deadline_withdraw_color' => 'red',
             'value' => 1200,
         ]);
-        $wrongDeadlineColor = Register::factory()->create([
+        $automaticDeadlineColor = Register::factory()->create([
             'vehicle_plate_color' => 'blue',
             'status' => 'pending',
             'tow_yard' => 'Pátio Campinas',
@@ -502,8 +604,8 @@ class RegisterResourceTest extends TestCase
             ->set('columnFilters.deadline_withdraw.until', '2026-10-30')
             ->set('columnFilters.value.minimum', '1000')
             ->set('columnFilters.value.maximum', '2000')
-            ->assertCanSeeTableRecords([$matching])
-            ->assertCanNotSeeTableRecords([$wrongColor, $wrongDeadlineColor, $wrongStatus, $wrongYard, $wrongDate, $wrongValue]);
+            ->assertCanSeeTableRecords([$matching, $automaticDeadlineColor])
+            ->assertCanNotSeeTableRecords([$wrongColor, $wrongStatus, $wrongYard, $wrongDate, $wrongValue]);
     }
 
     public function test_column_filters_can_be_cleared_when_the_filtered_table_is_empty(): void

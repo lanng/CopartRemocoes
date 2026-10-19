@@ -18,6 +18,7 @@
     $activeExpression = match ($column) {
         'deadline_withdraw' => '($wire.columnFilters.deadline_withdraw_color || $wire.columnFilters.deadline_withdraw?.from || $wire.columnFilters.deadline_withdraw?.until)',
         'deadline_delivery' => '($wire.columnFilters.deadline_delivery_color || $wire.columnFilters.deadline_delivery?.from || $wire.columnFilters.deadline_delivery?.until)',
+        'origin_city' => '($wire.columnFilters.origin_city_color || ($wire.columnFilters.origin_cities?.length ?? 0) > 0)',
         default => match (true) {
             $colorAttribute !== null => '$wire.columnFilters.'.$colorAttribute,
             $column === 'value' => '($wire.columnFilters.value?.minimum != null || $wire.columnFilters.value?.maximum != null)',
@@ -109,6 +110,30 @@
                     @endforeach
                 </select>
             </label>
+            @if ($column === 'origin_city')
+                <div class="registers-column-filter-field mt-3 space-y-1.5">
+                    <span class="registers-column-filter-label text-xs font-medium text-gray-600 dark:text-gray-300">Cidades</span>
+                    <div class="max-h-48 space-y-1 overflow-y-auto rounded-lg border border-gray-200 p-2 dark:border-white/10">
+                        @forelse (\App\Filament\Resources\RegisterResource::spreadsheetOriginCityFilterOptions() as $city)
+                            <label
+                                wire:key="origin-city-filter-{{ md5($city) }}"
+                                class="flex cursor-pointer items-start gap-2 text-sm text-gray-950 dark:text-white"
+                            >
+                                <input
+                                    type="checkbox"
+                                    value="{{ $city }}"
+                                    x-bind:checked="($wire.columnFilters.origin_cities ?? []).includes(@js($city))"
+                                    wire:click="toggleOriginCityFilter(@js($city))"
+                                    class="mt-0.5 rounded border-gray-300 text-primary-600 shadow-sm focus:ring-primary-500 dark:border-white/20 dark:bg-gray-950"
+                                />
+                                <span class="break-words">{{ $city }}</span>
+                            </label>
+                        @empty
+                            <p class="text-sm text-gray-500 dark:text-gray-400">Nenhuma cidade cadastrada.</p>
+                        @endforelse
+                    </div>
+                </div>
+            @endif
             @if (in_array($column, ['deadline_withdraw', 'deadline_delivery'], true))
                 <div class="mt-3 space-y-3">
                     <label class="registers-column-filter-field block space-y-1.5">

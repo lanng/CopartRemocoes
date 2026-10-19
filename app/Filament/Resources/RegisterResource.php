@@ -67,6 +67,10 @@ class RegisterResource extends Resource
     public const VEHICLE_CONDITION_OPTIONS = [
         'ANDA' => 'ANDA',
         'Ñ ANDA' => 'Ñ ANDA',
+        'DOC - OK' => 'DOC - OK',
+        'AMI - OK' => 'AMI - OK',
+        'FIS - OK' => 'FIS - OK',
+        'ND - OK' => 'ND - OK',
     ];
 
     /** @var array<string, string> */
@@ -77,6 +81,12 @@ class RegisterResource extends Resource
         'destination_city' => 'destination_city_color',
         'deadline_withdraw' => 'deadline_withdraw_color',
         'deadline_delivery' => 'deadline_delivery_color',
+    ];
+
+    /** @var array<string, string> */
+    public const SPREADSHEET_DEADLINE_COLOR_ATTRIBUTES = [
+        'deadline_withdraw_color' => 'deadline_withdraw',
+        'deadline_delivery_color' => 'deadline_delivery',
     ];
 
     /** @var array<int, string> */
@@ -544,8 +554,8 @@ class RegisterResource extends Resource
                                     'vehicle_model_color' => $record->vehicle_model_color,
                                     'origin_city_color' => $record->origin_city_color,
                                     'destination_city_color' => $record->destination_city_color,
-                                    'deadline_withdraw_color' => $record->deadline_withdraw_color,
-                                    'deadline_delivery_color' => $record->deadline_delivery_color,
+                                    'deadline_withdraw_color' => self::spreadsheetCellColorValue($record, 'deadline_withdraw_color'),
+                                    'deadline_delivery_color' => self::spreadsheetCellColorValue($record, 'deadline_delivery_color'),
                                 ],
                             ])->values()->all();
 
@@ -631,6 +641,7 @@ class RegisterResource extends Resource
                 ),
             TextColumn::make('origin_city')
                 ->label('Origem')
+                ->width('15rem')
                 ->color(fn (Register $record): string => self::spreadsheetCellTextColor($record, 'origin_city_color'))
                 ->tooltip('Clique para alterar a cor da origem')
                 ->extraCellAttributes(fn (Register $record): array => self::spreadsheetMobileRecordLinkAttributes($record))
@@ -741,13 +752,13 @@ class RegisterResource extends Resource
                 ->toggleable(isToggledHiddenByDefault: true),
             TextColumn::make('tow_yard')
                 ->label('Local')
-                ->width('7rem')
+                ->width('6rem')
                 ->wrap()
                 ->searchable()
                 ->toggleable(),
             SelectColumn::make('condition')
                 ->label('Condição')
-                ->width('6rem')
+                ->width('8rem')
                 ->wrapHeader()
                 ->options(self::VEHICLE_CONDITION_OPTIONS)
                 ->placeholder('—')
@@ -843,7 +854,18 @@ class RegisterResource extends Resource
     {
         $attribute = self::SPREADSHEET_COLUMN_COLOR_ATTRIBUTES[$column] ?? null;
 
-        return $attribute === null ? [] : self::spreadsheetColorOptions($attribute);
+        if ($attribute === null) {
+            return [];
+        }
+
+        if (isset(self::SPREADSHEET_DEADLINE_COLOR_ATTRIBUTES[$attribute])) {
+            return [
+                'automatic' => 'Sem marcação',
+                ...self::SPREADSHEET_COLOR_CHOICES[$attribute],
+            ];
+        }
+
+        return self::spreadsheetColorOptions($attribute);
     }
 
     public static function spreadsheetColorAttributeForColumn(string $column): ?string
@@ -860,6 +882,18 @@ class RegisterResource extends Resource
             ->distinct()
             ->orderBy('tow_yard')
             ->pluck('tow_yard')
+            ->all();
+    }
+
+    /** @return array<int, string> */
+    public static function spreadsheetOriginCityFilterOptions(): array
+    {
+        return Register::query()
+            ->whereNotNull('origin_city')
+            ->where('origin_city', '!=', '')
+            ->distinct()
+            ->orderBy('origin_city')
+            ->pluck('origin_city')
             ->all();
     }
 
@@ -889,9 +923,11 @@ class RegisterResource extends Resource
             ->modalSubmitActionLabel('Aplicar cor')
             ->modalWidth('sm')
             ->fillForm(fn (Register $record): array => [
-                'color' => in_array($record->{$attribute}, [null, 'black'], true)
-                    ? 'automatic'
-                    : $record->{$attribute},
+                'color' => match (true) {
+                    isset(self::SPREADSHEET_DEADLINE_COLOR_ATTRIBUTES[$attribute]) && $record->{$attribute} === 'black' => 'black',
+                    in_array($record->{$attribute}, [null, 'black'], true) => 'automatic',
+                    default => $record->{$attribute},
+                },
             ])
             ->form([
                 Select::make('color')
@@ -911,21 +947,44 @@ class RegisterResource extends Resource
     /** @return array<string, string> */
     private static function spreadsheetColorOptions(string $attribute): array
     {
-        return [
-            'automatic' => 'Automático — sem marcação',
-            ...self::SPREADSHEET_COLOR_CHOICES[$attribute],
+        $options = [
+            'automatic' => isset(self::SPREADSHEET_DEADLINE_COLOR_ATTRIBUTES[$attribute])
+                ? 'Automático — por prazo'
+                : 'Automático — sem marcação',
         ];
+
+        if (isset(self::SPREADSHEET_DEADLINE_COLOR_ATTRIBUTES[$attribute])) {
+            $options['black'] = 'Sem marcação';
+        }
+
+        return [...$options, ...self::SPREADSHEET_COLOR_CHOICES[$attribute]];
     }
 
     private static function spreadsheetCellTextColor(Register $record, string $attribute): string
     {
-        return match ($record->{$attribute}) {
+        return match (self::spreadsheetCellColorValue($record, $attribute)) {
             'blue' => 'info',
             'red' => 'danger',
             'yellow' => 'warning',
             'green' => 'success',
             default => 'gray',
         };
+    }
+
+    private static function spreadsheetCellColorValue(Register $record, string $attribute): ?string
+    {
+        $color = $record->{$attribute};
+        $deadlineAttribute = self::SPREADSHEET_DEADLINE_COLOR_ATTRIBUTES[$attribute] ?? null;
+
+        if ($color === null && $deadlineAttribute !== null) {
+            $deadline = $record->{$deadlineAttribute};
+
+            if ($deadline !== null) {
+                return 'red';
+            }
+        }
+
+        return $color;
     }
 
     private static function dateRangeFilter(string $column, string $label): Filter
