@@ -71,6 +71,7 @@ class RegisterResource extends Resource
         'AMI - OK' => 'AMI - OK',
         'FIS - OK' => 'FIS - OK',
         'ND - OK' => 'ND - OK',
+        'MOTO' => 'MOTO',
     ];
 
     /** @var array<string, string> */

@@ -174,6 +174,7 @@ class RegisterResourceTest extends TestCase
             'AMI - OK' => 'AMI - OK',
             'FIS - OK' => 'FIS - OK',
             'ND - OK' => 'ND - OK',
+            'MOTO' => 'MOTO',
         ], $register);
         $this->assertFalse($conditionColumn->isSortable());
 
@@ -183,8 +184,11 @@ class RegisterResourceTest extends TestCase
         $component->call('updateTableColumnState', 'condition', (string) $register->getKey(), 'Ñ ANDA');
         $this->assertSame('Ñ ANDA', $register->refresh()->condition);
 
+        $component->call('updateTableColumnState', 'condition', (string) $register->getKey(), 'MOTO');
+        $this->assertSame('MOTO', $register->refresh()->condition);
+
         $component->call('updateTableColumnState', 'condition', (string) $register->getKey(), 'OUTRA');
-        $this->assertSame('Ñ ANDA', $register->refresh()->condition);
+        $this->assertSame('MOTO', $register->refresh()->condition);
     }
 
     public function test_register_list_uses_the_full_available_page_width(): void
