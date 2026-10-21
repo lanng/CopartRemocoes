@@ -905,6 +905,18 @@ class RegisterResource extends Resource
             ->all();
     }
 
+    /** @return array<int, string> */
+    public static function spreadsheetDestinationCityFilterOptions(): array
+    {
+        return Register::query()
+            ->whereNotNull('destination_city')
+            ->where('destination_city', '!=', '')
+            ->distinct()
+            ->orderBy('destination_city')
+            ->pluck('destination_city')
+            ->all();
+    }
+
     /** @return array<string, string> */
     private static function spreadsheetMobileRecordLinkAttributes(Register $record): array
     {

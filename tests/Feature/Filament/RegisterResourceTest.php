@@ -640,6 +640,137 @@ class RegisterResourceTest extends TestCase
             ->assertCanNotSeeTableRecords([$osvaldoCruz]);
     }
 
+    public function test_destination_city_filter_toggles_cities_independently_and_combines_with_color(): void
+    {
+        $ourinhos = Register::factory()->create([
+            'destination_city' => 'Ourinhos',
+            'destination_city_color' => 'red',
+            'insurance' => 'Seguradora A',
+        ]);
+        $osvaldoCruz = Register::factory()->create([
+            'destination_city' => 'Osvaldo Cruz',
+            'destination_city_color' => 'red',
+        ]);
+        $otherColor = Register::factory()->create(['destination_city' => 'Ourinhos']);
+
+        $component = Livewire::test(ListRegisters::class)
+            ->set('columnFilters.destination_city_color', 'red')
+            ->call('toggleDestinationCityFilter', 'Ourinhos')
+            ->assertSet('columnFilters.destination_cities', ['Ourinhos'])
+            ->assertCanSeeTableRecords([$ourinhos])
+            ->assertCanNotSeeTableRecords([$osvaldoCruz, $otherColor])
+            ->assertSeeHtml('value="Osvaldo Cruz"');
+
+        $this->assertSame(['Osvaldo Cruz', 'Ourinhos'], $component->instance()->getDestinationCityFilterOptions());
+
+        $component->call('toggleDestinationCityFilter', 'Osvaldo Cruz')
+            ->assertSet('columnFilters.destination_cities', ['Ourinhos', 'Osvaldo Cruz'])
+            ->assertCanSeeTableRecords([$ourinhos, $osvaldoCruz])
+            ->call('toggleDestinationCityFilter', 'Ourinhos')
+            ->assertSet('columnFilters.destination_cities', ['Osvaldo Cruz'])
+            ->assertCanSeeTableRecords([$osvaldoCruz])
+            ->call('clearColumnFilter', 'destination_city')
+            ->assertSet('columnFilters.destination_city_color', null)
+            ->assertSet('columnFilters.destination_cities', [])
+            ->assertCanSeeTableRecords([$ourinhos, $osvaldoCruz, $otherColor]);
+    }
+
+    public function test_destination_city_options_follow_origin_selection_and_origin_options_follow_destination_selection(): void
+    {
+        Register::factory()->create(['origin_city' => 'Campinas', 'destination_city' => 'Santos']);
+        Register::factory()->create(['origin_city' => 'Campinas', 'destination_city' => 'Bauru']);
+        Register::factory()->create(['origin_city' => 'Ourinhos', 'destination_city' => 'Assis']);
+
+        $component = Livewire::test(ListRegisters::class)
+            ->call('toggleOriginCityFilter', 'Campinas')
+            ->assertSeeHtml('value="Bauru"')
+            ->assertSeeHtml('value="Santos"')
+            ->assertDontSeeHtml('value="Assis"');
+
+        $this->assertSame(['Bauru', 'Santos'], $component->instance()->getDestinationCityFilterOptions());
+
+        $component->call('toggleDestinationCityFilter', 'Santos')
+            ->assertCanSeeTableRecords(Register::query()->where('origin_city', 'Campinas')->where('destination_city', 'Santos')->get())
+            ->assertDontSeeHtml('value="Ourinhos"');
+
+        $this->assertSame(['Campinas'], $component->instance()->getOriginCityFilterOptions());
+    }
+
+    public function test_destination_city_options_respect_search_and_other_filters_across_pages(): void
+    {
+        Register::factory()->count(25)->create([
+            'destination_city' => 'Ourinhos',
+            'vehicle_model' => 'CIVIC',
+            'destination_city_color' => 'red',
+            'status' => 'pending',
+            'deadline_withdraw' => '2026-10-01',
+        ]);
+        $secondPageRegister = Register::factory()->create([
+            'destination_city' => 'Osvaldo Cruz',
+            'vehicle_model' => 'CIVIC',
+            'destination_city_color' => 'red',
+            'status' => 'pending',
+            'deadline_withdraw' => '2026-10-02',
+        ]);
+        Register::factory()->create([
+            'destination_city' => 'Santos',
+            'vehicle_model' => 'COROLLA',
+            'destination_city_color' => 'red',
+            'status' => 'pending',
+            'deadline_withdraw' => '2026-10-02',
+        ]);
+
+        $component = Livewire::test(ListRegisters::class)
+            ->filterTable('company', 'copart')
+            ->searchTable('CIVIC')
+            ->set('columnFilters', [
+                'destination_city_color' => 'red',
+                'deadline_withdraw' => ['from' => '2026-10-01', 'until' => '2026-10-03'],
+            ])
+            ->sortTable('deadline_withdraw', 'asc')
+            ->assertCanNotSeeTableRecords([$secondPageRegister])
+            ->assertSeeHtml('value="Osvaldo Cruz"')
+            ->assertSeeHtml('value="Ourinhos"')
+            ->assertDontSeeHtml('value="Santos"');
+
+        $this->assertSame(['Osvaldo Cruz', 'Ourinhos'], $component->instance()->getDestinationCityFilterOptions());
+    }
+
+    public function test_destination_city_options_only_include_operational_statuses_and_selected_city_can_be_removed(): void
+    {
+        $retired = Register::factory()->create(['destination_city' => 'Ourinhos', 'status' => 'paid']);
+        $eligible = Register::factory()->create(['destination_city' => 'Osvaldo Cruz', 'status' => 'pending']);
+        Register::factory()->create(['destination_city' => 'Bauru', 'status' => 'collected']);
+        Register::factory()->create(['destination_city' => 'Campinas', 'status' => 'available']);
+        Register::factory()->create(['destination_city' => 'Assis', 'status' => 'pending daily rates']);
+        Register::factory()->create(['destination_city' => 'Santos', 'status' => 'delivered']);
+
+        $component = Livewire::test(ListRegisters::class)
+            ->set('columnFilters.destination_cities', ['Ourinhos'])
+            ->assertCanSeeTableRecords([$retired])
+            ->assertCanNotSeeTableRecords([$eligible])
+            ->assertDontSeeHtml('value="Ourinhos"');
+
+        $this->assertSame(['Assis', 'Bauru', 'Campinas', 'Osvaldo Cruz'], $component->instance()->getDestinationCityFilterOptions());
+
+        $component->call('toggleDestinationCityFilter', 'Ourinhos')
+            ->assertSet('columnFilters.destination_cities', [])
+            ->assertCanSeeTableRecords([$retired, $eligible]);
+    }
+
+    public function test_destination_city_filter_options_are_dynamic_distinct_and_sorted(): void
+    {
+        Register::factory()->create(['destination_city' => 'Ourinhos']);
+        Register::factory()->create(['destination_city' => 'Bauru']);
+        Register::factory()->create(['destination_city' => 'Ourinhos']);
+        Register::factory()->create(['destination_city' => '']);
+
+        $this->assertSame(
+            ['Bauru', 'Ourinhos'],
+            RegisterResource::spreadsheetDestinationCityFilterOptions(),
+        );
+    }
+
     public function test_origin_city_options_follow_search_and_other_table_filters(): void
     {
         $matchingAttributes = [
@@ -804,7 +935,7 @@ class RegisterResourceTest extends TestCase
     public function test_register_column_filter_menus_are_attached_to_visible_headers(): void
     {
         Register::factory()->create(['tow_yard' => 'Pátio central']);
-        Register::factory()->create(['origin_city' => 'Osvaldo Cruz']);
+        Register::factory()->create(['origin_city' => 'Osvaldo Cruz', 'destination_city' => 'Ourinhos']);
         $response = $this->withoutMiddleware(Authenticate::class)->get('/admin/registers');
         $response->assertOk();
         preg_match_all('/wire:model[^\s>]+="[^"]+"/', $response->getContent(), $modelBindings);
@@ -821,6 +952,11 @@ class RegisterResourceTest extends TestCase
         preg_match_all('/wire:key="origin-city-filter-([^"]+)"/', $response->getContent(), $originCityKeys);
         $this->assertCount(2, $originCityKeys[1]);
         $this->assertCount(2, array_unique($originCityKeys[1]));
+        preg_match_all('/wire:click="[^"]*toggleDestinationCityFilter\(/', $response->getContent(), $destinationCityActions);
+        $this->assertCount(2, $destinationCityActions[0]);
+        preg_match_all('/wire:key="destination-city-filter-([^"]+)"/', $response->getContent(), $destinationCityKeys);
+        $this->assertCount(2, $destinationCityKeys[1]);
+        $this->assertCount(2, array_unique($destinationCityKeys[1]));
 
         preg_match_all('/data-register-column-filter="([^"]+)"/', $response->getContent(), $filterableColumns);
         $this->assertSame([

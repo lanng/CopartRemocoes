@@ -19,6 +19,7 @@
         'deadline_withdraw' => '($wire.columnFilters.deadline_withdraw_color || $wire.columnFilters.deadline_withdraw?.from || $wire.columnFilters.deadline_withdraw?.until)',
         'deadline_delivery' => '($wire.columnFilters.deadline_delivery_color || $wire.columnFilters.deadline_delivery?.from || $wire.columnFilters.deadline_delivery?.until)',
         'origin_city' => '($wire.columnFilters.origin_city_color || ($wire.columnFilters.origin_cities?.length ?? 0) > 0)',
+        'destination_city' => '($wire.columnFilters.destination_city_color || ($wire.columnFilters.destination_cities?.length ?? 0) > 0)',
         default => match (true) {
             $colorAttribute !== null => '$wire.columnFilters.'.$colorAttribute,
             $column === 'value' => '($wire.columnFilters.value?.minimum != null || $wire.columnFilters.value?.maximum != null)',
@@ -110,23 +111,29 @@
                     @endforeach
                 </select>
             </label>
-            @if ($column === 'origin_city')
+            @if (in_array($column, ['origin_city', 'destination_city'], true))
+                @php
+                    $cityFilter = $column === 'origin_city' ? 'origin_cities' : 'destination_cities';
+                    $cityToggleMethod = $column === 'origin_city' ? 'toggleOriginCityFilter' : 'toggleDestinationCityFilter';
+                    $cityKeyPrefix = $column === 'origin_city' ? 'origin-city' : 'destination-city';
+                    $cityOptions = $column === 'origin_city' ? $this->getOriginCityFilterOptions() : $this->getDestinationCityFilterOptions();
+                @endphp
                 <div class="registers-column-filter-field mt-3 space-y-1.5">
                     <span class="registers-column-filter-label text-xs font-medium text-gray-600 dark:text-gray-300">Cidades</span>
                     <div
                         class="space-y-1 rounded-lg border border-gray-200 p-2 dark:border-white/10"
                         style="max-height: min(16rem, 50dvh); overflow-y: auto; overscroll-behavior-y: contain;"
                     >
-                        @forelse ($this->getOriginCityFilterOptions() as $city)
+                        @forelse ($cityOptions as $city)
                             <label
-                                wire:key="origin-city-filter-{{ md5($city) }}"
+                                wire:key="{{ $cityKeyPrefix }}-filter-{{ md5($city) }}"
                                 class="flex cursor-pointer items-start gap-2 text-sm text-gray-950 dark:text-white"
                             >
                                 <input
                                     type="checkbox"
                                     value="{{ $city }}"
-                                    x-bind:checked="($wire.columnFilters.origin_cities ?? []).includes(@js($city))"
-                                    wire:click="toggleOriginCityFilter(@js($city))"
+                                    x-bind:checked="($wire.columnFilters.{{ $cityFilter }} ?? []).includes(@js($city))"
+                                    wire:click="{{ $cityToggleMethod }}(@js($city))"
                                     class="mt-0.5 rounded border-gray-300 text-primary-600 shadow-sm focus:ring-primary-500 dark:border-white/20 dark:bg-gray-950"
                                 />
                                 <span class="break-words">{{ $city }}</span>

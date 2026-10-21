@@ -89,6 +89,38 @@ class ListRegisters extends ListRecords
         return $cities->unique()->sort(SORT_NATURAL | SORT_FLAG_CASE)->values()->all();
     }
 
+    /** @return array<int, string> */
+    public function getDestinationCityFilterOptions(): array
+    {
+        $query = parent::filterTableQuery($this->getTable()->getQuery());
+        $cities = $this->applyColumnFiltersToQuery($query, includeDestinationCities: false)
+            ->whereIn('registers.status', self::ORIGIN_CITY_FILTER_STATUSES)
+            ->reorder()
+            ->select('registers.destination_city')
+            ->whereNotNull('registers.destination_city')
+            ->where('registers.destination_city', '!=', '')
+            ->distinct()
+            ->pluck('registers.destination_city');
+
+        $selectedCities = $this->columnFilters['destination_cities'] ?? [];
+
+        if (is_array($selectedCities) && $selectedCities !== []) {
+            $availableCities = Register::query()
+                ->whereIn('status', self::ORIGIN_CITY_FILTER_STATUSES)
+                ->whereNotNull('destination_city')
+                ->where('destination_city', '!=', '')
+                ->distinct()
+                ->pluck('destination_city')
+                ->all();
+            $cities = $cities->merge(array_filter(
+                $selectedCities,
+                fn (mixed $city): bool => is_string($city) && in_array($city, $availableCities, true),
+            ));
+        }
+
+        return $cities->unique()->sort(SORT_NATURAL | SORT_FLAG_CASE)->values()->all();
+    }
+
     public function updatedColumnFilters(): void
     {
         $this->resetPage();
@@ -124,6 +156,9 @@ class ListRegisters extends ListRecords
         if ($column === 'origin_city') {
             $this->columnFilters['origin_city_color'] = null;
             $this->columnFilters['origin_cities'] = [];
+        } elseif ($column === 'destination_city') {
+            $this->columnFilters['destination_city_color'] = null;
+            $this->columnFilters['destination_cities'] = [];
         } elseif ($colorAttribute !== null) {
             $this->columnFilters[$colorAttribute] = null;
         } else {
@@ -146,13 +181,23 @@ class ListRegisters extends ListRecords
 
     public function toggleOriginCityFilter(string $city): void
     {
-        $availableCities = RegisterResource::spreadsheetOriginCityFilterOptions();
+        $this->toggleCityFilter('origin_cities', $city, RegisterResource::spreadsheetOriginCityFilterOptions());
+    }
+
+    public function toggleDestinationCityFilter(string $city): void
+    {
+        $this->toggleCityFilter('destination_cities', $city, RegisterResource::spreadsheetDestinationCityFilterOptions());
+    }
+
+    /** @param array<int, string> $availableCities */
+    private function toggleCityFilter(string $filter, string $city, array $availableCities): void
+    {
 
         if (! in_array($city, $availableCities, true)) {
             return;
         }
 
-        $selectedCities = $this->columnFilters['origin_cities'] ?? [];
+        $selectedCities = $this->columnFilters[$filter] ?? [];
         $selectedCities = is_array($selectedCities)
             ? array_values(array_filter(
                 $selectedCities,
@@ -169,7 +214,7 @@ class ListRegisters extends ListRecords
             $selectedCities[] = $city;
         }
 
-        $this->columnFilters['origin_cities'] = $selectedCities;
+        $this->columnFilters[$filter] = $selectedCities;
         $this->updatedColumnFilters();
     }
 
@@ -192,8 +237,11 @@ class ListRegisters extends ListRecords
         return count($plates) >= 2 ? array_values(array_unique($plates)) : null;
     }
 
-    private function applyColumnFiltersToQuery(Builder $query, bool $includeOriginCities = true): Builder
-    {
+    private function applyColumnFiltersToQuery(
+        Builder $query,
+        bool $includeOriginCities = true,
+        bool $includeDestinationCities = true,
+    ): Builder {
         $deadlineAlertDate = today('America/Sao_Paulo')->toDateString();
 
         foreach (RegisterResource::SPREADSHEET_COLUMN_COLOR_ATTRIBUTES as $column => $attribute) {
@@ -260,6 +308,20 @@ class ListRegisters extends ListRecords
 
             if ($originCities !== []) {
                 $query->whereIn('origin_city', $originCities);
+            }
+        }
+
+        $destinationCities = $this->columnFilters['destination_cities'] ?? [];
+
+        if ($includeDestinationCities && is_array($destinationCities) && $destinationCities !== []) {
+            $availableCities = RegisterResource::spreadsheetDestinationCityFilterOptions();
+            $destinationCities = array_values(array_filter(
+                $destinationCities,
+                fn (mixed $city): bool => is_string($city) && in_array($city, $availableCities, true),
+            ));
+
+            if ($destinationCities !== []) {
+                $query->whereIn('destination_city', $destinationCities);
             }
         }
 
