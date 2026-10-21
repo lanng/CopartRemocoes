@@ -417,6 +417,7 @@ class RegisterResourceTest extends TestCase
         $this->travelTo(Carbon::parse('2026-10-19 12:00:00', 'America/Sao_Paulo'));
         $red = collect();
         $unmarked = collect();
+        $operationalUnmarked = collect();
 
         foreach (RegisterStatusEnum::cases() as $status) {
             foreach (['2026-10-18', '2026-10-19 23:59:59', '2026-10-20'] as $deadline) {
@@ -431,36 +432,47 @@ class RegisterResourceTest extends TestCase
                 } else {
                     $unmarked->push($register);
                 }
+
+                if (in_array($status, [
+                    RegisterStatusEnum::COLLECTED,
+                    RegisterStatusEnum::PENDING,
+                    RegisterStatusEnum::AVAILABLE,
+                    RegisterStatusEnum::PENDING_DAILY_RATES,
+                ], true) && ! $red->contains($register)) {
+                    $operationalUnmarked->push($register);
+                }
             }
         }
 
-        $red->push(Register::factory()->create([
+        $historicalManualRed = Register::factory()->create([
             'status' => 'paid',
             'deadline_withdraw' => '2026-10-20',
             'deadline_delivery' => '2026-10-20',
             'deadline_withdraw_color' => 'red',
             'deadline_delivery_color' => 'red',
-        ]));
-        $unmarked->push(Register::factory()->create([
+        ]);
+        $legacyBlack = Register::factory()->create([
             'deadline_withdraw' => '2026-10-18',
             'deadline_delivery' => '2026-10-18',
             'deadline_withdraw_color' => 'black',
             'deadline_delivery_color' => 'black',
-        ]));
+        ]);
+        $unmarked->push($legacyBlack);
+        $operationalUnmarked->push($legacyBlack);
 
         foreach (['deadline_withdraw_color', 'deadline_delivery_color'] as $attribute) {
             $component = Livewire::test(ListRegisters::class)
                 ->set('columnFilters', [$attribute => 'red'])
                 ->assertCanSeeTableRecords($red->all())
-                ->assertCanNotSeeTableRecords($unmarked->all());
+                ->assertCanNotSeeTableRecords([...$unmarked, $historicalManualRed]);
 
             $this->assertEqualsCanonicalizing($red->pluck('id')->all(), $component->instance()->getTableQueryForExport()->pluck('registers.id')->all());
 
             $component->set('columnFilters', [$attribute => 'automatic'])
-                ->assertCanSeeTableRecords($unmarked->all())
-                ->assertCanNotSeeTableRecords($red->all());
+                ->assertCanSeeTableRecords($operationalUnmarked->all())
+                ->assertCanNotSeeTableRecords([...$red, $historicalManualRed]);
 
-            $this->assertEqualsCanonicalizing($unmarked->pluck('id')->all(), $component->instance()->getTableQueryForExport()->pluck('registers.id')->all());
+            $this->assertEqualsCanonicalizing($operationalUnmarked->pluck('id')->all(), $component->instance()->getTableQueryForExport()->pluck('registers.id')->all());
         }
     }
 
@@ -581,6 +593,104 @@ class RegisterResourceTest extends TestCase
         }
     }
 
+    public function test_color_filters_scope_records_and_exports_to_the_four_operational_statuses(): void
+    {
+        $operational = collect();
+        $historical = collect();
+
+        foreach ([
+            'pending',
+            'available',
+            'collected',
+            'pending daily rates',
+        ] as $status) {
+            $operational->push(Register::factory()->create([
+                'status' => $status,
+                'vehicle_plate_color' => 'blue',
+            ]));
+        }
+
+        foreach (['paid', 'delivered', 'cancelled', 'invoiced', 'analysis'] as $status) {
+            $historical->push(Register::factory()->create([
+                'status' => $status,
+                'vehicle_plate_color' => 'blue',
+            ]));
+        }
+
+        $component = Livewire::test(ListRegisters::class)
+            ->set('columnFilters.vehicle_plate_color', 'blue')
+            ->assertCanSeeTableRecords($operational->all())
+            ->assertCanNotSeeTableRecords($historical->all());
+
+        $this->assertEqualsCanonicalizing(
+            $operational->pluck('id')->all(),
+            $component->instance()->getTableQueryForExport()->pluck('registers.id')->all(),
+        );
+
+        foreach ([...$operational, ...$historical] as $register) {
+            $this->assertSame('blue', $register->refresh()->vehicle_plate_color);
+        }
+    }
+
+    public function test_city_filters_scope_matching_rows_to_the_four_operational_statuses(): void
+    {
+        $pendingOrigin = Register::factory()->create(['status' => 'pending', 'origin_city' => 'Ourinhos']);
+        $paidOrigin = Register::factory()->create(['status' => 'paid', 'origin_city' => 'Ourinhos']);
+        $availableDestination = Register::factory()->create([
+            'status' => 'available',
+            'origin_city' => 'Bauru',
+            'destination_city' => 'Santos',
+        ]);
+        $invoicedDestination = Register::factory()->create([
+            'status' => 'invoiced',
+            'origin_city' => 'Bauru',
+            'destination_city' => 'Santos',
+        ]);
+
+        $component = Livewire::test(ListRegisters::class)
+            ->set('columnFilters.origin_cities', ['Ourinhos'])
+            ->assertCanSeeTableRecords([$pendingOrigin])
+            ->assertCanNotSeeTableRecords([$paidOrigin, $availableDestination, $invoicedDestination])
+            ->call('clearColumnFilter', 'origin_city')
+            ->assertCanSeeTableRecords([$pendingOrigin, $paidOrigin, $availableDestination, $invoicedDestination])
+            ->set('columnFilters.destination_cities', ['Santos'])
+            ->assertCanSeeTableRecords([$availableDestination])
+            ->assertCanNotSeeTableRecords([$pendingOrigin, $paidOrigin, $invoicedDestination]);
+
+        $this->assertEqualsCanonicalizing(
+            [$availableDestination->id],
+            $component->instance()->getTableQueryForExport()->pluck('registers.id')->all(),
+        );
+    }
+
+    public function test_unset_invalid_and_empty_color_or_city_filters_preserve_historical_rows(): void
+    {
+        $historical = collect();
+
+        foreach (['paid', 'delivered', 'cancelled', 'invoiced', 'analysis'] as $status) {
+            $historical->push(Register::factory()->create(['status' => $status]));
+        }
+
+        $component = Livewire::test(ListRegisters::class)
+            ->assertCanSeeTableRecords($historical->all());
+
+        foreach (['not-a-color', ''] as $color) {
+            $component->set('columnFilters.vehicle_plate_color', $color)
+                ->assertCanSeeTableRecords($historical->all());
+        }
+
+        $component->set('columnFilters.vehicle_plate_color', null)
+            ->set('columnFilters.origin_cities', ['unknown origin'])
+            ->set('columnFilters.destination_cities', ['unknown destination'])
+            ->assertCanSeeTableRecords($historical->all());
+
+        $component->set('columnFilters.origin_cities', [])
+            ->set('columnFilters.destination_cities', [])
+            ->set('columnFilters.status', 'paid')
+            ->assertCanSeeTableRecords([$historical->first()])
+            ->assertCanNotSeeTableRecords($historical->slice(1)->all());
+    }
+
     public function test_origin_filter_combines_multiple_cities_with_color_and_other_filters(): void
     {
         $osvaldoCruz = Register::factory()->create([
@@ -607,13 +717,12 @@ class RegisterResourceTest extends TestCase
         Livewire::test(ListRegisters::class)
             ->set('columnFilters.origin_city_color', 'red')
             ->set('columnFilters.origin_cities', ['Osvaldo Cruz', 'Ourinhos'])
-            ->set('columnFilters.status', 'pending')
             ->assertCanSeeTableRecords([$osvaldoCruz, $ourinhos])
             ->assertCanNotSeeTableRecords([$otherCity, $otherColor, $otherStatus])
             ->call('clearColumnFilter', 'origin_city')
             ->assertSet('columnFilters.origin_city_color', null)
             ->assertSet('columnFilters.origin_cities', [])
-            ->assertCanSeeTableRecords([$otherCity]);
+            ->assertCanSeeTableRecords([$otherCity, $otherColor, $otherStatus]);
     }
 
     public function test_origin_city_filter_toggles_each_city_independently(): void
@@ -747,8 +856,7 @@ class RegisterResourceTest extends TestCase
 
         $component = Livewire::test(ListRegisters::class)
             ->set('columnFilters.destination_cities', ['Ourinhos'])
-            ->assertCanSeeTableRecords([$retired])
-            ->assertCanNotSeeTableRecords([$eligible])
+            ->assertCanNotSeeTableRecords([$retired, $eligible])
             ->assertDontSeeHtml('value="Ourinhos"');
 
         $this->assertSame(['Assis', 'Bauru', 'Campinas', 'Osvaldo Cruz'], $component->instance()->getDestinationCityFilterOptions());
@@ -890,10 +998,8 @@ class RegisterResourceTest extends TestCase
 
         $component = Livewire::test(ListRegisters::class)
             ->set('columnFilters.origin_cities', ['Ourinhos'])
-            ->assertCanSeeTableRecords([$retired])
-            ->assertCanNotSeeTableRecords([$eligible, $unrelated])
-            ->assertDontSeeHtml('value="Ourinhos"')
-            ->assertSeeHtml('value="Osvaldo Cruz"');
+            ->assertCanNotSeeTableRecords([$retired, $eligible, $unrelated])
+            ->assertDontSeeHtml('value="Ourinhos"');
 
         $this->assertSame(['Osvaldo Cruz'], $component->instance()->getOriginCityFilterOptions());
     }

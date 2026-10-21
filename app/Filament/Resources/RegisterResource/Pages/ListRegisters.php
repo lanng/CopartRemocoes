@@ -13,7 +13,7 @@ use Illuminate\Database\Eloquent\Builder;
 class ListRegisters extends ListRecords
 {
     /** @var array<int, string> */
-    private const ORIGIN_CITY_FILTER_STATUSES = [
+    private const OPERATIONAL_FILTER_STATUSES = [
         RegisterStatusEnum::COLLECTED->value,
         RegisterStatusEnum::PENDING->value,
         RegisterStatusEnum::AVAILABLE->value,
@@ -62,7 +62,7 @@ class ListRegisters extends ListRecords
     {
         $query = parent::filterTableQuery($this->getTable()->getQuery());
         $cities = $this->applyColumnFiltersToQuery($query, includeOriginCities: false)
-            ->whereIn('registers.status', self::ORIGIN_CITY_FILTER_STATUSES)
+            ->whereIn('registers.status', self::OPERATIONAL_FILTER_STATUSES)
             ->reorder()
             ->select('registers.origin_city')
             ->whereNotNull('registers.origin_city')
@@ -74,7 +74,7 @@ class ListRegisters extends ListRecords
 
         if (is_array($selectedCities) && $selectedCities !== []) {
             $availableCities = Register::query()
-                ->whereIn('status', self::ORIGIN_CITY_FILTER_STATUSES)
+                ->whereIn('status', self::OPERATIONAL_FILTER_STATUSES)
                 ->whereNotNull('origin_city')
                 ->where('origin_city', '!=', '')
                 ->distinct()
@@ -94,7 +94,7 @@ class ListRegisters extends ListRecords
     {
         $query = parent::filterTableQuery($this->getTable()->getQuery());
         $cities = $this->applyColumnFiltersToQuery($query, includeDestinationCities: false)
-            ->whereIn('registers.status', self::ORIGIN_CITY_FILTER_STATUSES)
+            ->whereIn('registers.status', self::OPERATIONAL_FILTER_STATUSES)
             ->reorder()
             ->select('registers.destination_city')
             ->whereNotNull('registers.destination_city')
@@ -106,7 +106,7 @@ class ListRegisters extends ListRecords
 
         if (is_array($selectedCities) && $selectedCities !== []) {
             $availableCities = Register::query()
-                ->whereIn('status', self::ORIGIN_CITY_FILTER_STATUSES)
+                ->whereIn('status', self::OPERATIONAL_FILTER_STATUSES)
                 ->whereNotNull('destination_city')
                 ->where('destination_city', '!=', '')
                 ->distinct()
@@ -243,6 +243,7 @@ class ListRegisters extends ListRecords
         bool $includeDestinationCities = true,
     ): Builder {
         $deadlineAlertDate = today('America/Sao_Paulo')->toDateString();
+        $hasActiveColorFilter = false;
 
         foreach (RegisterResource::SPREADSHEET_COLUMN_COLOR_ATTRIBUTES as $column => $attribute) {
             $color = $this->columnFilters[$attribute] ?? null;
@@ -256,6 +257,8 @@ class ListRegisters extends ListRecords
             if (! array_key_exists($color, $options)) {
                 continue;
             }
+
+            $hasActiveColorFilter = true;
 
             $deadlineAttribute = RegisterResource::SPREADSHEET_DEADLINE_COLOR_ATTRIBUTES[$attribute] ?? null;
 
@@ -297,6 +300,7 @@ class ListRegisters extends ListRecords
             $query->where($attribute, $color);
         }
 
+        $hasActiveCityFilter = false;
         $originCities = $this->columnFilters['origin_cities'] ?? [];
 
         if ($includeOriginCities && is_array($originCities) && $originCities !== []) {
@@ -308,6 +312,7 @@ class ListRegisters extends ListRecords
 
             if ($originCities !== []) {
                 $query->whereIn('origin_city', $originCities);
+                $hasActiveCityFilter = true;
             }
         }
 
@@ -322,7 +327,12 @@ class ListRegisters extends ListRecords
 
             if ($destinationCities !== []) {
                 $query->whereIn('destination_city', $destinationCities);
+                $hasActiveCityFilter = true;
             }
+        }
+
+        if ($hasActiveColorFilter || $hasActiveCityFilter) {
+            $query->whereIn('status', self::OPERATIONAL_FILTER_STATUSES);
         }
 
         $status = $this->columnFilters['status'] ?? null;
