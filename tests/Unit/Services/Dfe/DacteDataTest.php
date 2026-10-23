@@ -42,6 +42,11 @@ class DacteDataTest extends TestCase
         $this->assertSame('1', $dacte->indSn);
         $this->assertSame('3504008', $dacte->originIbge);
         $this->assertSame('3523107', $dacte->destinationIbge);
+        $this->assertSame('5353', $dacte->cfop);
+        $this->assertSame('SP', $dacte->originUf);
+        $this->assertSame('SP', $dacte->destinationUf);
+        $this->assertSame('3', $dacte->takerCode);
+        $this->assertSame($dacte->dest, $dacte->taker);
         $this->assertStringContainsString('nfe.fazenda.sp.gov.br/CTeConsulta/qrCode', (string) $dacte->qrUrl);
         $this->assertSame('Assis', $dacte->originCity);
         $this->assertSame('Itaquaquecetuba', $dacte->destinationCity);
@@ -59,6 +64,71 @@ class DacteDataTest extends TestCase
         $this->assertSame('21879.0000', $dacte->cargo['qCarga']);
         $this->assertSame('ETANOL HIDRATADO COMBUSTIVEL', $dacte->cargo['proPred']);
         $this->assertSame([], $dacte->components);
+    }
+
+    public function test_parses_and_prints_every_cargo_measurement(): void
+    {
+        $proc = (string) file_get_contents(__DIR__.'/../../../Fixtures/Dfe/cte-2962.xml');
+        $proc = str_replace(
+            '</infCarga>',
+            '<infQ><cUnid>00</cUnid><tpMed>CUBAGEM</tpMed><qCarga>4.2500</qCarga></infQ></infCarga>',
+            $proc,
+        );
+        $dacte = DacteData::fromProc($proc);
+        $html = view('dfe.dacte', ['dacte' => $dacte, 'qrImage' => null])->render();
+
+        $this->assertCount(2, $dacte->cargo['measurements']);
+        $this->assertSame('00', $dacte->cargo['measurements'][1]['cUnid']);
+        $this->assertStringContainsString('CUBAGEM: 4,2500 M3', $html);
+        $this->assertStringContainsString('2.000,0000', $html);
+    }
+
+    public function test_uses_the_remitter_as_taker_when_toma3_is_zero(): void
+    {
+        $proc = str_replace(
+            '<toma3><toma>3</toma></toma3>',
+            '<toma3><toma>0</toma></toma3>',
+            (string) file_get_contents(__DIR__.'/../../../Fixtures/Dfe/cte-2962.xml'),
+        );
+
+        $dacte = DacteData::fromProc($proc);
+        $html = view('dfe.dacte', ['dacte' => $dacte, 'qrImage' => null])->render();
+
+        $this->assertSame('0', $dacte->takerCode);
+        $this->assertSame('TOKIO MARINE SEGURADORA S.A', $dacte->taker['xNome']);
+        $this->assertStringContainsString('TOMADOR DO SERVIÇO', $html);
+        $this->assertStringContainsString('TOKIO MARINE SEGURADORA S.A', $html);
+    }
+
+    public function test_parses_and_renders_xml_taker_expediter_cfop_and_route_without_snapshot_data(): void
+    {
+        $proc = (string) file_get_contents(__DIR__.'/../../../Fixtures/Dfe/cte-2962.xml');
+        $taker = '<toma4><toma>4</toma><CNPJ>99999999000199</CNPJ><IE>998877665544</IE>'
+            .'<xNome>Tomador Outro Sintetico</xNome><enderToma><xLgr>Rua do Tomador</xLgr><nro>99</nro>'
+            .'<xBairro>Centro</xBairro><cMun>3534708</cMun><xMun>Ourinhos</xMun><CEP>19900000</CEP><UF>MG</UF></enderToma></toma4>';
+        $expediter = '<exped><CNPJ>88888888000188</CNPJ><IE>887766554433</IE><xNome>Expedidor Sintetico</xNome>'
+            .'<enderExped><xLgr>Rua do Expedidor</xLgr><nro>88</nro><xBairro>Industrial</xBairro>'
+            .'<cMun>3534708</cMun><xMun>Ourinhos</xMun><CEP>19900001</CEP><UF>MG</UF></enderExped></exped>';
+        $proc = str_replace('<toma3><toma>3</toma></toma3>', $taker, $proc);
+        $proc = str_replace('</rem><dest>', '</rem>'.$expediter.'<dest>', $proc);
+        $proc = str_replace('<CFOP>5353</CFOP>', '<CFOP>6932</CFOP>', $proc);
+        $proc = str_replace('<UFIni>SP</UFIni>', '<UFIni>MG</UFIni>', $proc);
+
+        $dacte = DacteData::fromProc($proc);
+        $html = view('dfe.dacte', ['dacte' => $dacte, 'qrImage' => null])->render();
+
+        $this->assertSame('6932', $dacte->cfop);
+        $this->assertSame('MG', $dacte->originUf);
+        $this->assertSame('SP', $dacte->destinationUf);
+        $this->assertSame('Expedidor Sintetico', $dacte->exped['xNome']);
+        $this->assertSame('4', $dacte->takerCode);
+        $this->assertSame('Tomador Outro Sintetico', $dacte->taker['xNome']);
+        $this->assertStringContainsString('6932 - PREST SERV TRANSPORTE', $html);
+        $this->assertStringContainsString('Assis - MG - 3504008', $html);
+        $this->assertStringContainsString('Itaquaquecetuba - SP - 3523107', $html);
+        $this->assertStringContainsString('Expedidor Sintetico', $html);
+        $this->assertStringContainsString('Tomador Outro Sintetico', $html);
+        $this->assertStringContainsString('Rua do Tomador, 99 - Centro', $html);
     }
 
     public function test_parses_multiple_nfe_references_and_the_physical_receiver(): void
