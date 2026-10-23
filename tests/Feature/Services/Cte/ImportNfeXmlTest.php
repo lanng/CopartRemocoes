@@ -170,6 +170,20 @@ class ImportNfeXmlTest extends TestCase
         app(ImportNfeXml::class)->handle($xml, 'ambiguous-unit.xml');
     }
 
+    public function test_converts_cubic_meter_quantities_to_liters(): void
+    {
+        $xml = str_replace(
+            ['<uCom>L</uCom>', '<qCom>100.0000</qCom>', '<uTrib>L</uTrib>', '<qTrib>100.0000</qTrib>'],
+            ['<uCom>m3</uCom>', '<qCom>19.89</qCom>', '<uTrib>m3</uTrib>', '<qTrib>19.89</qTrib>'],
+            (string) file_get_contents($this->fixture('nfe-delivery-001.xml')),
+        );
+
+        $nfe = app(ImportNfeXml::class)->handle($xml, 'cubic-meter-quantity.xml');
+
+        $this->assertSame('19890.0000', $nfe['cargo_liters']);
+        $this->assertSame('19890.0000', $nfe['products'][0]['liters']);
+    }
+
     public function test_rejects_ambiguous_decimal_separators_and_numbers_outside_exact_integer_range(): void
     {
         $path = $this->fixture('nfe-delivery-001.xml');

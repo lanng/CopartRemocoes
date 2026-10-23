@@ -104,8 +104,8 @@ class ImportNfeXml
                 continue;
             }
 
-            $commercialUnit = $this->normalizedLiterUnit($this->value($xpath, './n:prod/n:uCom', $detail));
-            $taxedUnit = $this->normalizedLiterUnit($this->value($xpath, './n:prod/n:uTrib', $detail));
+            $commercialUnit = $this->normalizedVolumeUnit($this->value($xpath, './n:prod/n:uCom', $detail));
+            $taxedUnit = $this->normalizedVolumeUnit($this->value($xpath, './n:prod/n:uTrib', $detail));
 
             if ($commercialUnit === null || $taxedUnit === null || $commercialUnit !== $taxedUnit) {
                 throw new DomainException("A NF-e {$filename} possui unidades comerciais e tributárias incompatíveis; revisão manual necessária.");
@@ -114,9 +114,18 @@ class ImportNfeXml
             $commercialQuantity = trim($this->value($xpath, './n:prod/n:qCom', $detail));
             $taxedQuantity = trim($this->value($xpath, './n:prod/n:qTrib', $detail));
             $quantity = ExactDecimal::parse($commercialQuantity, 4, $filename, 'qCom');
+            $taxedQuantity = ExactDecimal::parse($taxedQuantity, 4, $filename, 'qTrib');
 
-            if ($quantity !== ExactDecimal::parse($taxedQuantity, 4, $filename, 'qTrib')) {
+            if ($quantity !== $taxedQuantity) {
                 throw new DomainException("A NF-e {$filename} possui quantidade comercial e tributária divergentes; revisão manual necessária.");
+            }
+
+            if ($commercialUnit === 'M3') {
+                if ($quantity > intdiv(PHP_INT_MAX, 1000)) {
+                    throw new DomainException("A NF-e {$filename} excede o limite para conversão exata de m³ para litros no campo qCom.");
+                }
+
+                $quantity *= 1000;
             }
 
             $liters = ExactDecimal::add($liters, $quantity, $filename, 'qCom');
@@ -215,10 +224,11 @@ class ImportNfeXml
         return $checkDigit === (int) $accessKey[43];
     }
 
-    private function normalizedLiterUnit(string $unit): ?string
+    private function normalizedVolumeUnit(string $unit): ?string
     {
         return match (strtoupper(trim($unit))) {
             'L', 'LT' => 'L',
+            'M3' => 'M3',
             default => null,
         };
     }
