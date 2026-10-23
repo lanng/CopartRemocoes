@@ -11,7 +11,10 @@ use Illuminate\Support\Facades\DB;
 
 class QueueCteDocumentEmission
 {
-    public function __construct(private AssertCteNfeOriginalsArchived $assertNfeOriginalsArchived) {}
+    public function __construct(
+        private AssertCteNfeOriginalsArchived $assertNfeOriginalsArchived,
+        private ValidateGeneralCargoCteSnapshot $generalCargoValidator,
+    ) {}
 
     public function handle(CteDocument $document): CteDocument
     {
@@ -31,13 +34,18 @@ class QueueCteDocumentEmission
             if ($lockedDocument->emitter !== 'direct'
                 || $lockedDocument->execution_mode !== 'live'
                 || $lockedDocument->workflow_origin !== FiscalDocumentWorkflowOriginEnum::ControlledV1) {
-                throw new DomainException('Somente um CT-e de álcool do fluxo controlado em modo live pode ser enfileirado.');
+                throw new DomainException('Somente um CT-e do emissor direto, fluxo controlado e modo live pode ser enfileirado.');
             }
 
             $snapshot = (array) $lockedDocument->snapshot;
+            $isGeneralCargo = ($snapshot['line'] ?? null) === 'general_cargo';
 
-            if ((int) ($snapshot['schema_version'] ?? 0) !== 3 || ($snapshot['line'] ?? null) !== 'tank_alcohol') {
-                throw new DomainException('Somente um snapshot v3 de CT-e de álcool pode ser enfileirado por este fluxo.');
+            if ($isGeneralCargo) {
+                if (! in_array((int) ($snapshot['schema_version'] ?? 0), [4, 5], true)) {
+                    throw new DomainException('Somente snapshots v4 ou v5 de CT-e avulso podem ser enfileirados.');
+                }
+            } elseif ((int) ($snapshot['schema_version'] ?? 0) !== 3 || ($snapshot['line'] ?? null) !== 'tank_alcohol') {
+                throw new DomainException('Somente snapshots v3 de CT-e de álcool ou v4 de CT-e avulso podem ser enfileirados.');
             }
 
             if ($lockedDocument->status === CteDocumentStatusEnum::QUEUED) {
@@ -49,7 +57,12 @@ class QueueCteDocumentEmission
             }
 
             $this->assertNfeOriginalsArchived->handle($lockedDocument);
-            $this->assertSnapshotReady($snapshot);
+
+            if ($isGeneralCargo) {
+                $this->generalCargoValidator->handle($snapshot, forEmission: true);
+            } else {
+                $this->assertSnapshotReady($snapshot);
+            }
 
             app(DirectCteDocumentWorkflow::class)->transition($lockedDocument, CteDocumentStatusEnum::QUEUED);
             EmitCteDirectJob::dispatch($lockedDocument->id)->afterCommit();

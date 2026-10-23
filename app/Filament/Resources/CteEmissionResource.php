@@ -80,6 +80,7 @@ class CteEmissionResource extends Resource
                         TextEntry::make('authorized_at')->label('Autorizado em')->dateTime('d/m/Y H:i')->timezone('America/Sao_Paulo')->placeholder('—'),
                     ]),
                 Section::make('Origem e destino')
+                    ->visible(fn (CteDocument $record): bool => data_get($record->snapshot, 'line') !== 'general_cargo')
                     ->columns(2)
                     ->schema([
                         TextEntry::make('origin')
@@ -95,6 +96,7 @@ class CteEmissionResource extends Resource
                         TextEntry::make('snapshot.dest.xNome')->label('Tomador fiscal')->placeholder('—'),
                     ]),
                 Section::make('Entrega física')
+                    ->visible(fn (CteDocument $record): bool => data_get($record->snapshot, 'line') !== 'general_cargo')
                     ->columns(3)
                     ->schema([
                         TextEntry::make('snapshot.delivery_party.xNome')->label('Destinatário físico')->placeholder('—'),
@@ -114,12 +116,52 @@ class CteEmissionResource extends Resource
                             ->columnSpanFull(),
                     ]),
                 Section::make('Valores e carga')
+                    ->visible(fn (CteDocument $record): bool => data_get($record->snapshot, 'line') !== 'general_cargo')
                     ->columns(4)
                     ->schema([
                         TextEntry::make('snapshot.value')->label('Frete')->money('BRL')->placeholder('—'),
                         TextEntry::make('snapshot.cargo_value')->label('Valor da carga')->money('BRL')->placeholder('—'),
                         TextEntry::make('snapshot.cargo_liters')->label('Volume')->suffix(' L')->placeholder('—'),
                         TextEntry::make('snapshot.cargo_weight_kg')->label('Peso líquido')->suffix(' kg')->placeholder('—'),
+                    ]),
+                Section::make('CT-e avulso')
+                    ->visible(fn (CteDocument $record): bool => data_get($record->snapshot, 'line') === 'general_cargo')
+                    ->columns(3)
+                    ->schema([
+                        TextEntry::make('snapshot.origin.name')->label('Município de início'),
+                        TextEntry::make('snapshot.origin.uf')->label('UF de início'),
+                        TextEntry::make('snapshot.destination.name')->label('Município de término'),
+                        TextEntry::make('snapshot.destination.uf')->label('UF de término'),
+                        TextEntry::make('snapshot.cfop')->label('CFOP'),
+                        TextEntry::make('snapshot.nat_op')->label('Natureza da operação'),
+                        TextEntry::make('snapshot.rem.xNome')->label('Remetente'),
+                        TextEntry::make('snapshot.dest.xNome')->label('Destinatário'),
+                        TextEntry::make('general_cargo_taker')
+                            ->label('Tomador do serviço')
+                            ->state(fn (CteDocument $record): string => self::generalCargoTaker($record)),
+                        TextEntry::make('snapshot.cargo.value')->label('Valor da carga')->money('BRL'),
+                        TextEntry::make('snapshot.cargo.predominant_product')->label('Produto predominante'),
+                        TextEntry::make('snapshot.cargo.other_category')->label('Outras características')->placeholder('—'),
+                        TextEntry::make('snapshot.cargo.weight_kg')->label('Peso bruto')->suffix(' kg'),
+                        TextEntry::make('snapshot.freight.total')->label('Valor total do frete')->money('BRL'),
+                        TextEntry::make('snapshot.freight.receivable')->label('Valor a receber')->money('BRL'),
+                        RepeatableEntry::make('snapshot.cargo.measurements')
+                            ->label('Medidas da carga')
+                            ->columns(3)
+                            ->schema([
+                                TextEntry::make('unit')->label('Unidade'),
+                                TextEntry::make('measure')->label('Descrição'),
+                                TextEntry::make('quantity')->label('Quantidade'),
+                            ])
+                            ->columnSpanFull(),
+                        RepeatableEntry::make('snapshot.freight.components')
+                            ->label('Componentes do frete')
+                            ->columns(2)
+                            ->schema([
+                                TextEntry::make('name')->label('Componente'),
+                                TextEntry::make('value')->label('Valor')->money('BRL'),
+                            ])
+                            ->columnSpanFull(),
                     ]),
                 Section::make('NF-es vinculadas')
                     ->schema([
@@ -371,7 +413,24 @@ class CteEmissionResource extends Resource
         return [
             'index' => Pages\ListCteEmissions::route('/'),
             'create' => Pages\CreateCteEmission::route('/create'),
+            'create-avulso' => Pages\CreateAvulsoCteEmission::route('/create-avulso'),
             'view' => Pages\ViewCteEmission::route('/{record}'),
         ];
+    }
+
+    private static function generalCargoTaker(CteDocument $record): string
+    {
+        $snapshot = (array) $record->snapshot;
+        $code = (string) ($snapshot['taker_code'] ?? '');
+        $party = match ($code) {
+            '0' => (array) ($snapshot['rem'] ?? []),
+            '1' => (array) ($snapshot['exped'] ?? []),
+            '2' => (array) ($snapshot['receb'] ?? []),
+            '3' => (array) ($snapshot['dest'] ?? []),
+            '4' => (array) ($snapshot['taker'] ?? []),
+            default => [],
+        };
+
+        return (string) ($party['xNome'] ?? '—');
     }
 }

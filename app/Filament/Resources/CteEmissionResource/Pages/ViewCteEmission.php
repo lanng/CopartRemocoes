@@ -7,17 +7,21 @@ use App\Models\CteDocument;
 use App\Models\CteDocumentNfe;
 use App\Services\Cte\QueueCteDocumentEmission;
 use App\Services\Cte\RemoveDraftCteDocument;
+use App\Services\Cte\UpdateGeneralCargoCteDraft;
 use App\Services\Dfe\CancelCteDocument;
 use App\Services\Dfe\DfeDocumentStore;
 use App\Services\Dfe\GenerateDactePdf;
 use DomainException;
 use Filament\Actions;
+use Filament\Forms\Components\Repeater;
 use Filament\Forms\Components\Select;
 use Filament\Forms\Components\Textarea;
+use Filament\Forms\Components\TextInput;
 use Filament\Notifications\Notification;
 use Filament\Resources\Pages\ViewRecord;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Validation\ValidationException;
+use Leandrocfe\FilamentPtbrFormFields\Money;
 use Symfony\Component\HttpFoundation\StreamedResponse;
 
 class ViewCteEmission extends ViewRecord
@@ -32,6 +36,66 @@ class ViewCteEmission extends ViewRecord
     protected function getHeaderActions(): array
     {
         return [
+            Actions\Action::make('editGeneralCargoDraft')
+                ->label('Editar carga e CFOP')
+                ->icon('heroicon-o-pencil-square')
+                ->visible(fn (): bool => $this->canEditGeneralCargoDraft())
+                ->fillForm(fn (): array => $this->generalCargoEditForm())
+                ->form([
+                    TextInput::make('cfop')
+                        ->label('CFOP')
+                        ->maxLength(4)
+                        ->helperText('Em rota SP para outra UF, escolha o CFOP de transporte conforme a operação.'),
+                    Money::make('cargo.value')->label('Valor total da carga')->required(),
+                    TextInput::make('cargo.predominant_product')->label('Produto predominante')->required()->maxLength(60),
+                    TextInput::make('cargo.other_category')->label('Outras características')->maxLength(30),
+                    Repeater::make('cargo.measurements')
+                        ->label('Medidas da carga')
+                        ->helperText('Informe PESO ESTIMADO em kg (unidade 01) ou VEICULOS/UNIDADES transportados (unidade 03). Peso estimado não é peso aferido.')
+                        ->schema([
+                            Select::make('unit')
+                                ->label('Unidade')
+                                ->options([
+                                    '00' => 'm³',
+                                    '01' => 'kg',
+                                    '02' => 'toneladas',
+                                    '03' => 'unidades',
+                                    '04' => 'litros',
+                                    '05' => 'MMBTU',
+                                ])
+                                ->required(),
+                            TextInput::make('measure')
+                                ->label('Descrição da medida')
+                                ->placeholder('PESO ESTIMADO, VEICULOS ou UNIDADES')
+                                ->required()
+                                ->maxLength(20),
+                            TextInput::make('quantity')->label('Quantidade')->numeric()->required(),
+                        ])
+                        ->minItems(1)
+                        ->columns(3),
+                ])
+                ->modalHeading('Editar rascunho de CT-e avulso')
+                ->modalDescription('Atualiza o CFOP e os dados da carga. As referências e os XMLs originais das NF-es serão preservados; nenhuma emissão é iniciada.')
+                ->action(function (array $data): void {
+                    try {
+                        app(UpdateGeneralCargoCteDraft::class)->handle($this->emission(), $data);
+                    } catch (DomainException $exception) {
+                        Notification::make()
+                            ->title('Não foi possível editar o rascunho.')
+                            ->body($exception->getMessage())
+                            ->danger()
+                            ->send();
+
+                        return;
+                    }
+
+                    $this->refreshDocument();
+
+                    Notification::make()
+                        ->title('Rascunho atualizado.')
+                        ->success()
+                        ->send();
+                }),
             Actions\Action::make('deleteDraft')
                 ->label('Excluir rascunho')
                 ->icon('heroicon-o-trash')
@@ -170,6 +234,12 @@ class ViewCteEmission extends ViewRecord
 
                     return Storage::disk('dfe')->download((string) $nfeDocument->xml_path, $filename);
                 }),
+            Actions\Action::make('downloadCartaAttachment')
+                ->label('Baixar carta de remoção anexada')
+                ->icon('heroicon-o-arrow-down-tray')
+                ->color('gray')
+                ->visible(fn (): bool => $this->hasCartaAttachment())
+                ->action(fn (): StreamedResponse => $this->downloadCartaAttachment()),
         ];
     }
 
@@ -187,6 +257,28 @@ class ViewCteEmission extends ViewRecord
                 ),
             ])
             ->all();
+    }
+
+    /** @return array<string, mixed> */
+    private function generalCargoEditForm(): array
+    {
+        $snapshot = (array) $this->emission()->snapshot;
+
+        return [
+            'cfop' => data_get($snapshot, 'cfop', ''),
+            'cargo' => [
+                'value' => data_get($snapshot, 'cargo.value', ''),
+                'predominant_product' => data_get($snapshot, 'cargo.predominant_product', ''),
+                'other_category' => data_get($snapshot, 'cargo.other_category', ''),
+                'measurements' => data_get($snapshot, 'cargo.measurements', []),
+            ],
+        ];
+    }
+
+    private function canEditGeneralCargoDraft(): bool
+    {
+        return data_get($this->emission()->snapshot, 'line') === 'general_cargo'
+            && app(RemoveDraftCteDocument::class)->canRemove($this->emission());
     }
 
     private function downloadXml(): StreamedResponse
@@ -221,6 +313,35 @@ class ViewCteEmission extends ViewRecord
             $pdfPath,
             strtolower((string) ($document->access_key ?? $document->id)).'-dacte.pdf',
         );
+    }
+
+    private function hasCartaAttachment(): bool
+    {
+        $attachment = data_get($this->emission()->snapshot, 'other_document.attachment');
+        $path = (string) data_get($attachment, 'path', '');
+
+        return data_get($this->emission()->snapshot, 'origin_document_mode') === 'other'
+            && str_starts_with($path, 'cte-drafts/'.$this->emission()->public_id.'/carta-remocao/')
+            && $this->hasArchivedFile($path);
+    }
+
+    private function downloadCartaAttachment(): StreamedResponse
+    {
+        $document = $this->emission();
+        $attachment = data_get($document->snapshot, 'other_document.attachment');
+        $path = (string) data_get($attachment, 'path', '');
+        $expectedPrefix = 'cte-drafts/'.$document->public_id.'/carta-remocao/';
+        $sha256 = (string) data_get($attachment, 'sha256', '');
+        $store = app(DfeDocumentStore::class);
+
+        abort_unless(str_starts_with($path, $expectedPrefix)
+            && preg_match('/^[a-f0-9]{64}$/', $sha256)
+            && $store->exists($path)
+            && hash_equals($sha256, hash('sha256', $store->read($path))), 404);
+
+        $filename = basename(str_replace('\\', '/', (string) data_get($attachment, 'filename', 'carta-remocao')));
+
+        return Storage::disk('dfe')->download($path, $filename);
     }
 
     private function hasArchivedFile(?string $path): bool

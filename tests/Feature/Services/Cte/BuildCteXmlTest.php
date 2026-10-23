@@ -10,6 +10,7 @@ use App\Services\Dfe\XsdValidator;
 use Carbon\Carbon;
 use DomainException;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Storage;
 use PHPUnit\Framework\Attributes\DataProvider;
 use Tests\Support\DfeTestCertificate;
 use Tests\TestCase;
@@ -130,6 +131,223 @@ class BuildCteXmlTest extends TestCase
         $this->assertStringContainsString('<infQ><cUnid>04</cUnid><tpMed>LITROS</tpMed><qCarga>21879.0000</qCarga></infQ>', $xml);
         $this->assertStringContainsString('<infDoc><infNFe><chave>35260945483450002164550010004300881365784943</chave><dPrev>2026-10-02</dPrev></infNFe></infDoc>', $xml);
         $this->assertStringNotContainsString('<xOutCat>', $xml);
+    }
+
+    public function test_builds_generic_cargo_xml_with_manual_freight_and_multiple_measurements(): void
+    {
+        $built = $this->signed($this->generalCargoSnapshot());
+        $xml = $built->xml;
+
+        $this->assertStringContainsString('<CFOP>5353</CFOP>', $xml);
+        $this->assertStringContainsString('<natOp>PREST SERV TRANSPORTE</natOp>', $xml);
+        $this->assertStringContainsString('<indIEToma>9</indIEToma><toma3><toma>3</toma></toma3>', $xml);
+        $this->assertStringContainsString('<vTPrest>5000.00</vTPrest><vRec>4800.00</vRec>', $xml);
+        $this->assertStringContainsString('<Comp><xNome>FRETE</xNome><vComp>4500.00</vComp></Comp>', $xml);
+        $this->assertStringContainsString('<Comp><xNome>PEDAGIO</xNome><vComp>500.00</vComp></Comp>', $xml);
+        $this->assertStringContainsString('<vCarga>25000.00</vCarga><proPred>MAQUINAS AGRICOLAS</proPred><xOutCat>PECAS PESADAS</xOutCat>', $xml);
+        $this->assertStringContainsString('<infQ><cUnid>01</cUnid><tpMed>PESO BRUTO</tpMed><qCarga>12000.0000</qCarga></infQ>', $xml);
+        $this->assertStringContainsString('<infQ><cUnid>03</cUnid><tpMed>UNIDADES</tpMed><qCarga>4.0000</qCarga></infQ>', $xml);
+        $this->assertStringContainsString('<infDoc><infNFe><chave>35261011111111111111550010000000011000000011</chave></infNFe></infDoc>', $xml);
+        $this->assertStringNotContainsString('CARTA DE REMOCAO', $xml);
+        $this->assertStringNotContainsString('<dPrev>', $xml);
+    }
+
+    public function test_builds_and_xsd_validates_general_cargo_with_estimated_weight_only(): void
+    {
+        $snapshot = $this->generalCargoSnapshot();
+        $snapshot['cargo']['measurements'] = [
+            ['unit' => '01', 'measure' => 'PESO ESTIMADO', 'quantity' => '1500.0000'],
+        ];
+
+        $built = $this->signed($snapshot);
+
+        $this->assertStringContainsString(
+            '<infQ><cUnid>01</cUnid><tpMed>PESO ESTIMADO</tpMed><qCarga>1500.0000</qCarga></infQ>',
+            $built->xml,
+        );
+        $this->assertStringNotContainsString('<tpMed>PESO BRUTO</tpMed>', $built->xml);
+    }
+
+    public function test_builds_and_xsd_validates_general_cargo_with_units_only(): void
+    {
+        $snapshot = $this->generalCargoSnapshot();
+        $snapshot['cargo']['measurements'] = [
+            ['unit' => '03', 'measure' => 'VEICULOS', 'quantity' => '3.0000'],
+        ];
+
+        $built = $this->signed($snapshot);
+
+        $this->assertStringContainsString(
+            '<infQ><cUnid>03</cUnid><tpMed>VEICULOS</tpMed><qCarga>3.0000</qCarga></infQ>',
+            $built->xml,
+        );
+        $this->assertStringNotContainsString('<tpMed>PESO BRUTO</tpMed>', $built->xml);
+    }
+
+    public function test_builds_a_carta_origin_document_without_fabricated_number_or_date_and_renders_it_in_dacte(): void
+    {
+        $snapshot = $this->generalCargoSnapshot();
+        $snapshot['schema_version'] = 5;
+        $snapshot['origin_document_mode'] = 'other';
+        $snapshot['nfe_documents'] = [];
+        $snapshot['other_document'] = [
+            'type' => 'carta_remocao',
+            'tp_doc' => '99',
+            'description' => 'CARTA DE REMOCAO',
+            'number' => null,
+            'issued_on' => null,
+            'attachment' => null,
+        ];
+
+        $built = $this->signed($snapshot);
+        $xml = $built->xml;
+
+        $this->assertStringContainsString(
+            '<infDoc><infOutros><tpDoc>99</tpDoc><descOutros>CARTA DE REMOCAO</descOutros></infOutros></infDoc>',
+            $xml,
+        );
+        $this->assertStringNotContainsString('<nDoc>', $xml);
+        $this->assertStringNotContainsString('<dEmi>', $xml);
+        $this->assertStringNotContainsString('<exped>', $xml);
+        $this->assertStringNotContainsString('<receb>', $xml);
+
+        $dacte = \App\Services\Dfe\DacteData::fromProc($xml);
+        $html = view('dfe.dacte', ['dacte' => $dacte, 'qrImage' => null])->render();
+
+        $this->assertSame('CARTA DE REMOCAO', $dacte->document['descOutros']);
+        $this->assertNull($dacte->document['nDoc']);
+        $this->assertNull($dacte->document['dEmi']);
+        $this->assertStringContainsString('CARTA DE REMOCAO', $html);
+        $this->assertStringNotContainsString('Emissão:', $html);
+
+        Storage::fake('dfe');
+        $pdfPath = app(\App\Services\Dfe\GenerateDactePdf::class)->generateForProc($built->accessKey, $xml);
+
+        $this->assertStringStartsWith('%PDF', Storage::disk('dfe')->get($pdfPath));
+    }
+
+    public function test_emits_real_carta_number_and_issue_date_when_they_are_provided(): void
+    {
+        $snapshot = $this->generalCargoSnapshot();
+        $snapshot['schema_version'] = 5;
+        $snapshot['origin_document_mode'] = 'other';
+        $snapshot['nfe_documents'] = [];
+        $snapshot['other_document'] = [
+            'type' => 'carta_remocao',
+            'tp_doc' => '99',
+            'description' => 'CARTA DE REMOCAO',
+            'number' => 'REM-123',
+            'issued_on' => '2026-10-15',
+            'attachment' => null,
+        ];
+
+        $xml = $this->signed($snapshot)->xml;
+
+        $this->assertStringContainsString(
+            '<infOutros><tpDoc>99</tpDoc><descOutros>CARTA DE REMOCAO</descOutros><nDoc>REM-123</nDoc><dEmi>2026-10-15</dEmi></infOutros>',
+            $xml,
+        );
+    }
+
+    public function test_builds_supported_tomador_codes_from_the_selected_party(): void
+    {
+        foreach (['0', '1', '2', '3', '4'] as $code) {
+            $snapshot = $this->generalCargoSnapshot();
+            $snapshot['taker_code'] = $code;
+
+            if ($code === '1') {
+                $snapshot['exped'] = $this->genericParty('Expedidor', '123456789');
+                $snapshot['ind_ietoma'] = '1';
+            } elseif ($code === '2') {
+                $snapshot['receb'] = $this->genericParty('Recebedor', '');
+                $snapshot['ind_ietoma'] = '9';
+            } elseif ($code === '0') {
+                $snapshot['ind_ietoma'] = '1';
+            } elseif ($code === '4') {
+                $snapshot['taker'] = $this->genericParty('Tomador outro', '');
+                $snapshot['ind_ietoma'] = '9';
+            }
+
+            $xml = $this->signed($snapshot)->xml;
+
+            if ($code === '4') {
+                $this->assertStringContainsString('<toma4><toma>4</toma><CNPJ>00000000000191</CNPJ>', $xml);
+            } else {
+                $this->assertStringContainsString('<toma3><toma>'.$code.'</toma></toma3>', $xml);
+            }
+
+            $this->assertStringContainsString('<indIEToma>9</indIEToma>', $xml);
+        }
+    }
+
+    public function test_homolog_general_cargo_uses_non_contributor_indicator_for_synthetic_sender(): void
+    {
+        $snapshot = $this->generalCargoSnapshot();
+        $snapshot['taker_code'] = '0';
+
+        $xml = $this->signed($snapshot)->xml;
+
+        $this->assertStringContainsString('<tpAmb>2</tpAmb>', $xml);
+        $this->assertStringContainsString('<indIEToma>9</indIEToma><toma3><toma>0</toma></toma3>', $xml);
+        $this->assertStringContainsString(
+            '<rem><CNPJ>00000000000191</CNPJ><xNome>CTE EMITIDO EM AMBIENTE DE HOMOLOGACAO - SEM VALOR FISCAL</xNome>',
+            $xml,
+        );
+        $this->assertStringNotContainsString('<rem><CNPJ>00000000000191</CNPJ><IE>', $xml);
+    }
+
+    public function test_production_general_cargo_preserves_real_sender_indicator_and_inscription(): void
+    {
+        config(['dfe.tp_amb' => '1', 'dfe.numbering_start' => '123']);
+        $snapshot = $this->generalCargoSnapshot();
+        $snapshot['taker_code'] = '0';
+
+        $xml = $this->signed($snapshot)->xml;
+
+        $this->assertStringContainsString('<tpAmb>1</tpAmb>', $xml);
+        $this->assertStringContainsString('<indIEToma>1</indIEToma><toma3><toma>0</toma></toma3>', $xml);
+        $this->assertStringContainsString('<rem><CNPJ>11111111111111</CNPJ><IE>123456789</IE>', $xml);
+    }
+
+    public function test_generic_cargo_uses_the_explicit_non_contributor_status_even_when_taker_has_ie(): void
+    {
+        config(['dfe.tp_amb' => '1', 'dfe.numbering_start' => '123']);
+        $snapshot = $this->generalCargoSnapshot();
+        $snapshot['ind_ietoma'] = '9';
+
+        $xml = $this->signed($snapshot)->xml;
+
+        $this->assertStringContainsString('<indIEToma>9</indIEToma>', $xml);
+        $this->assertStringContainsString('<dest><CNPJ>11111111111111</CNPJ><IE>987654321</IE>', $xml);
+    }
+
+    public function test_generic_cargo_emits_isento_ie_for_an_explicit_exempt_tomador(): void
+    {
+        config(['dfe.tp_amb' => '1', 'dfe.numbering_start' => '123']);
+        $snapshot = $this->generalCargoSnapshot();
+        $snapshot['taker_code'] = '4';
+        $snapshot['ind_ietoma'] = '2';
+        $snapshot['taker'] = $this->genericParty('Tomador isento', '');
+        $snapshot['taker']['cMun'] = '4106902';
+        $snapshot['taker']['xMun'] = 'Curitiba';
+        $snapshot['taker']['CEP'] = '80010000';
+        $snapshot['taker']['UF'] = 'PR';
+
+        $xml = $this->signed($snapshot)->xml;
+
+        $this->assertStringContainsString('<indIEToma>2</indIEToma><toma4><toma>4</toma>', $xml);
+        $this->assertStringContainsString('<IE>ISENTO</IE><xNome>Tomador isento</xNome>', $xml);
+    }
+
+    public function test_rejects_an_unknown_snapshot_line_instead_of_treating_it_as_vehicle_removal(): void
+    {
+        $snapshot = $this->vehicleSnapshot();
+        $snapshot['line'] = 'unknown';
+
+        $this->expectException(DomainException::class);
+        $this->expectExceptionMessage('Modalidade');
+
+        $this->builder->handle($snapshot);
     }
 
     public function test_builds_multiple_nfe_references_without_a_receiver_group(): void
@@ -391,6 +609,65 @@ class BuildCteXmlTest extends TestCase
                 'cep' => '14690000',
                 'uf' => 'SP',
             ],
+        ];
+    }
+
+    /** @return array<string, mixed> */
+    protected function generalCargoSnapshot(): array
+    {
+        return [
+            'schema_version' => 4,
+            'line' => 'general_cargo',
+            'cfop' => '5353',
+            'nat_op' => 'PREST SERV TRANSPORTE',
+            'taker_code' => '3',
+            'ind_ietoma' => '1',
+            'taker_is_transport_company' => false,
+            'origin' => ['ibge' => '3504008', 'name' => 'Assis', 'uf' => 'SP'],
+            'destination' => ['ibge' => '3523107', 'name' => 'Itaquaquecetuba', 'uf' => 'SP'],
+            'rem' => $this->genericParty('Remetente', '123456789'),
+            'dest' => $this->genericParty('Destinatário', '987654321'),
+            'exped' => null,
+            'receb' => null,
+            'taker' => null,
+            'nfe_documents' => [['access_key' => '35261011111111111111550010000000011000000011']],
+            'cargo' => [
+                'value' => '25000.00',
+                'predominant_product' => 'MAQUINAS AGRICOLAS',
+                'other_category' => 'PECAS PESADAS',
+                'weight_kg' => '12000.0000',
+                'measurements' => [
+                    ['unit' => '01', 'measure' => 'PESO BRUTO', 'quantity' => '12000.0000'],
+                    ['unit' => '03', 'measure' => 'UNIDADES', 'quantity' => '4.0000'],
+                ],
+            ],
+            'freight' => [
+                'total' => '5000.00',
+                'receivable' => '4800.00',
+                'components' => [
+                    ['name' => 'FRETE', 'value' => '4500.00'],
+                    ['name' => 'PEDAGIO', 'value' => '500.00'],
+                ],
+            ],
+            'value' => '5000.00',
+        ];
+    }
+
+    /** @return array<string, string> */
+    protected function genericParty(string $name, string $ie): array
+    {
+        return [
+            'cnpj' => '11111111111111',
+            'cpf' => '',
+            'ie' => $ie,
+            'xNome' => $name,
+            'xLgr' => 'Rua das Cargas',
+            'nro' => '100',
+            'xBairro' => 'Centro',
+            'cMun' => '3504008',
+            'xMun' => 'Assis',
+            'CEP' => '19800000',
+            'UF' => 'SP',
         ];
     }
 }

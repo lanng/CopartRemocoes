@@ -5,10 +5,13 @@ namespace Tests\Feature\Filament;
 use App\Enums\CteDocumentStatusEnum;
 use App\Enums\FiscalDocumentStatusEnum;
 use App\Filament\Resources\CteEmissionResource;
+use App\Filament\Resources\CteEmissionResource\Pages\CreateAvulsoCteEmission;
 use App\Filament\Resources\CteEmissionResource\Pages\CreateCteEmission;
 use App\Filament\Resources\CteEmissionResource\Pages\ListCteEmissions;
 use App\Filament\Resources\CteEmissionResource\Pages\ViewCteEmission;
 use App\Jobs\EmitCteDirectJob;
+use App\Models\City;
+use App\Models\Company;
 use App\Models\CteDocument;
 use App\Models\MdfeDocument;
 use App\Models\User;
@@ -59,6 +62,388 @@ class CteEmissionResourceTest extends TestCase
         Livewire::test(ListCteEmissions::class)
             ->assertCanSeeTableRecords([])
             ->assertSee('Novo CT-e de álcool');
+    }
+
+    public function test_listing_exposes_the_standalone_general_cargo_cte_form(): void
+    {
+        Livewire::test(ListCteEmissions::class)
+            ->assertSee('Novo CT-e avulso');
+
+        $this->assertArrayHasKey('create-avulso', CteEmissionResource::getPages());
+        config(['app.env' => 'local']);
+
+        $this->get(CteEmissionResource::getUrl('create-avulso'))
+            ->assertSuccessful()
+            ->assertSee('Referências de NF-e')
+            ->assertSee('Salvar rascunho');
+
+        Livewire::test(CreateAvulsoCteEmission::class)
+            ->assertSee('Referências de NF-e')
+            ->assertSee('Salvar rascunho');
+    }
+
+    public function test_avulso_form_leaves_interstate_sp_cfop_blank_for_manual_selection(): void
+    {
+        City::factory()->create(['ibge_code' => '3504008', 'name' => 'Assis', 'state' => 'SP']);
+        City::factory()->create(['ibge_code' => '3106200', 'name' => 'Belo Horizonte', 'state' => 'MG']);
+
+        Livewire::test(CreateAvulsoCteEmission::class)
+            ->set('data.origin.ibge', '3504008')
+            ->set('data.destination.ibge', '3106200')
+            ->assertSet('data.cfop_suggestion', '')
+            ->assertSet('data.cfop', '');
+    }
+
+    public function test_avulso_form_warns_to_check_icms_when_origin_is_outside_sp(): void
+    {
+        City::factory()->create(['ibge_code' => '3504008', 'name' => 'Assis', 'state' => 'SP']);
+        City::factory()->create(['ibge_code' => '3106200', 'name' => 'Belo Horizonte', 'state' => 'MG']);
+
+        Livewire::test(CreateAvulsoCteEmission::class)
+            ->set('data.origin.ibge', '3106200')
+            ->assertSee('Conferência fiscal da UF de início')
+            ->assertSee('Quando houver guia devida, recolha antes da viagem.')
+            ->assertSee('O sistema não calcula nem emite essa guia.')
+            ->set('data.origin.ibge', '3504008')
+            ->assertDontSee('Conferência fiscal da UF de início');
+    }
+
+    public function test_avulso_form_prefills_blank_fields_from_nfe_xml_and_preserves_manual_edits(): void
+    {
+        $issuer = $this->company('11111111111111', 'Remetente Ficticio Ltda');
+        $recipient = $this->company('22222222222222', 'Destinatario Fiscal Ficticio Ltda');
+        $firstNfe = (string) file_get_contents(__DIR__.'/../../Fixtures/Dfe/Nfe/nfe-delivery-001.xml');
+        $firstNfe = str_replace('<vNF>1000.00</vNF>', '<vNF>1000.01</vNF>', $firstNfe);
+        $firstNfe = str_replace('<pesoL>80.000</pesoL><pesoB>80.000</pesoB>', '<pesoL>79.000</pesoL><pesoB>80.000</pesoB>', $firstNfe);
+        preg_match('/<NFe>.*?<\/NFe>/s', $firstNfe, $nfeMatch);
+        $firstNfe = str_replace('<NFe>', '<NFe xmlns="http://www.portalfiscal.inf.br/nfe">', $nfeMatch[0]);
+
+        $page = Livewire::test(CreateAvulsoCteEmission::class)
+            ->set('data.nfe_xmls', [UploadedFile::fake()->createWithContent('entrada.xml', $firstNfe)])
+            ->assertSet('data.rem_company_id', (string) $issuer->id)
+            ->assertSet('data.dest_company_id', (string) $recipient->id)
+            ->assertSet('data.cargo.value', '1000.01')
+            ->assertSet('data.cfop', '')
+            ->assertSee('22071090')
+            ->assertSee('Remetente localizado no cadastro')
+            ->assertDontSee('Peso bruto real (kg)');
+
+        $measurements = array_values($page->get('data.cargo.measurements'));
+        $this->assertSame('PESO BRUTO', $measurements[0]['measure']);
+
+        $this->assertDatabaseCount('companies', 2);
+
+        $manualChoice = $this->company('33333333333333', 'Empresa selecionada manualmente');
+        $page->set('data.rem_company_id', (string) $manualChoice->id)
+            ->set('data.cargo.value', '123.45')
+            ->set('data.nfe_xmls', [UploadedFile::fake()->createWithContent(
+                'outra.xml', $firstNfe,
+            )])
+            ->assertSet('data.rem_company_id', (string) $manualChoice->id)
+            ->assertSet('data.cargo.value', '123.45');
+    }
+
+    public function test_avulso_form_switches_between_nfe_and_carta_without_retaining_incompatible_references(): void
+    {
+        $page = Livewire::test(CreateAvulsoCteEmission::class)
+            ->set('data.nfe_keys', '35261011111111111111550010000000011000000011')
+            ->set('data.carta_number', 'CARTA-10')
+            ->set('data.origin_document_mode', 'other')
+            ->assertSet('data.nfe_keys', '')
+            ->assertSet('data.nfe_xmls', [])
+            ->assertSet('data.carta_number', 'CARTA-10')
+            ->assertSee('Carta de remoção')
+            ->assertDontSee('Expedidor')
+            ->assertDontSee('Recebedor');
+
+        $page->set('data.origin_document_mode', 'nfe')
+            ->assertSet('data.carta_number', '')
+            ->assertSet('data.carta_issued_on', null)
+            ->assertSet('data.carta_attachment', null)
+            ->assertSee('Referências de NF-e');
+    }
+
+    public function test_avulso_form_saves_carta_mode_with_an_optional_private_attachment(): void
+    {
+        Queue::fake();
+        City::factory()->create(['ibge_code' => '3504008', 'name' => 'Assis', 'state' => 'SP']);
+        City::factory()->create(['ibge_code' => '3523107', 'name' => 'Itaquaquecetuba', 'state' => 'SP']);
+        $formData = $this->generalCargoFormData();
+        $formData['origin_document_mode'] = 'other';
+        $formData['nfe_keys'] = '';
+        $formData['carta_number'] = 'REM-2026-15';
+        $formData['carta_issued_on'] = '2026-10-20';
+        unset($formData['nfe_xmls']);
+
+        $page = Livewire::test(CreateAvulsoCteEmission::class)
+            ->fillForm($formData)
+            ->set('data.carta_attachment', UploadedFile::fake()->createWithContent(
+                'carta-remocao.pdf', "%PDF-1.4\nCarta de teste\n",
+            ));
+        $measurement = $formData['cargo']['measurements']['peso'];
+        $component = $formData['freight']['components']['frete'];
+        $measurementKey = array_key_first($page->get('data.cargo.measurements'));
+        $componentKey = array_key_first($page->get('data.freight.components'));
+
+        $page->set("data.cargo.measurements.{$measurementKey}.unit", $measurement['unit'])
+            ->set("data.cargo.measurements.{$measurementKey}.measure", $measurement['measure'])
+            ->set("data.cargo.measurements.{$measurementKey}.quantity", $measurement['quantity'])
+            ->set("data.freight.components.{$componentKey}.name", $component['name'])
+            ->set("data.freight.components.{$componentKey}.value", $component['value'])
+            ->call('create')
+            ->assertHasNoFormErrors();
+
+        $document = CteDocument::query()->sole();
+        $attachment = $document->snapshot['other_document']['attachment'];
+
+        $this->assertSame('other', $document->snapshot['origin_document_mode']);
+        $this->assertSame('REM-2026-15', $document->snapshot['other_document']['number']);
+        $this->assertSame('2026-10-20', $document->snapshot['other_document']['issued_on']);
+        $this->assertSame([], $document->nfeDocuments->all());
+        Storage::disk('dfe')->assertExists($attachment['path']);
+        Queue::assertNothingPushed();
+    }
+
+    public function test_avulso_form_can_create_a_company_from_the_party_select_without_losing_the_draft(): void
+    {
+        City::factory()->create(['ibge_code' => '3504008', 'name' => 'Assis', 'state' => 'SP']);
+        City::factory()->create(['ibge_code' => '3523107', 'name' => 'Itaquaquecetuba', 'state' => 'SP']);
+        $data = $this->generalCargoFormData();
+        $draftValue = $data['cargo']['value'];
+
+        $page = Livewire::test(CreateAvulsoCteEmission::class)
+            ->fillForm($data)
+            ->callFormComponentAction('rem_company_id', 'createOption', [
+                'name' => 'Nova empresa do rascunho',
+                'cnpj' => '12.345.678/0001-99',
+                'ie' => '123.456.789',
+                'street' => 'Rua de teste',
+                'number' => '10',
+                'district' => 'Centro',
+                'city' => 'Assis',
+                'state' => 'SP',
+                'zipcode' => '19800000',
+                'ibge_code' => '3504008',
+            ]);
+
+        $company = Company::query()->where('cnpj', '12345678000199')->firstOrFail();
+        $page->assertHasNoFormComponentActionErrors()
+            ->assertSet('data.rem_company_id', (string) $company->id)
+            ->assertSet('data.cargo.value', $draftValue);
+    }
+
+    public function test_view_page_downloads_only_the_carta_attachment_saved_for_that_draft(): void
+    {
+        $document = CteDocument::factory()->create();
+        $contents = "%PDF-1.4\nattachment\n";
+        $sha256 = hash('sha256', $contents);
+        $path = "cte-drafts/{$document->public_id}/carta-remocao/{$sha256}.pdf";
+        Storage::disk('dfe')->put($path, $contents);
+        $snapshot = (array) $document->snapshot;
+        $snapshot['origin_document_mode'] = 'other';
+        $snapshot['other_document'] = ['attachment' => [
+            'filename' => 'carta teste.pdf',
+            'path' => $path,
+            'sha256' => $sha256,
+            'mime_type' => 'application/pdf',
+        ]];
+        $document->forceFill(['snapshot' => $snapshot])->save();
+
+        Livewire::test(ViewCteEmission::class, ['record' => $document->getRouteKey()])
+            ->assertActionVisible('downloadCartaAttachment')
+            ->callAction('downloadCartaAttachment')
+            ->assertFileDownloaded('carta teste.pdf');
+    }
+
+    public function test_avulso_form_reports_missing_nfe_weight_and_volume_without_guessing(): void
+    {
+        $xml = (string) file_get_contents(__DIR__.'/../../Fixtures/Dfe/Nfe/nfe-delivery-001.xml');
+        $xml = str_replace('<qVol>1</qVol>', '', $xml);
+        $xml = str_replace('<pesoL>80.000</pesoL><pesoB>80.000</pesoB>', '<pesoL>80.000</pesoL>', $xml);
+
+        Livewire::test(CreateAvulsoCteEmission::class)
+            ->set('data.nfe_xmls', [UploadedFile::fake()->createWithContent('incompleta.xml', $xml)])
+            ->assertSee('informe peso estimado em kg ou unidades transportadas')
+            ->assertSee('volume qVol não encontrado');
+    }
+
+    public function test_avulso_form_saves_a_draft_with_units_only_and_no_weight(): void
+    {
+        Queue::fake();
+        City::factory()->create(['ibge_code' => '3504008', 'name' => 'Assis', 'state' => 'SP']);
+        City::factory()->create(['ibge_code' => '3523107', 'name' => 'Itaquaquecetuba', 'state' => 'SP']);
+        $formData = $this->generalCargoFormData();
+
+        $page = Livewire::test(CreateAvulsoCteEmission::class)->fillForm($formData);
+        $measurementKey = array_key_first($page->get('data.cargo.measurements'));
+        $component = $formData['freight']['components']['frete'];
+        $componentKey = array_key_first($page->get('data.freight.components'));
+
+        $page->set("data.cargo.measurements.{$measurementKey}.unit", '03')
+            ->set("data.cargo.measurements.{$measurementKey}.measure", 'VEICULOS')
+            ->set("data.cargo.measurements.{$measurementKey}.quantity", '3')
+            ->set("data.freight.components.{$componentKey}.name", $component['name'])
+            ->set("data.freight.components.{$componentKey}.value", $component['value'])
+            ->call('create')
+            ->assertHasNoFormErrors()
+            ->assertRedirect();
+
+        $document = CteDocument::query()->sole();
+        $this->assertSame('VEICULOS', $document->snapshot['cargo']['measurements'][0]['measure']);
+        $this->assertArrayNotHasKey('weight_kg', $document->snapshot['cargo']);
+        $this->assertArrayNotHasKey('cargo_weight_kg', $document->snapshot);
+        Queue::assertNothingPushed();
+    }
+
+    public function test_avulso_form_saves_a_draft_from_a_manual_key_and_uploaded_xml_without_queueing_it(): void
+    {
+        Queue::fake();
+        City::factory()->create(['ibge_code' => '3504008', 'name' => 'Assis', 'state' => 'SP']);
+        City::factory()->create(['ibge_code' => '3523107', 'name' => 'Itaquaquecetuba', 'state' => 'SP']);
+        $formData = $this->generalCargoFormData();
+        $measurement = $formData['cargo']['measurements']['peso'];
+        $component = $formData['freight']['components']['frete'];
+        unset($formData['cargo']['measurements'], $formData['freight']['components'], $formData['nfe_xmls']);
+
+        $page = Livewire::test(CreateAvulsoCteEmission::class)
+            ->fillForm($formData)
+            ->set('data.nfe_xmls', [UploadedFile::fake()->createWithContent(
+                'second-nfe.xml',
+                (string) file_get_contents(__DIR__.'/../../Fixtures/Dfe/Nfe/nfe-delivery-002.xml'),
+            )]);
+        $measurementKey = array_key_first($page->get('data.cargo.measurements'));
+        $componentKey = array_key_first($page->get('data.freight.components'));
+
+        $page->set("data.cargo.measurements.{$measurementKey}.unit", $measurement['unit'])
+            ->set("data.cargo.measurements.{$measurementKey}.measure", $measurement['measure'])
+            ->set("data.cargo.measurements.{$measurementKey}.quantity", $measurement['quantity'])
+            ->set("data.freight.components.{$componentKey}.name", $component['name'])
+            ->set("data.freight.components.{$componentKey}.value", $component['value'])
+            ->call('create');
+        $page
+            ->assertHasNoFormErrors()
+            ->assertRedirect();
+
+        $document = CteDocument::query()->sole();
+
+        $this->assertSame(CteDocumentStatusEnum::DRAFT, $document->status);
+        $this->assertNull($document->cte_emission_batch_id);
+        $this->assertNull($document->register_id);
+        $this->assertCount(2, $document->nfeDocuments);
+        $this->assertNull($document->nfeDocuments->firstWhere('access_key', '35261011111111111111550010000000011000000011')?->xml_path);
+        $uploadedNfe = $document->nfeDocuments->firstWhere('access_key', '35261011111111111111550010000000021000000027');
+        $this->assertNotNull($uploadedNfe?->xml_path);
+        Storage::disk('dfe')->assertExists($uploadedNfe->xml_path);
+        $page->assertRedirect(CteEmissionResource::getUrl('view', ['record' => $document]));
+        Queue::assertNothingPushed();
+    }
+
+    public function test_avulso_form_rejects_nfe_uploads_over_the_aggregate_size_limit(): void
+    {
+        config(['dfe.nfe_xml_max_total_size_bytes' => 1]);
+        City::factory()->create(['ibge_code' => '3504008', 'name' => 'Assis', 'state' => 'SP']);
+        City::factory()->create(['ibge_code' => '3523107', 'name' => 'Itaquaquecetuba', 'state' => 'SP']);
+        $formData = $this->generalCargoFormData();
+
+        $page = Livewire::test(CreateAvulsoCteEmission::class)
+            ->fillForm($formData)
+            ->set('data.nfe_xmls', [UploadedFile::fake()->createWithContent(
+                'entrada.xml',
+                (string) file_get_contents(__DIR__.'/../../Fixtures/Dfe/Nfe/nfe-delivery-002.xml'),
+            )])
+            ->call('create')
+            ->assertHasFormErrors()
+            ->assertSee('totalizar');
+
+        $this->assertDatabaseCount('cte_documents', 0);
+    }
+
+    public function test_avulso_detail_page_displays_the_saved_cargo_and_freight_snapshot(): void
+    {
+        $document = CteDocument::factory()->create([
+            'snapshot' => [
+                'line' => 'general_cargo',
+                'origin' => ['name' => 'Assis', 'uf' => 'SP'],
+                'destination' => ['name' => 'Itaquaquecetuba', 'uf' => 'SP'],
+                'cfop' => '5353',
+                'nat_op' => 'PREST SERV TRANSPORTE',
+                'rem' => ['xNome' => 'Remetente da carga'],
+                'dest' => ['xNome' => 'Destinatário da carga'],
+                'taker_code' => '3',
+                'cargo' => [
+                    'value' => '25000.00',
+                    'predominant_product' => 'MAQUINAS AGRICOLAS',
+                    'other_category' => 'PECAS PESADAS',
+                    'weight_kg' => '12000.0000',
+                    'measurements' => [['unit' => '01', 'measure' => 'PESO BRUTO', 'quantity' => '12000.0000']],
+                ],
+                'freight' => [
+                    'total' => '5000.00',
+                    'receivable' => '4800.00',
+                    'components' => [['name' => 'FRETE', 'value' => '5000.00']],
+                ],
+            ],
+        ]);
+
+        Livewire::test(ViewCteEmission::class, ['record' => $document->getRouteKey()])
+            ->assertSee('CT-e avulso')
+            ->assertSee('Produto predominante')
+            ->assertSee('MAQUINAS AGRICOLAS')
+            ->assertSee('12000.0000')
+            ->assertSee('Valor a receber');
+    }
+
+    public function test_avulso_draft_page_can_edit_cfop_and_cargo(): void
+    {
+        City::factory()->create(['ibge_code' => '3504008', 'name' => 'Assis', 'state' => 'SP']);
+        City::factory()->create(['ibge_code' => '3523107', 'name' => 'Itaquaquecetuba', 'state' => 'SP']);
+        $document = app(\App\Services\Cte\CreateGeneralCargoCteDocument::class)
+            ->handle($this->generalCargoFormData());
+
+        $data = [
+            'cfop' => '5352',
+            'cargo' => [
+                'value' => '26000.00',
+                'predominant_product' => 'VEICULOS REVISADOS',
+                'other_category' => '',
+                'measurements' => [
+                    ['unit' => '01', 'measure' => 'PESO ESTIMADO', 'quantity' => '12500.0000'],
+                ],
+            ],
+        ];
+
+        $page = Livewire::test(ViewCteEmission::class, ['record' => $document->getRouteKey()])
+            ->assertActionVisible('editGeneralCargoDraft')
+            ->mountAction('editGeneralCargoDraft')
+            ->assertActionMounted('editGeneralCargoDraft');
+        $measurementKey = array_key_first($page->get('mountedActionsData.0.cargo.measurements'));
+        $data['cargo']['measurements'] = [$measurementKey => [
+            'unit' => '01',
+            'measure' => 'PESO ESTIMADO',
+            'quantity' => '12500.0000',
+        ]];
+
+        $page->setActionData($data)
+            ->assertActionDataSet($data)
+            ->callMountedAction()
+            ->assertHasNoActionErrors()
+            ->assertNotified('Rascunho atualizado.');
+
+        $this->assertSame('5352', $document->refresh()->snapshot['cfop']);
+        $this->assertSame('26000.00', $document->snapshot['cargo']['value']);
+        $this->assertSame('VEICULOS REVISADOS', $document->snapshot['cargo']['predominant_product']);
+    }
+
+    public function test_avulso_draft_edit_action_is_hidden_after_queueing(): void
+    {
+        City::factory()->create(['ibge_code' => '3504008', 'name' => 'Assis', 'state' => 'SP']);
+        City::factory()->create(['ibge_code' => '3523107', 'name' => 'Itaquaquecetuba', 'state' => 'SP']);
+        $document = app(\App\Services\Cte\CreateGeneralCargoCteDocument::class)
+            ->handle($this->generalCargoFormData());
+        $document->forceFill(['status' => CteDocumentStatusEnum::QUEUED])->save();
+
+        Livewire::test(ViewCteEmission::class, ['record' => $document->getRouteKey()])
+            ->assertActionHidden('editGeneralCargoDraft');
     }
 
     public function test_download_actions_appear_when_file_paths_are_present(): void
@@ -530,6 +915,56 @@ class CteEmissionResourceTest extends TestCase
         $this->assertNotNull($document->pdf_path);
         Storage::disk('dfe')->assertExists($document->pdf_path);
         $this->assertStringStartsWith('%PDF', (string) Storage::disk('dfe')->get($document->pdf_path));
+    }
+
+    /** @return array<string, mixed> */
+    private function generalCargoFormData(): array
+    {
+        $remitter = $this->company('11111111111111', 'Remetente Industrial', '3504008', 'Assis');
+        $recipient = $this->company('22222222222222', 'Destinatário Comercial', '3523107', 'Itaquaquecetuba');
+
+        return [
+            'origin_document_mode' => 'nfe',
+            'nfe_keys' => '35261011111111111111550010000000011000000011',
+            'nfe_xmls' => [],
+            'cfop' => '5353',
+            'nat_op' => 'PREST SERV TRANSPORTE',
+            'origin' => ['ibge' => '3504008', 'name' => 'Assis', 'uf' => 'SP'],
+            'destination' => ['ibge' => '3523107', 'name' => 'Itaquaquecetuba', 'uf' => 'SP'],
+            'rem_company_id' => (string) $remitter->id,
+            'dest_company_id' => (string) $recipient->id,
+            'taker_code' => '3',
+            'ind_ietoma' => '1',
+            'taker_is_transport_company' => '0',
+            'cargo' => [
+                'value' => '25000.00',
+                'predominant_product' => 'MAQUINAS AGRICOLAS',
+                'other_category' => '',
+                'measurements' => ['peso' => ['unit' => '01', 'measure' => 'PESO ESTIMADO', 'quantity' => '12000.0000']],
+            ],
+            'freight' => [
+                'total' => '5000.00',
+                'receivable' => '5000.00',
+                'components' => ['frete' => ['name' => 'FRETE', 'value' => '5000.00']],
+            ],
+        ];
+    }
+
+    private function company(string $cnpj, string $name, string $ibge = '3506003', string $city = 'Campinas'): Company
+    {
+        return Company::factory()->create([
+            'cnpj' => $cnpj,
+            'name' => $name,
+            'ie' => '123456789',
+            'street' => 'Rua das Cargas',
+            'number' => '100',
+            'complement' => '',
+            'district' => 'Centro',
+            'city' => $city,
+            'state' => 'SP',
+            'zipcode' => '01001000',
+            'ibge_code' => $ibge,
+        ]);
     }
 
     private function createDraft(): CteDocument

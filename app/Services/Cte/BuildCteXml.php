@@ -25,6 +25,7 @@ class BuildCteXml
     public function __construct(
         protected AllocateCteNumber $allocator,
         protected AccessKey $accessKey,
+        protected ValidateGeneralCargoCteSnapshot $generalCargoValidator,
     ) {}
 
     /**
@@ -64,7 +65,18 @@ class BuildCteXml
     {
         $emittedAt = $this->emissionDate($snapshot);
         $isHomolog = (string) config('dfe.tp_amb') !== '1';
-        $freight = $this->decimal($snapshot['value'], 2);
+        $isGeneralCargo = $this->isGeneralCargoLine($snapshot);
+
+        if ($isGeneralCargo && (string) ($snapshot['ind_ietoma'] ?? '') === '2') {
+            $snapshot = $this->snapshotWithIsentoTaker($snapshot);
+        }
+
+        $freight = $this->decimal($isGeneralCargo ? $snapshot['freight']['total'] : $snapshot['value'], 2);
+        $cfop = $isGeneralCargo ? (string) $snapshot['cfop'] : (string) config('dfe.cte.cfop');
+        $nature = $isGeneralCargo ? (string) $snapshot['nat_op'] : (string) config('dfe.cte.natOp');
+        $takerIndicator = $isGeneralCargo
+            ? ($isHomolog ? '9' : (string) $snapshot['ind_ietoma'])
+            : $this->takerIeIndicator($snapshot, $isHomolog);
 
         $xml = '<?xml version="1.0" encoding="UTF-8"?>'
             .'<CTe xmlns="http://www.portalfiscal.inf.br/cte">'
@@ -72,8 +84,8 @@ class BuildCteXml
             .'<ide>'
             .'<cUF>'.(int) config('dfe.cuf').'</cUF>'
             .'<cCT>'.str_pad($cct, 8, '0', STR_PAD_LEFT).'</cCT>'
-            .'<CFOP>'.e((string) config('dfe.cte.cfop')).'</CFOP>'
-            .'<natOp>'.e((string) config('dfe.cte.natOp')).'</natOp>'
+            .'<CFOP>'.e($cfop).'</CFOP>'
+            .'<natOp>'.e($nature).'</natOp>'
             .'<mod>'.AccessKey::MODELO_CTE.'</mod>'
             .'<serie>'.$serie.'</serie>'
             .'<nCT>'.$number.'</nCT>'
@@ -93,16 +105,16 @@ class BuildCteXml
             .$this->cityGroup('Ini', $snapshot['origin'])
             .$this->cityGroup('Fim', $snapshot['destination'])
             .'<retira>0</retira>'
-            .'<indIEToma>'.$this->takerIeIndicator($snapshot, $isHomolog).'</indIEToma>'
-            .'<toma3><toma>3</toma></toma3>'
+            .'<indIEToma>'.$takerIndicator.'</indIEToma>'
+            .$this->takerGroup($snapshot, $isHomolog)
             .'</ide>'
             .'<compl><Entrega><semData><tpPer>0</tpPer></semData><semHora><tpHor>0</tpHor></semHora></Entrega></compl>'
             .$this->emitGroup()
             .$this->partyGroup('rem', $snapshot['rem'], $isHomolog, withFantasyName: true)
+            .($isGeneralCargo ? $this->optionalPartyGroup('exped', $snapshot, $isHomolog) : '')
+            .($isGeneralCargo ? $this->optionalPartyGroup('receb', $snapshot, $isHomolog) : '')
             .$this->partyGroup('dest', $snapshot['dest'], $isHomolog, withFantasyName: false)
-            .'<vPrest><vTPrest>'.$freight.'</vTPrest><vRec>'.$freight.'</vRec>'
-            .($this->isVehicleLine($snapshot) ? '<Comp><xNome>FRETE</xNome><vComp>'.$freight.'</vComp></Comp>' : '')
-            .'</vPrest>'
+            .$this->freightGroup($snapshot, $freight)
             .'<imp><ICMS><ICMSSN><CST>90</CST><indSN>1</indSN></ICMSSN></ICMS></imp>'
             .'<infCTeNorm>'
             .$this->cargoGroup($snapshot)
@@ -157,7 +169,13 @@ class BuildCteXml
      */
     protected function partyGroup(string $tag, array $party, bool $isHomolog, bool $withFantasyName): string
     {
-        $addressTag = $tag === 'rem' ? 'enderReme' : 'enderDest';
+        $addressTag = match ($tag) {
+            'rem' => 'enderReme',
+            'dest' => 'enderDest',
+            'exped' => 'enderExped',
+            'receb' => 'enderReceb',
+            default => throw new DomainException("Grupo de participante CT-e não suportado: {$tag}."),
+        };
 
         $identity = $isHomolog
             ? '<CNPJ>'.self::HOMOLOG_PARTY_CNPJ.'</CNPJ>'
@@ -173,18 +191,76 @@ class BuildCteXml
             .$ie
             .'<xNome>'.e($name).'</xNome>'
             .$fantasy
-            .'<'.$addressTag.'>'
+            .$this->addressGroup($addressTag, $party)
+            .'</'.$tag.'>';
+    }
+
+    /** @param array<string, mixed> $snapshot */
+    private function optionalPartyGroup(string $tag, array $snapshot, bool $isHomolog): string
+    {
+        $party = $snapshot[$tag] ?? null;
+
+        return is_array($party) ? $this->partyGroup($tag, $party, $isHomolog, withFantasyName: false) : '';
+    }
+
+    /** @param array<string, mixed> $party */
+    private function addressGroup(string $tag, array $party): string
+    {
+        return '<'.$tag.'>'
             .'<xLgr>'.e((string) $party['xLgr']).'</xLgr>'
             .'<nro>'.e((string) $party['nro']).'</nro>'
             .$this->complementElement($party)
             .'<xBairro>'.e((string) $party['xBairro']).'</xBairro>'
             .'<cMun>'.e((string) $party['cMun']).'</cMun>'
             .'<xMun>'.e((string) $party['xMun']).'</xMun>'
-            .'<CEP>'.e((string) $party['cep']).'</CEP>'
-            .'<UF>'.e((string) $party['uf']).'</UF>'
+            .'<CEP>'.e((string) ($party['CEP'] ?? $party['cep'] ?? '')).'</CEP>'
+            .'<UF>'.e((string) ($party['UF'] ?? $party['uf'] ?? '')).'</UF>'
             .'<cPais>1058</cPais><xPais>Brasil</xPais>'
-            .'</'.$addressTag.'>'
             .'</'.$tag.'>';
+    }
+
+    /** @param array<string, mixed> $snapshot */
+    private function takerGroup(array $snapshot, bool $isHomolog): string
+    {
+        if (! $this->isGeneralCargoLine($snapshot)) {
+            return '<toma3><toma>3</toma></toma3>';
+        }
+
+        $code = (string) $snapshot['taker_code'];
+
+        if ($code !== '4') {
+            return '<toma3><toma>'.e($code).'</toma></toma3>';
+        }
+
+        $party = (array) $snapshot['taker'];
+        $identity = $isHomolog
+            ? '<CNPJ>'.self::HOMOLOG_PARTY_CNPJ.'</CNPJ>'
+            : $this->partyIdentity($party);
+        $name = $isHomolog ? self::HOMOLOG_PARTY_NAME : (string) $party['xNome'];
+        $ie = ! $isHomolog && filled($party['ie'] ?? null) ? '<IE>'.e((string) $party['ie']).'</IE>' : '';
+
+        return '<toma4><toma>4</toma>'.$identity.$ie.'<xNome>'.e($name).'</xNome>'
+            .$this->addressGroup('enderToma', $party)
+            .'</toma4>';
+    }
+
+    /** @param array<string, mixed> $snapshot @return array<string, mixed> */
+    private function snapshotWithIsentoTaker(array $snapshot): array
+    {
+        $partyKey = match ((string) ($snapshot['taker_code'] ?? '')) {
+            '0' => 'rem',
+            '1' => 'exped',
+            '2' => 'receb',
+            '3' => 'dest',
+            '4' => 'taker',
+            default => null,
+        };
+
+        if ($partyKey !== null && is_array($snapshot[$partyKey] ?? null)) {
+            $snapshot[$partyKey]['ie'] = 'ISENTO';
+        }
+
+        return $snapshot;
     }
 
     /** @param array<string, mixed> $party */
@@ -231,6 +307,25 @@ class BuildCteXml
      */
     protected function cargoGroup(array $snapshot): string
     {
+        if ($this->isGeneralCargoLine($snapshot)) {
+            $cargo = $snapshot['cargo'];
+            $xml = '<infCarga>'
+                .'<vCarga>'.$this->decimal($cargo['value'], 2).'</vCarga>'
+                .'<proPred>'.e((string) $cargo['predominant_product']).'</proPred>';
+
+            if (filled($cargo['other_category'] ?? null)) {
+                $xml .= '<xOutCat>'.e((string) $cargo['other_category']).'</xOutCat>';
+            }
+
+            foreach ((array) $cargo['measurements'] as $measurement) {
+                $xml .= '<infQ><cUnid>'.e((string) $measurement['unit']).'</cUnid>'
+                    .'<tpMed>'.e((string) $measurement['measure']).'</tpMed>'
+                    .'<qCarga>'.$this->decimal($measurement['quantity'], 4).'</qCarga></infQ>';
+            }
+
+            return $xml.'</infCarga>';
+        }
+
         if ($this->isVehicleLine($snapshot)) {
             $proPred = strtoupper((string) $snapshot['vehicle_model']).'-PLACA:'.strtoupper((string) $snapshot['vehicle_plate']);
             $weight = $this->decimal($snapshot['cargo_weight_kg'] ?? config('dfe.cte.default_weight_kg'), 4);
@@ -269,6 +364,17 @@ class BuildCteXml
                 .'</infOutros></infDoc>';
         }
 
+        if ($this->isGeneralCargoLine($snapshot) && ($snapshot['origin_document_mode'] ?? null) === 'other') {
+            $document = (array) $snapshot['other_document'];
+
+            return '<infDoc><infOutros>'
+                .'<tpDoc>99</tpDoc>'
+                .'<descOutros>'.e((string) $document['description']).'</descOutros>'
+                .(filled($document['number'] ?? null) ? '<nDoc>'.e((string) $document['number']).'</nDoc>' : '')
+                .(filled($document['issued_on'] ?? null) ? '<dEmi>'.e((string) $document['issued_on']).'</dEmi>' : '')
+                .'</infOutros></infDoc>';
+        }
+
         $references = $snapshot['nfe_documents'] ?? [[
             'access_key' => (string) ($snapshot['nfe_key'] ?? ''),
         ]];
@@ -277,11 +383,31 @@ class BuildCteXml
         foreach ($references as $reference) {
             $documents .= '<infNFe>'
                 .'<chave>'.e((string) $reference['access_key']).'</chave>'
-                .'<dPrev>'.e((string) $snapshot['dprev']).'</dPrev>'
+                .($this->isGeneralCargoLine($snapshot) ? '' : '<dPrev>'.e((string) $snapshot['dprev']).'</dPrev>')
                 .'</infNFe>';
         }
 
         return '<infDoc>'.$documents.'</infDoc>';
+    }
+
+    /** @param array<string, mixed> $snapshot */
+    private function freightGroup(array $snapshot, string $freight): string
+    {
+        if (! $this->isGeneralCargoLine($snapshot)) {
+            return '<vPrest><vTPrest>'.$freight.'</vTPrest><vRec>'.$freight.'</vRec>'
+                .($this->isVehicleLine($snapshot) ? '<Comp><xNome>FRETE</xNome><vComp>'.$freight.'</vComp></Comp>' : '')
+                .'</vPrest>';
+        }
+
+        $group = '<vPrest><vTPrest>'.$freight.'</vTPrest>'
+            .'<vRec>'.$this->decimal($snapshot['freight']['receivable'], 2).'</vRec>';
+
+        foreach ((array) $snapshot['freight']['components'] as $component) {
+            $group .= '<Comp><xNome>'.e((string) $component['name']).'</xNome>'
+                .'<vComp>'.$this->decimal($component['value'], 2).'</vComp></Comp>';
+        }
+
+        return $group.'</vPrest>';
     }
 
     /**
@@ -289,7 +415,13 @@ class BuildCteXml
      */
     protected function isVehicleLine(array $snapshot): bool
     {
-        return ($snapshot['line'] ?? 'vehicle_removal') !== 'tank_alcohol';
+        return ($snapshot['line'] ?? 'vehicle_removal') === 'vehicle_removal';
+    }
+
+    /** @param array<string, mixed> $snapshot */
+    private function isGeneralCargoLine(array $snapshot): bool
+    {
+        return ($snapshot['line'] ?? null) === 'general_cargo';
     }
 
     protected function qrUrl(string $accessKey): string
@@ -307,6 +439,18 @@ class BuildCteXml
      */
     protected function assertSnapshotComplete(array $snapshot): void
     {
+        $line = (string) ($snapshot['line'] ?? 'vehicle_removal');
+
+        if ($line === 'general_cargo') {
+            $this->generalCargoValidator->handle($snapshot, forEmission: true);
+
+            return;
+        }
+
+        if (! in_array($line, ['vehicle_removal', 'tank_alcohol'], true)) {
+            throw new DomainException("Modalidade de CT-e não reconhecida: {$line}.");
+        }
+
         $missing = [];
 
         if (isset($snapshot['schema_version']) && (int) $snapshot['schema_version'] < 2) {
