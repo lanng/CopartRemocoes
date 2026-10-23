@@ -28,6 +28,7 @@ return [
 
     // Limite individual dos XMLs de NF-e lidos pelo importador (10 MiB por arquivo).
     'nfe_xml_max_file_size_bytes' => (int) env('DFE_NFE_XML_MAX_FILE_SIZE_BYTES', 10 * 1024 * 1024),
+    'nfe_xml_max_total_size_bytes' => (int) env('DFE_NFE_XML_MAX_TOTAL_SIZE_BYTES', 10 * 1024 * 1024),
     'nfe_xml_max_files_per_import' => (int) env('DFE_NFE_XML_MAX_FILES_PER_IMPORT', 10),
 
     'cte_version' => env('DFE_CTE_VERSION', '4.00'),

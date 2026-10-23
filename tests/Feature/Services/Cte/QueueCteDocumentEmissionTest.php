@@ -4,12 +4,17 @@ namespace Tests\Feature\Services\Cte;
 
 use App\Enums\CteDocumentStatusEnum;
 use App\Jobs\EmitCteDirectJob;
+use App\Models\City;
+use App\Models\Company;
 use App\Models\CteDocument;
 use App\Services\Cte\CreateAlcoholCteDocument;
+use App\Services\Cte\CreateGeneralCargoCteDocument;
+use App\Services\Cte\EmitCteDocument;
 use App\Services\Cte\QueueCteDocumentEmission;
 use Carbon\Carbon;
 use DomainException;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Facades\Storage;
 use Tests\TestCase;
@@ -24,6 +29,7 @@ class QueueCteDocumentEmissionTest extends TestCase
 
         Storage::fake('dfe');
         Carbon::setTestNow('2026-10-07 10:00:00-03:00');
+        $this->seedCities();
     }
 
     protected function tearDown(): void
@@ -124,6 +130,88 @@ class QueueCteDocumentEmissionTest extends TestCase
         app(QueueCteDocumentEmission::class)->handle($document);
     }
 
+    public function test_queues_a_standalone_generic_cte_with_a_manually_entered_nfe_key(): void
+    {
+        Queue::fake();
+        $document = app(CreateGeneralCargoCteDocument::class)->handle($this->generalCargoData());
+
+        $queued = app(QueueCteDocumentEmission::class)->handle($document);
+
+        $this->assertSame(CteDocumentStatusEnum::QUEUED, $queued->status);
+        $this->assertNull($queued->cte_emission_batch_id);
+        $this->assertNull($queued->register_id);
+        Queue::assertPushed(EmitCteDirectJob::class, 1);
+    }
+
+    public function test_still_queues_an_existing_v4_avulso_snapshot(): void
+    {
+        Queue::fake();
+        $document = app(CreateGeneralCargoCteDocument::class)->handle($this->generalCargoData());
+        $snapshot = (array) $document->snapshot;
+        $snapshot['schema_version'] = 4;
+        unset($snapshot['origin_document_mode'], $snapshot['other_document']);
+        $document->forceFill(['snapshot' => $snapshot])->save();
+
+        $queued = app(QueueCteDocumentEmission::class)->handle($document);
+
+        $this->assertSame(CteDocumentStatusEnum::QUEUED, $queued->status);
+        Queue::assertPushed(EmitCteDirectJob::class, 1);
+    }
+
+    public function test_blocks_queueing_an_interstate_generic_cte_until_cfop_is_selected(): void
+    {
+        Queue::fake();
+        $data = $this->generalCargoData();
+        $data['cfop'] = '';
+        $data['destination'] = ['ibge' => '3106200', 'name' => 'Belo Horizonte', 'uf' => 'MG'];
+        $document = app(CreateGeneralCargoCteDocument::class)->handle($data);
+
+        $this->expectException(DomainException::class);
+        $this->expectExceptionMessage('escolha o CFOP de transporte');
+
+        app(QueueCteDocumentEmission::class)->handle($document);
+    }
+
+    public function test_queues_a_production_generic_transport_starting_outside_sp(): void
+    {
+        Queue::fake();
+        config(['dfe.tp_amb' => '1']);
+        $data = $this->generalCargoData();
+        $data['origin'] = ['ibge' => '3106200', 'name' => 'Belo Horizonte', 'uf' => 'MG'];
+        $data['destination'] = ['ibge' => '3550308', 'name' => 'São Paulo', 'uf' => 'SP'];
+        $data['cfop'] = '6932';
+        $document = app(CreateGeneralCargoCteDocument::class)->handle($data);
+
+        $queued = app(QueueCteDocumentEmission::class)->handle($document);
+
+        $this->assertSame(CteDocumentStatusEnum::QUEUED, $queued->status);
+        Queue::assertPushed(EmitCteDirectJob::class, 1);
+    }
+
+    public function test_global_production_toggle_still_blocks_an_off_sp_generic_cte_attempt(): void
+    {
+        Queue::fake();
+        Http::preventStrayRequests();
+        $data = $this->generalCargoData();
+        $data['origin'] = ['ibge' => '3106200', 'name' => 'Belo Horizonte', 'uf' => 'MG'];
+        $data['destination'] = ['ibge' => '3550308', 'name' => 'São Paulo', 'uf' => 'SP'];
+        $data['cfop'] = '6932';
+        $document = app(CreateGeneralCargoCteDocument::class)->handle($data);
+        $queued = app(QueueCteDocumentEmission::class)->handle($document);
+        config(['dfe.tp_amb' => '1', 'dfe.cte.production_enabled' => false]);
+
+        try {
+            app(EmitCteDocument::class)->attempt($queued);
+            $this->fail('O bloqueio global deve impedir a tentativa antes de alterar o estado do documento.');
+        } catch (DomainException $exception) {
+            $this->assertStringContainsString('DFE_CTE_PRODUCTION_ENABLED', $exception->getMessage());
+        }
+
+        $this->assertSame(CteDocumentStatusEnum::QUEUED, $document->fresh()->status);
+        $this->assertDatabaseCount('cte_number_sequences', 0);
+        Http::assertNothingSent();
+    }
+
     public function test_refuses_a_sao_paulo_tomador_marked_isento_in_production(): void
     {
         config(['dfe.tp_amb' => '1']);
@@ -154,5 +242,68 @@ class QueueCteDocumentEmissionTest extends TestCase
             'filename' => $fixture,
             'xml' => (string) file_get_contents(base_path("tests/Fixtures/Dfe/Nfe/{$fixture}")),
         ];
+    }
+
+    /** @return array<string, mixed> */
+    private function generalCargoData(): array
+    {
+        $remitter = $this->company('11111111111111', 'Remetente', '3504008', 'Assis');
+        $recipient = $this->company('22222222222222', 'Destinatário', '3523107', 'Itaquaquecetuba');
+
+        return [
+            'origin_document_mode' => 'nfe',
+            'rem_company_id' => $remitter->id,
+            'dest_company_id' => $recipient->id,
+            'cfop' => '5353',
+            'nat_op' => 'PREST SERV TRANSPORTE',
+            'taker_code' => '3',
+            'ind_ietoma' => '1',
+            'taker_is_transport_company' => '0',
+            'nfe_keys' => '35261011111111111111550010000000011000000011',
+            'nfe_xmls' => [],
+            'origin' => ['ibge' => '3504008', 'name' => 'Assis', 'uf' => 'SP'],
+            'destination' => ['ibge' => '3523107', 'name' => 'Itaquaquecetuba', 'uf' => 'SP'],
+            'cargo' => [
+                'value' => '25000.00',
+                'predominant_product' => 'MAQUINAS AGRICOLAS',
+                'other_category' => '',
+                'gross_weight_kg' => '12000.0000',
+                'measurements' => [['unit' => '01', 'measure' => 'PESO BRUTO', 'quantity' => '12000.0000']],
+            ],
+            'freight' => [
+                'total' => '5000.00',
+                'receivable' => '5000.00',
+                'components' => [['name' => 'FRETE', 'value' => '5000.00']],
+            ],
+        ];
+    }
+
+    private function company(string $cnpj, string $name, string $ibge, string $city): Company
+    {
+        return Company::factory()->create([
+            'cnpj' => $cnpj,
+            'name' => $name,
+            'ie' => '123456789',
+            'street' => 'Rua das Cargas',
+            'number' => '100',
+            'complement' => '',
+            'district' => 'Centro',
+            'city' => $city,
+            'state' => 'SP',
+            'zipcode' => '01001000',
+            'ibge_code' => $ibge,
+        ]);
+    }
+
+    private function seedCities(): void
+    {
+        foreach ([
+            ['3504008', 'Assis', 'SP'],
+            ['3523107', 'Itaquaquecetuba', 'SP'],
+            ['3106200', 'Belo Horizonte', 'MG'],
+            ['3550308', 'São Paulo', 'SP'],
+        ] as [$ibge, $name, $state]) {
+            City::query()->create(['ibge_code' => $ibge, 'name' => $name, 'state' => $state]);
+        }
     }
 }

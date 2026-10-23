@@ -57,6 +57,151 @@ class GenerateDactePdfTest extends TestCase
         $this->assertStringNotContainsString('COPART-DFE-1.0', $html);
     }
 
+    public function test_pdf_renders_the_taker_selected_by_toma3_zero(): void
+    {
+        $proc = str_replace(
+            '<toma3><toma>3</toma></toma3>',
+            '<toma3><toma>0</toma></toma3>',
+            (string) file_get_contents(__DIR__.'/../../../Fixtures/Dfe/cte-2962.xml'),
+        );
+        $data = DacteData::fromProc($proc);
+        $html = view('dfe.dacte', ['dacte' => $data, 'qrImage' => null])->render();
+
+        $this->assertStringContainsString('TOKIO MARINE SEGURADORA S.A', $html);
+        $this->assertStringNotContainsString('style="left: 66pt; top: 2pt; width: 210pt; font-size: 6.5pt">Copart do Brasil', $html);
+        $this->assertPdfRenders($proc);
+    }
+
+    public function test_pdf_uses_toma4_expediter_cfop_and_route_from_xml(): void
+    {
+        $proc = (string) file_get_contents(__DIR__.'/../../../Fixtures/Dfe/cte-2962.xml');
+        $taker = '<toma4><toma>4</toma><CNPJ>99999999000199</CNPJ><IE>998877665544</IE>'
+            .'<xNome>Tomador Outro Sintetico</xNome><enderToma><xLgr>Rua do Tomador</xLgr><nro>99</nro>'
+            .'<xBairro>Centro</xBairro><cMun>3534708</cMun><xMun>Ourinhos</xMun><CEP>19900000</CEP><UF>MG</UF></enderToma></toma4>';
+        $expediter = '<exped><CNPJ>88888888000188</CNPJ><IE>887766554433</IE><xNome>Expedidor Sintetico</xNome>'
+            .'<enderExped><xLgr>Rua do Expedidor</xLgr><nro>88</nro><xBairro>Industrial</xBairro>'
+            .'<cMun>3534708</cMun><xMun>Ourinhos</xMun><CEP>19900001</CEP><UF>MG</UF></enderExped></exped>';
+        $proc = str_replace('<toma3><toma>3</toma></toma3>', $taker, $proc);
+        $proc = str_replace('</rem><dest>', '</rem>'.$expediter.'<dest>', $proc);
+        $proc = str_replace('<CFOP>5353</CFOP>', '<CFOP>6932</CFOP>', $proc);
+        $proc = str_replace('<UFIni>SP</UFIni>', '<UFIni>MG</UFIni>', $proc);
+        $data = DacteData::fromProc($proc);
+        $html = view('dfe.dacte', ['dacte' => $data, 'qrImage' => null])->render();
+
+        $this->assertStringContainsString('6932 - PREST SERV TRANSPORTE', $html);
+        $this->assertStringContainsString('Assis - MG - 3504008', $html);
+        $this->assertStringContainsString('Itaquaquecetuba - SP - 3523107', $html);
+        $this->assertStringContainsString('Expedidor Sintetico', $html);
+        $this->assertStringContainsString('Tomador Outro Sintetico', $html);
+        $this->assertStringContainsString('Rua do Tomador, 99 - Centro', $html);
+        $this->assertPdfRenders($proc);
+    }
+
+    public function test_pdf_prints_all_measurements_and_selects_peso_bruto_by_description(): void
+    {
+        $proc = (string) file_get_contents(__DIR__.'/../../../Fixtures/Dfe/cte-2962.xml');
+        $measurements = '<infQ><cUnid>01</cUnid><tpMed>PESO LÍQUIDO</tpMed><qCarga>1800.0000</qCarga></infQ>'
+            .'<infQ><cUnid>01</cUnid><tpMed>PESO BRUTO</tpMed><qCarga>2100.0000</qCarga></infQ>';
+
+        for ($position = 1; $position <= 8; $position++) {
+            $measurements .= '<infQ><cUnid>03</cUnid><tpMed>MEDIDA TESTE '.$position.'</tpMed><qCarga>'
+                .$position.'.0000</qCarga></infQ>';
+        }
+
+        $proc = str_replace(
+            '<infQ><cUnid>01</cUnid><tpMed>KG</tpMed><qCarga>2000.0000</qCarga></infQ>',
+            $measurements,
+            $proc,
+        );
+        $data = DacteData::fromProc($proc);
+        $html = view('dfe.dacte', ['dacte' => $data, 'qrImage' => null])->render();
+        $pdf = new Dompdf;
+        $frames = [];
+        $pdf->setCallbacks([[
+            'event' => 'end_frame',
+            'f' => function (Frame $frame) use (&$frames): void {
+                $node = $frame->get_node();
+                if ($node instanceof DOMText && trim($node->textContent) !== '') {
+                    $frames[] = [trim($node->textContent), $frame->get_border_box()];
+                }
+            },
+        ]]);
+        $pdf->loadHtml($html);
+        $pdf->setPaper('a4');
+        $pdf->render();
+
+        $measurementFrames = array_values(array_filter(
+            $frames,
+            fn (array $frame): bool => str_starts_with($frame[0], 'MEDIDA TESTE '),
+        ));
+        $grossWeightFrames = array_values(array_filter(
+            $frames,
+            fn (array $frame): bool => $frame[0] === '2.100,0000' && $frame[1][0] < 100,
+        ));
+        $serviceFrame = array_values(array_filter(
+            $frames,
+            fn (array $frame): bool => str_contains($frame[0], 'COMPONENTES DO VALOR DA PRESTAÇÃO DE SERVIÇO'),
+        ));
+
+        $this->assertCount(8, $measurementFrames);
+        $this->assertNotEmpty($grossWeightFrames, 'O campo de peso bruto deve usar a medida PESO BRUTO, não a primeira medida em kg.');
+        $this->assertNotEmpty($serviceFrame);
+        $this->assertSame(1, $pdf->getCanvas()->get_page_count());
+        $this->assertGreaterThan(413, $serviceFrame[0][1][1]);
+
+        $this->assertPdfRenders($proc);
+    }
+
+    public function test_estimated_weight_is_printed_as_estimated_and_not_in_the_gross_weight_box(): void
+    {
+        $proc = (string) file_get_contents(__DIR__.'/../../../Fixtures/Dfe/cte-2962.xml');
+        $proc = str_replace(
+            '<infQ><cUnid>01</cUnid><tpMed>KG</tpMed><qCarga>2000.0000</qCarga></infQ>',
+            '<infQ><cUnid>01</cUnid><tpMed>PESO ESTIMADO</tpMed><qCarga>1500.0000</qCarga></infQ>',
+            $proc,
+        );
+        $data = DacteData::fromProc($proc);
+        $html = view('dfe.dacte', ['dacte' => $data, 'qrImage' => null])->render();
+
+        $this->assertStringContainsString('PESO ESTIMADO: 1.500,0000 KG', $html);
+        $this->assertSame(1, substr_count($html, '1.500,0000'));
+        $this->assertPdfRenders($proc);
+
+        $unitsOnlyProc = str_replace(
+            '<infQ><cUnid>01</cUnid><tpMed>KG</tpMed><qCarga>2000.0000</qCarga></infQ>',
+            '<infQ><cUnid>03</cUnid><tpMed>VEICULOS</tpMed><qCarga>3.0000</qCarga></infQ>',
+            (string) file_get_contents(__DIR__.'/../../../Fixtures/Dfe/cte-2962.xml'),
+        );
+        $unitsOnly = DacteData::fromProc($unitsOnlyProc);
+        $unitsHtml = view('dfe.dacte', ['dacte' => $unitsOnly, 'qrImage' => null])->render();
+
+        $this->assertStringContainsString('VEICULOS: 3,0000 UN', $unitsHtml);
+    }
+
+    public function test_measurements_beyond_the_first_page_continue_without_being_dropped(): void
+    {
+        $proc = (string) file_get_contents(__DIR__.'/../../../Fixtures/Dfe/cte-2962.xml');
+        $measurements = '';
+
+        for ($position = 1; $position <= 40; $position++) {
+            $measurements .= '<infQ><cUnid>03</cUnid><tpMed>MEDIDA TESTE '.$position.'</tpMed><qCarga>'
+                .$position.'.0000</qCarga></infQ>';
+        }
+
+        $proc = str_replace('</infCarga>', $measurements.'</infCarga>', $proc);
+        $data = DacteData::fromProc($proc);
+        $html = view('dfe.dacte', ['dacte' => $data, 'qrImage' => null])->render();
+        $pdf = new Dompdf;
+        $pdf->loadHtml($html);
+        $pdf->setPaper('a4');
+        $pdf->render();
+
+        $this->assertSame(2, $pdf->getCanvas()->get_page_count());
+        $this->assertStringContainsString('01/02', $html);
+        $this->assertStringContainsString('Folha 02/02', $html);
+        $this->assertStringContainsString('MEDIDA TESTE 40: 40,0000 UN', $html);
+    }
+
     public function test_regeneration_never_overwrites_it_versions_the_file(): void
     {
         $proc = (string) file_get_contents(__DIR__.'/../../../Fixtures/Dfe/cte-2962.xml');
@@ -75,6 +220,14 @@ class GenerateDactePdfTest extends TestCase
         Storage::disk('dfe')->assertExists($first);
         Storage::disk('dfe')->assertExists($second);
         Storage::disk('dfe')->assertExists($third);
+    }
+
+    private function assertPdfRenders(string $proc): void
+    {
+        $accessKey = str_repeat('8', 44);
+        $path = app(GenerateDactePdf::class)->generateForProc($accessKey, $proc);
+
+        $this->assertStringStartsWith('%PDF', (string) Storage::disk('dfe')->get($path));
     }
 
     public function test_prints_all_nfe_references_and_the_physical_receiver_without_changing_page_geometry(): void

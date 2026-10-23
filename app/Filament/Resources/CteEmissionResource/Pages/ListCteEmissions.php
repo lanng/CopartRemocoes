@@ -6,6 +6,7 @@ use App\Filament\Actions\DownloadFiscalXmlsAction;
 use App\Filament\Resources\CteEmissionResource;
 use App\Models\CteDocument;
 use Closure;
+use Filament\Actions\Action;
 use Filament\Actions\CreateAction;
 use Filament\Resources\Pages\ListRecords;
 
@@ -22,6 +23,10 @@ class ListCteEmissions extends ListRecords
     {
         return [
             DownloadFiscalXmlsAction::make(CteEmissionResource::class, 'cte'),
+            Action::make('createGeneralCargo')
+                ->label('Novo CT-e avulso')
+                ->icon('heroicon-o-plus')
+                ->url(CteEmissionResource::getUrl('create-avulso')),
             CreateAction::make()->label('Novo CT-e de álcool'),
         ];
     }

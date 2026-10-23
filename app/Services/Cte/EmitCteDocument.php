@@ -35,6 +35,7 @@ class EmitCteDocument
         protected BuildCteXml $builder,
         protected SefazSoapClient $client,
         protected RecordDirectCteResult $recorder,
+        protected ValidateGeneralCargoCteSnapshot $generalCargoValidator,
     ) {}
 
     /**
@@ -147,6 +148,16 @@ class EmitCteDocument
 
         if ((string) config('dfe.tp_amb') === '1' && ! config('dfe.cte.production_enabled', false)) {
             throw new DomainException('A transmissão de CT-e em produção está bloqueada por DFE_CTE_PRODUCTION_ENABLED.');
+        }
+
+        $snapshot = (array) $document->snapshot;
+
+        if (($snapshot['line'] ?? null) === 'general_cargo') {
+            if ($document->batch !== null) {
+                throw new DomainException('O CT-e avulso deve permanecer independente de lote.');
+            }
+
+            $this->generalCargoValidator->handle($snapshot, forEmission: true);
         }
 
         if ($document->batch === null) {

@@ -17,10 +17,12 @@ class DacteData
     /**
      * @param  array<string, string>  $emit
      * @param  array<string, string>  $rem
+     * @param  array<string, string>  $exped
      * @param  array<string, string>  $receb
      * @param  array<string, string>  $dest
+     * @param  array<string, string>  $taker
      * @param  list<array{xNome: string, vComp: string}>  $components
-     * @param  array{vCarga: ?string, proPred: ?string, xOutCat: ?string, qCarga: ?string, tpMed: ?string, cUnid: ?string}|null  $cargo
+     * @param  array{vCarga: ?string, proPred: ?string, xOutCat: ?string, qCarga: ?string, tpMed: ?string, cUnid: ?string, measurements: list<array{cUnid: ?string, tpMed: ?string, qCarga: ?string}>}|null  $cargo
      * @param  array{kind: string, chave: ?string, dPrev: ?string, tpDoc: ?string, descOutros: ?string, nDoc: ?string, dEmi: ?string}|null  $document
      * @param  list<array{kind: string, chave: ?string, dPrev: ?string, tpDoc: ?string, descOutros: ?string, nDoc: ?string, dEmi: ?string}>  $documents
      */
@@ -41,8 +43,12 @@ class DacteData
         public readonly ?string $xMotivo,
         public readonly array $emit,
         public readonly array $rem,
+        public readonly array $exped,
         public readonly array $receb,
         public readonly array $dest,
+        public readonly array $taker,
+        public readonly string $takerCode,
+        public readonly string $cfop,
         public readonly string $vTPrest,
         public readonly string $vRec,
         public readonly array $components,
@@ -52,7 +58,9 @@ class DacteData
         public readonly ?string $rntrc,
         public readonly ?string $qrUrl,
         public readonly ?string $originCity,
+        public readonly string $originUf,
         public readonly ?string $destinationCity,
+        public readonly string $destinationUf,
         public readonly ?string $originIbge,
         public readonly ?string $destinationIbge,
     ) {}
@@ -85,8 +93,20 @@ class DacteData
         $ide = self::first($infCte, 'ide');
         $emit = self::first($infCte, 'emit');
         $rem = self::first($infCte, 'rem');
+        $exped = self::first($infCte, 'exped');
         $receb = self::first($infCte, 'receb');
         $dest = self::first($infCte, 'dest');
+        $toma3 = $ide !== null ? self::first($ide, 'toma3') : null;
+        $toma4 = $ide !== null ? self::first($ide, 'toma4') : null;
+        $takerCode = $toma4 !== null ? '4' : ($toma3 !== null ? (self::optional($toma3, 'toma') ?? '3') : '3');
+        $taker = match ($takerCode) {
+            '0' => self::party($rem, 'enderReme'),
+            '1' => self::party($exped, 'enderExped'),
+            '2' => self::party($receb, 'enderReceb'),
+            '3' => self::party($dest, 'enderDest'),
+            '4' => self::party($toma4, 'enderToma'),
+            default => [],
+        };
         $vPrest = self::first($infCte, 'vPrest');
         $infCteNorm = self::first($infCte, 'infCTeNorm');
         $infCarga = $infCteNorm !== null ? self::first($infCteNorm, 'infCarga') : null;
@@ -116,6 +136,18 @@ class DacteData
             }
         }
 
+        $measurements = [];
+
+        foreach ($infCarga?->childNodes ?? [] as $measurement) {
+            if ($measurement instanceof DOMElement && $measurement->localName === 'infQ') {
+                $measurements[] = [
+                    'cUnid' => self::optional($measurement, 'cUnid'),
+                    'tpMed' => self::optional($measurement, 'tpMed'),
+                    'qCarga' => self::optional($measurement, 'qCarga'),
+                ];
+            }
+        }
+
         $originMun = $ide !== null ? self::first($ide, 'xMunIni') : null;
         $destinationMun = $ide !== null ? self::first($ide, 'xMunFim') : null;
 
@@ -136,8 +168,12 @@ class DacteData
             xMotivo: self::protText($root, 'xMotivo'),
             emit: self::party($emit, 'enderEmit'),
             rem: self::party($rem, 'enderReme'),
+            exped: self::party($exped, 'enderExped'),
             receb: self::party($receb, 'enderReceb'),
             dest: self::party($dest, 'enderDest'),
+            taker: $taker,
+            takerCode: $takerCode,
+            cfop: (string) ($ide !== null ? self::textOf($ide, 'CFOP') : ''),
             vTPrest: (string) ($vPrest !== null ? self::textOf($vPrest, 'vTPrest') : ''),
             vRec: (string) ($vPrest !== null ? self::textOf($vPrest, 'vRec') : ''),
             components: $components,
@@ -148,13 +184,16 @@ class DacteData
                 'qCarga' => $infQ !== null ? self::optional($infQ, 'qCarga') : null,
                 'tpMed' => $infQ !== null ? self::optional($infQ, 'tpMed') : null,
                 'cUnid' => $infQ !== null ? self::optional($infQ, 'cUnid') : null,
+                'measurements' => $measurements,
             ] : null,
             document: $documents[0] ?? null,
             documents: $documents,
             rntrc: $rodo !== null ? self::optional($rodo, 'RNTRC') : null,
             qrUrl: self::qrUrl($cte),
             originCity: $originMun !== null ? trim((string) $originMun->textContent) : null,
+            originUf: $ide !== null ? (string) self::textOf($ide, 'UFIni') : '',
             destinationCity: $destinationMun !== null ? trim((string) $destinationMun->textContent) : null,
+            destinationUf: $ide !== null ? (string) self::textOf($ide, 'UFFim') : '',
             originIbge: $ide !== null ? self::optional($ide, 'cMunIni') : null,
             destinationIbge: $ide !== null ? self::optional($ide, 'cMunFim') : null,
         );
